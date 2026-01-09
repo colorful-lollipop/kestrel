@@ -40,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 smallvec = "1.13"
 ahash = "0.8"
+regex = "1.11"
+glob = "0.3"
 
 # Wasm runtime
 wasmtime = "26.0"

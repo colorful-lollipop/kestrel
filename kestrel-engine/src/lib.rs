@@ -6,10 +6,14 @@
 use kestrel_core::{Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig};
 use kestrel_event::Event;
 use kestrel_rules::RuleManager;
+use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
+
+#[cfg(feature = "wasm")]
+use kestrel_runtime_wasm::{WasmEngine, WasmConfig, RuleManifest, EvalResult};
 
 /// Detection engine configuration
 #[derive(Debug, Clone)]
@@ -22,6 +26,10 @@ pub struct EngineConfig {
 
     /// Rule manager configuration
     pub rules_dir: std::path::PathBuf,
+
+    /// Wasm runtime configuration (optional)
+    #[cfg(feature = "wasm")]
+    pub wasm_config: Option<WasmConfig>,
 }
 
 impl Default for EngineConfig {
@@ -30,6 +38,8 @@ impl Default for EngineConfig {
             event_bus: EventBusConfig::default(),
             alert_output: AlertOutputConfig::default(),
             rules_dir: std::path::PathBuf::from("./rules"),
+            #[cfg(feature = "wasm")]
+            wasm_config: None,
         }
     }
 }
@@ -39,12 +49,20 @@ pub struct DetectionEngine {
     _event_bus: EventBus,
     _alert_output: AlertOutput,
     rule_manager: Arc<RuleManager>,
+    schema: Arc<SchemaRegistry>,
+
+    #[cfg(feature = "wasm")]
+    wasm_engine: Option<Arc<WasmEngine>>,
 }
 
 impl DetectionEngine {
     /// Create a new detection engine
     pub async fn new(config: EngineConfig) -> Result<Self, EngineError> {
         info!("Initializing Kestrel detection engine");
+
+        // Initialize schema registry
+        let schema = Arc::new(SchemaRegistry::new());
+        info!("Schema registry initialized");
 
         // Initialize event bus
         let event_bus = EventBus::new(config.event_bus.clone());
@@ -71,10 +89,29 @@ impl DetectionEngine {
             "Rules loaded"
         );
 
+        // Initialize Wasm engine if configured
+        #[cfg(feature = "wasm")]
+        let wasm_engine = if let Some(wasm_config) = config.wasm_config {
+            let engine = WasmEngine::new(wasm_config, schema.clone())
+                .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))?;
+            info!("Wasm runtime initialized");
+            Some(Arc::new(engine))
+        } else {
+            info!("Wasm runtime disabled");
+            None
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let wasm_engine = None;
+
         Ok(Self {
             _event_bus: event_bus,
             _alert_output: alert_output,
             rule_manager,
+            schema,
+
+            #[cfg(feature = "wasm")]
+            wasm_engine,
         })
     }
 
@@ -91,6 +128,16 @@ impl DetectionEngine {
             rule_count,
             alerts_generated: 0, // TODO: implement alert counting
         }
+    }
+
+    /// Evaluate an event against all loaded rules
+    pub async fn eval_event(&self, event: &Event) -> Result<Vec<Alert>, EngineError> {
+        debug!("Evaluating event");
+        let mut alerts = Vec::new();
+
+        // For now, return empty alerts
+        // Full evaluation will be implemented in Phase 3 with EQL compiler
+        Ok(alerts)
     }
 }
 
@@ -112,6 +159,9 @@ pub enum EngineError {
 
     #[error("Alert output error: {0}")]
     AlertOutputError(String),
+
+    #[error("Wasm runtime error: {0}")]
+    WasmRuntimeError(String),
 }
 
 #[cfg(test)]

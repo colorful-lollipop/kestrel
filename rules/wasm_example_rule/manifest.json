@@ -1,0 +1,19 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "wasm-example-001",
+    "rule_name": "Wasm Example Rule - High PID Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Team",
+    "description": "Example Wasm rule that detects processes with PID > 1000",
+    "tags": ["example", "wasm", "process"],
+    "severity": "Low",
+    "schema_version": "1.0"
+  },
+  "capabilities": {
+    "supports_inline": true,
+    "requires_alert": true,
+    "requires_block": false,
+    "max_span_ms": null
+  }
+}
