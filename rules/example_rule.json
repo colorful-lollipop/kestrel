@@ -1,0 +1,9 @@
+{
+  "id": "rule-001",
+  "name": "Example Suspicious Process Execution",
+  "description": "Detects suspicious process execution patterns (example rule)",
+  "version": "1.0.0",
+  "author": "Kestrel Team",
+  "tags": ["process", "execution", "example"],
+  "severity": "Medium"
+}

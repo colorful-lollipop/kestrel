@@ -1,0 +1,60 @@
+[workspace]
+members = [
+    "kestrel-core",
+    "kestrel-schema",
+    "kestrel-engine",
+    "kestrel-event",
+    "kestrel-rules",
+    "kestrel-runtime-wasm",
+    "kestrel-runtime-lua",
+    "kestrel-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82" # Require latest Rust
+authors = ["Kestrel Team"]
+license = "Apache-2.0"
+repository = "https://github.com/kestrel-detection/kestrel"
+homepage = "https://github.com/kestrel-detection/kestrel"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+smallvec = "1.13"
+ahash = "0.8"
+
+# Wasm runtime
+wasmtime = "26.0"
+
+# Lua runtime (use vendored LuaJIT to avoid system dependencies)
+mlua = { version = "0.10", features = ["luajit", "vendored"] }
+
+# eBPF (for later phases)
+aya = { version = "0.13", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0

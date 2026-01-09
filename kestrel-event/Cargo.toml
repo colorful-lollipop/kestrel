@@ -1,0 +1,13 @@
+[package]
+name = "kestrel-event"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+kestrel-schema = { path = "../kestrel-schema" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+smallvec = { workspace = true }
+ahash = { workspace = true }

@@ -1,0 +1,52 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+
+# Test coverage
+tarpaulin-report.html
+cobertura.xml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# eBPF
+*.o
+*.bpf.o
+*.skel.h
+
+# Keys and secrets
+*.key
+*.pem
+*.env
+.env.*
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Documentation builds
+docs/_build/
+book/

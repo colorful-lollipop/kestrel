@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-schema"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+ahash = { workspace = true }
+smallvec = { workspace = true }

@@ -1,0 +1,31 @@
+[package]
+name = "kestrel-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+smallvec = { workspace = true }
+ahash = { workspace = true }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-core = { path = "../kestrel-core" }
+kestrel-rules = { path = "../kestrel-rules" }
+kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm", optional = true }
+kestrel-runtime-lua = { path = "../kestrel-runtime-lua", optional = true }
+
+[features]
+default = ["wasm", "lua"]
+wasm = ["kestrel-runtime-wasm"]
+lua = ["kestrel-runtime-lua"]
+
+[dev-dependencies]
+tempfile = "3.13"

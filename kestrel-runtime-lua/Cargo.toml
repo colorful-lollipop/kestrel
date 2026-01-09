@@ -1,0 +1,16 @@
+[package]
+name = "kestrel-runtime-lua"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+mlua = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
