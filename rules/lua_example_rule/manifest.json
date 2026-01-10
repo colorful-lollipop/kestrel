@@ -1,0 +1,19 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "lua-example-001",
+    "rule_name": "Lua Example Rule - High PID Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Team",
+    "description": "Example Lua rule that demonstrates predicate ABI (matches all events for demo)",
+    "tags": ["example", "lua", "process"],
+    "severity": "Low",
+    "schema_version": "1.0"
+  },
+  "capabilities": {
+    "supports_inline": true,
+    "requires_alert": true,
+    "requires_block": false,
+    "max_span_ms": null
+  }
+}
