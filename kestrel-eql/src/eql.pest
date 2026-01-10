@@ -1,0 +1,133 @@
+// EQL Grammar for Kestrel
+
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+// Identifiers and literals
+identifier = @{ ('a'..'z' | 'A'..'Z') ~ ('a'..'z' | 'A'..'Z' | '0'..'9' | "_")* }
+string_literal = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+int_literal = @{ '0'..'9'+ }
+
+// Field references (e.g., process.executable, file.path)
+field_ref = @{ identifier ~ ("." ~ identifier)* }
+
+// Operators
+comparison_op = { "==" | "!=" | "<" | "<=" | ">" | ">=" }
+and_op = { "and" | "&&" }
+or_op = { "or" | "||" }
+not_op = { "not" | "!" }
+
+// Duration value (e.g., 5s, 10ms, 2m, 1h)
+duration = @{ int_literal ~ ("ms" | "s" | "m" | "h") }
+
+// Boolean literals
+bool_literal = { "true" | "false" }
+
+// Atom expressions (basic values)
+atom = {
+    bool_literal |
+    int_literal |
+    string_literal |
+    "null" |
+    field_ref |
+    "(" ~ expr ~ ")"
+}
+
+// Function calls
+function_call = {
+    identifier ~ "(" ~ expr_list ~ ")"
+}
+
+expr_list = {
+    expr ~ ("," ~ expr)*
+}
+
+// In expression (must come before function_call to avoid ambiguity)
+in_expr_atom = {
+    atom ~ "in" ~ "(" ~ expr_list ~ ")"
+}
+
+// Primary expression
+primary = {
+    function_call |
+    in_expr_atom |
+    atom
+}
+
+// Comparison expressions (left-assoc but right-recursive to avoid cycles)
+comparison_rhs = {
+    comparison_op ~ primary ~ comparison_rhs?
+}
+
+comparison_expr = {
+    primary ~ comparison_rhs?
+}
+
+// Logical NOT
+not_expr = {
+    not_op ~ comparison_expr |
+    comparison_expr
+}
+
+// Logical AND
+and_rhs = {
+    and_op ~ not_expr ~ and_rhs?
+}
+
+and_expr = {
+    not_expr ~ and_rhs?
+}
+
+// Logical OR
+or_rhs = {
+    or_op ~ and_expr ~ or_rhs?
+}
+
+or_expr = {
+    and_expr ~ or_rhs?
+}
+
+// Top-level expression
+expr = {
+    or_expr
+}
+
+// Where clause
+where_clause = {
+    "where" ~ expr
+}
+
+// Event query: `process where process.executable == "/bin/bash"`
+event_query = {
+    identifier ~ where_clause?
+}
+
+// Sequence step: `[process where process.executable == "/bin/bash"]`
+sequence_step = {
+    "[" ~ identifier ~ where_clause? ~ "]"
+}
+
+// Maxspan clause
+maxspan_clause = {
+    "with" ~ "maxspan" ~ "=" ~ duration
+}
+
+// Until clause
+until_clause = {
+    "until" ~ sequence_step
+}
+
+// Sequence query
+sequence_query = {
+    "sequence" ~
+    "by" ~ field_ref ~
+    sequence_step+ ~
+    maxspan_clause? ~
+    until_clause?
+}
+
+// Top-level query
+query = {
+    SOI ~
+    (event_query | sequence_query) ~
+    EOI
+}
