@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{RwLock, Semaphore};
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 use wasmtime::{
     Caller, Config, Engine, Extern, Instance, InstanceAllocationStrategy, InstancePre, Linker,
-    Module, Store, TypedFunc,
+    Module, Store,
 };
 
 use kestrel_event::Event;
@@ -286,7 +286,17 @@ impl WasmEngine {
                     let value = event.get_field(field_id);
                     match value {
                         Some(TypedValue::I64(v)) => *v,
-                        Some(TypedValue::U64(v)) => i64::try_from(*v).unwrap_or(i64::MAX),
+                        Some(TypedValue::U64(v)) => {
+                            if *v > i64::MAX as u64 {
+                                warn!(
+                                    field_id = field_id,
+                                    "u64 value overflow when converting to i64"
+                                );
+                                0 // Return 0 on overflow to indicate conversion error
+                            } else {
+                                *v as i64
+                            }
+                        }
                         _ => 0,
                     }
                 },
@@ -308,7 +318,17 @@ impl WasmEngine {
                     let value = event.get_field(field_id);
                     match value {
                         Some(TypedValue::U64(v)) => *v,
-                        Some(TypedValue::I64(v)) => u64::try_from(*v).unwrap_or(u64::MAX),
+                        Some(TypedValue::I64(v)) => {
+                            if *v < 0 {
+                                warn!(
+                                    field_id = field_id,
+                                    "negative i64 value cannot be converted to u64"
+                                );
+                                0 // Return 0 on negative values
+                            } else {
+                                *v as u64
+                            }
+                        }
                         _ => 0,
                     }
                 },
@@ -481,15 +501,99 @@ impl WasmEngine {
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
-        // Alert emission
+        // Alert emission with field capture
         linker
             .func_wrap(
                 "kestrel",
                 "alert_emit",
-                |mut _caller: Caller<'_, WasmContext>, _event_handle: u32| -> i32 {
-                    // For now, just return success
-                    // In a full implementation, this would capture event details
-                    0
+                |mut caller: Caller<'_, WasmContext>, event_handle: u32| -> i32 {
+                    // Get the context data
+                    let ctx = caller.data();
+
+                    // Get the event from the context
+                    let event = match ctx.event.as_ref() {
+                        Some(e) => e,
+                        None => {
+                            error!("No event in context for alert_emit");
+                            return -1; // Error
+                        }
+                    };
+
+                    // Capture all event fields into the alert
+                    let mut fields = HashMap::new();
+                    for (field_id, value) in &event.fields {
+                        fields.insert(format!("field_{}", field_id), value.clone());
+                    }
+
+                    // Create alert record with event details
+                    let alert_record = AlertRecord {
+                        rule_id: "wasm_rule".to_string(), // TODO: Get from rule metadata
+                        severity: "medium".to_string(),    // TODO: Get from rule metadata
+                        title: "Wasm Alert".to_string(),   // TODO: Get from rule metadata
+                        description: None,
+                        event_handles: vec![event_handle],
+                        fields,
+                    };
+
+                    // Add to alerts
+                    let mut alerts = ctx.alerts.lock().unwrap();
+                    alerts.push(alert_record);
+
+                    0 // Success
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+
+        // Field capture function for pred_capture
+        // Allows Wasm predicates to mark specific fields for inclusion in alerts
+        linker
+            .func_wrap(
+                "kestrel",
+                "capture_field",
+                |mut caller: Caller<'_, WasmContext>, field_id: u32| -> i32 {
+                    // Get the context data
+                    let ctx = caller.data();
+
+                    // Check if we have an event
+                    let event = match ctx.event.as_ref() {
+                        Some(e) => e,
+                        None => {
+                            error!("No event in context for capture_field");
+                            return -1; // Error
+                        }
+                    };
+
+                    // Get the field value
+                    let value = match event.get_field(field_id) {
+                        Some(v) => v.clone(),
+                        None => return -2, // Field not found
+                    };
+
+                    // Store captured field in a dedicated capture map
+                    // For now, we'll add it to a special alert record that can be retrieved later
+                    let mut alerts = ctx.alerts.lock().unwrap();
+
+                    // Find or create a capture record
+                    let capture_record = if alerts.is_empty() {
+                        AlertRecord {
+                            rule_id: "capture".to_string(),
+                            severity: "info".to_string(),
+                            title: "Field Capture".to_string(),
+                            description: None,
+                            event_handles: vec![],
+                            fields: HashMap::new(),
+                        }
+                    } else {
+                        alerts.pop().unwrap()
+                    };
+
+                    // Add the captured field
+                    let mut updated_record = capture_record;
+                    updated_record.fields.insert(format!("field_{}", field_id), value);
+
+                    alerts.push(updated_record);
+
+                    0 // Success
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -526,9 +630,44 @@ impl WasmEngine {
             metadata: manifest.metadata,
         };
 
+        // Pre-populate the instance pool
+        let pool_size = self.config.pool_size;
+        let mut instances = Vec::with_capacity(pool_size);
+
+        // Create pooled instances
+        // Note: We can't reuse InstancePre, so we create new InstancePre for each pool entry
+        for _ in 0..pool_size {
+            let mut store = Store::new(
+                &self.engine,
+                WasmContext {
+                    event: None,
+                    schema: self.schema.clone(),
+                    alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    regex_cache: self.regex_cache.clone(),
+                    glob_cache: self.glob_cache.clone(),
+                },
+            );
+
+            // Create a new InstancePre for this pool entry
+            let instance_pre = self
+                .linker
+                .instantiate_pre(&compiled.module)
+                .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
+
+            let instance = instance_pre
+                .instantiate(&mut store)
+                .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
+
+            instances.push(PooledInstance {
+                store,
+                instance,
+                in_use: false,
+            });
+        }
+
         let pool = InstancePool {
-            instances: Vec::with_capacity(self.config.pool_size),
-            semaphore: Arc::new(Semaphore::new(self.config.pool_size)),
+            instances,
+            semaphore: Arc::new(Semaphore::new(pool_size)),
         };
 
         let mut modules = self.modules.write().await;
@@ -537,7 +676,7 @@ impl WasmEngine {
         modules.insert(rule_id.clone(), compiled);
         pools.insert(rule_id.clone(), pool);
 
-        info!(rule_id = %rule_id, "Wasm module loaded successfully");
+        info!(rule_id = %rule_id, pool_size, "Wasm module loaded successfully with instance pool");
         Ok(rule_id)
     }
 
@@ -669,44 +808,58 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         // Run async evaluation in blocking context
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let modules = self.modules.read().await;
-                let compiled = modules.get(rule_id).ok_or_else(|| {
-                    kestrel_nfa::NfaError::PredicateError(format!("Module not found: {}", rule_id))
+                // Get the instance pool for this rule (write access from the start)
+                let mut pools = self.instance_pool.write().await;
+                let pool = pools.get_mut(rule_id).ok_or_else(|| {
+                    kestrel_nfa::NfaError::PredicateError(format!("Instance pool not found for rule: {}", rule_id))
                 })?;
 
-                // Create a new store for this evaluation
-                let mut store = Store::new(
-                    &self.engine,
-                    WasmContext {
-                        event: Some(event.clone()),
-                        schema: self.schema.clone(),
-                        alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
-                        regex_cache: self.regex_cache.clone(),
-                        glob_cache: self.glob_cache.clone(),
-                    },
-                );
-
-                // Instantiate the module
-                let instance = compiled.instance_pre.instantiate(&mut store).map_err(|e| {
-                    kestrel_nfa::NfaError::PredicateError(format!("Instantiation failed: {}", e))
+                // Acquire a permit from the semaphore (limits concurrent access)
+                let _permit = pool.semaphore.acquire().await.map_err(|e| {
+                    kestrel_nfa::NfaError::PredicateError(format!("Failed to acquire semaphore: {}", e))
                 })?;
+
+                // Find an available instance
+                let instance_idx = pool.instances.iter().position(|inst| !inst.in_use)
+                    .ok_or_else(|| {
+                        kestrel_nfa::NfaError::PredicateError("No available instances in pool".to_string())
+                    })?;
+
+                // Mark as in-use and set event
+                pool.instances[instance_idx].in_use = true;
+                pool.instances[instance_idx].store.data_mut().event = Some(event.clone());
+
+                // Get references to the store and instance
+                // Note: We need to be careful with borrowing here
+                // We'll use unsafe to get mutable references since we control the lifecycle
+                use wasmtime::{Instance, Store};
+                let store_ptr: *mut Store<WasmContext> = &mut pool.instances[instance_idx].store;
+                let instance_ptr: *const Instance = &pool.instances[instance_idx].instance;
+
+                // SAFETY: We know the instance is valid for the duration of this block
+                // because we hold the semaphore permit and in_use flag
+                let store = unsafe { &mut *store_ptr };
+                let instance = unsafe { &*instance_ptr };
 
                 // Get the pred_eval dispatcher function
-                // Signature: (predicate_id: i32, event_handle: i32) -> i32
                 let pred_eval = instance
-                    .get_typed_func::<(u32, u32), i32>(&mut store, "pred_eval")
+                    .get_typed_func::<(u32, u32), i32>(&mut *store, "pred_eval")
                     .map_err(|_| {
                         kestrel_nfa::NfaError::PredicateError(
                             "pred_eval function not found".to_string(),
                         )
                     })?;
 
-                // Call the predicate with the predicate index
+                // Call the predicate
                 let result = pred_eval
-                    .call(&mut store, (predicate_index, 0))
+                    .call(&mut *store, (predicate_index, 0))
                     .map_err(|e| {
                         kestrel_nfa::NfaError::PredicateError(format!("Execution failed: {}", e))
                     })?;
+
+                // Reset event for next use
+                pool.instances[instance_idx].store.data_mut().event = None;
+                pool.instances[instance_idx].in_use = false;
 
                 Ok(result == 1)
             })

@@ -13,6 +13,7 @@ use crate::store::{StateStore, StateStoreConfig};
 use crate::{CompiledSequence, NfaError, NfaResult, PredicateEvaluator, SequenceAlert};
 use ahash::AHashMap;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -40,6 +41,9 @@ pub struct NfaEngine {
     /// Loaded sequences indexed by sequence ID
     sequences: AHashMap<String, NfaSequence>,
 
+    /// Event type index: event_type_id -> sequence IDs that have steps matching this type
+    event_type_index: HashMap<u16, Vec<String>>,
+
     /// Predicate evaluator for evaluating predicates
     predicate_evaluator: Arc<dyn PredicateEvaluator>,
 
@@ -51,20 +55,29 @@ pub struct NfaEngine {
 
     /// Configuration
     config: NfaEngineConfig,
+
+    /// Schema registry for event type resolution
+    schema: Arc<kestrel_schema::SchemaRegistry>,
 }
 
 impl NfaEngine {
     /// Create a new NFA engine
-    pub fn new(config: NfaEngineConfig, predicate_evaluator: Arc<dyn PredicateEvaluator>) -> Self {
+    pub fn new(
+        config: NfaEngineConfig,
+        predicate_evaluator: Arc<dyn PredicateEvaluator>,
+        schema: Arc<kestrel_schema::SchemaRegistry>,
+    ) -> Self {
         let metrics = Arc::new(RwLock::new(NfaMetrics::new()));
         let state_store = StateStore::new(config.state_store.clone());
 
         Self {
             sequences: AHashMap::default(),
+            event_type_index: HashMap::default(),
             predicate_evaluator,
             state_store,
             metrics,
             config,
+            schema,
         }
     }
 
@@ -85,7 +98,23 @@ impl NfaEngine {
 
         // Store the sequence
         self.sequences
-            .insert(compiled.id.clone(), compiled.sequence);
+            .insert(compiled.id.clone(), compiled.sequence.clone());
+
+        // Update event type index
+        for step in &compiled.sequence.steps {
+            self.event_type_index
+                .entry(step.event_type_id)
+                .or_insert_with(Vec::new)
+                .push(compiled.id.clone());
+        }
+
+        // Also index the until step if present
+        if let Some(until_step) = &compiled.sequence.until_step {
+            self.event_type_index
+                .entry(until_step.event_type_id)
+                .or_insert_with(Vec::new)
+                .push(compiled.id.clone());
+        }
 
         Ok(())
     }
@@ -100,6 +129,11 @@ impl NfaEngine {
             // Cleanup all partial matches for this sequence
             self.cleanup_sequence(sequence_id);
 
+            // Remove from event type index
+            for (_event_type, seq_ids) in self.event_type_index.iter_mut() {
+                seq_ids.retain(|id| id != sequence_id);
+            }
+
             // Unregister metrics
             self.metrics.write().unregister_sequence(sequence_id);
         }
@@ -111,9 +145,10 @@ impl NfaEngine {
     pub fn process_event(&mut self, event: &kestrel_event::Event) -> NfaResult<Vec<SequenceAlert>> {
         let mut alerts = Vec::new();
         let entity_key = event.entity_key;
+        let event_type_id = event.event_type_id;
 
         trace!(
-            event_type_id = event.event_type_id,
+            event_type_id = event_type_id,
             entity_key = entity_key,
             "Processing event"
         );
@@ -121,30 +156,36 @@ impl NfaEngine {
         // Record event in metrics
         self.metrics.write().record_event();
 
-        // Collect sequence IDs to avoid borrow checker issues
-        let sequence_ids: Vec<String> = self.sequences.keys().cloned().collect();
+        // Get relevant sequence IDs for this event type
+        let relevant_sequence_ids: Vec<String> = self
+            .event_type_index
+            .get(&event_type_id)
+            .cloned()
+            .unwrap_or_default();
 
-        // Process event through each sequence
-        for sequence_id in sequence_ids {
+        // Clone sequences first to avoid borrow conflicts
+        let sequences_to_process: Vec<(String, NfaSequence)> = relevant_sequence_ids
+            .into_iter()
+            .filter_map(|seq_id| {
+                self.sequences
+                    .get(&seq_id)
+                    .cloned()
+                    .map(|seq| (seq_id, seq))
+            })
+            .collect();
+
+        // Now process each sequence
+        for (seq_id, seq) in sequences_to_process {
             // Get sequence metrics handle before processing
-            let metrics_handle = self
-                .metrics
-                .read()
-                .get_sequence_metrics(&sequence_id)
-                .cloned();
+            let metrics_handle = self.metrics.read().get_sequence_metrics(&seq_id);
 
             if let Some(seq_metrics) = metrics_handle {
                 seq_metrics.record_event();
             }
 
-            // Get the sequence (clone to avoid holding borrow)
-            let sequence = self.sequences.get(&sequence_id).cloned();
-
-            if let Some(seq) = sequence {
-                // Process event through this sequence
-                if let Some(match_alerts) = self.process_sequence_event(&seq, event)? {
-                    alerts.extend(match_alerts);
-                }
+            // Process event through this sequence
+            if let Some(match_alerts) = self.process_sequence_event(&seq, event)? {
+                alerts.extend(match_alerts);
             }
         }
 
@@ -160,7 +201,8 @@ impl NfaEngine {
         let entity_key = event.entity_key;
         let event_type_id = event.event_type_id;
 
-        // Check if this event type is relevant to any step in the sequence
+        // Since we only process sequences that have steps matching this event type,
+        // we can proceed directly with checking relevant steps
         let relevant_steps: Vec<_> = sequence
             .steps
             .iter()
@@ -254,8 +296,7 @@ impl NfaEngine {
         let metrics_handle = self
             .metrics
             .read()
-            .get_sequence_metrics(sequence_id(sequence))
-            .cloned();
+            .get_sequence_metrics(sequence_id(sequence));
         if let Some(seq_metrics) = metrics_handle {
             seq_metrics.partial_match_created();
         }
@@ -295,8 +336,7 @@ impl NfaEngine {
                 let metrics_handle = self
                     .metrics
                     .read()
-                    .get_sequence_metrics(sequence_id(sequence))
-                    .cloned();
+                    .get_sequence_metrics(sequence_id(sequence));
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Expired);
@@ -320,8 +360,7 @@ impl NfaEngine {
                 let metrics_handle = self
                     .metrics
                     .read()
-                    .get_sequence_metrics(sequence_id(sequence))
-                    .cloned();
+                    .get_sequence_metrics(sequence_id(sequence));
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.sequence_completed();
@@ -359,8 +398,7 @@ impl NfaEngine {
                 let metrics_handle = self
                     .metrics
                     .read()
-                    .get_sequence_metrics(sequence_id(sequence))
-                    .cloned();
+                    .get_sequence_metrics(sequence_id(sequence));
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Terminated);
@@ -412,14 +450,11 @@ impl NfaEngine {
 
     /// Perform periodic maintenance (cleanup expired states, etc.)
     pub fn tick(&mut self, now_ns: u64) {
-        let expired = self.state_store.cleanup_expired(now_ns);
+        let maxspan_ms = self.config.state_store.default_maxspan_ms;
+        let expired = self.state_store.cleanup_expired(now_ns, maxspan_ms);
 
         for pm in expired {
-            let metrics_handle = self
-                .metrics
-                .read()
-                .get_sequence_metrics(&pm.sequence_id)
-                .cloned();
+            let metrics_handle = self.metrics.read().get_sequence_metrics(&pm.sequence_id);
             if let Some(seq_metrics) = metrics_handle {
                 seq_metrics.partial_match_removed();
 
@@ -444,11 +479,7 @@ impl NfaEngine {
             let evicted = self.state_store.evict_lru(to_evict);
 
             for pm in evicted {
-                let metrics_handle = self
-                    .metrics
-                    .read()
-                    .get_sequence_metrics(&pm.sequence_id)
-                    .cloned();
+                let metrics_handle = self.metrics.read().get_sequence_metrics(&pm.sequence_id);
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Lru);
@@ -473,6 +504,19 @@ fn sequence_id(seq: &NfaSequence) -> &str {
     &seq.id
 }
 
+/// Helper function to convert event type name to event type ID
+/// Uses a simple hash-based approach for consistent ID generation
+fn event_type_name_to_id(name: &str) -> u16 {
+    let mut hash = 0u16;
+    for byte in name.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(byte as u16);
+    }
+    if hash == 0 {
+        hash = 1; // Ensure non-zero
+    }
+    hash
+}
+
 /// Compile an IR sequence to an NFA sequence
 impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
     fn from((ir_rule, rule_id): (&kestrel_eql::ir::IrRule, &str)) -> Self {
@@ -488,22 +532,31 @@ impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
             .map(|(idx, step)| SeqStep {
                 state_id: idx as NfaStateId,
                 predicate_id: step.predicate_id.clone(),
-                event_type_id: 0, // TODO: Extract from predicate or add to IR
+                event_type_id: event_type_name_to_id(&step.event_type_name),
                 condition: None,
             })
             .collect();
+
+        let until_step = sequence.until.as_ref().map(|until| {
+            // Find the predicate to get its event type
+            let event_type_name = ir_rule
+                .predicates
+                .get(until)
+                .map_or("unknown", |p| &p.event_type);
+            SeqStep {
+                state_id: 999, // Until doesn't have a traditional state ID
+                predicate_id: until.clone(),
+                event_type_id: event_type_name_to_id(event_type_name),
+                condition: None,
+            }
+        });
 
         let nfa_sequence = NfaSequence::new(
             ir_rule.rule_id.clone(),
             sequence.by_field_id,
             steps,
             sequence.maxspan_ms,
-            sequence.until.as_ref().map(|until| SeqStep {
-                state_id: 999, // Until doesn't have a traditional state ID
-                predicate_id: until.clone(),
-                event_type_id: 0,
-                condition: None,
-            }),
+            until_step,
         );
 
         Self {
@@ -518,6 +571,7 @@ impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_schema::SchemaRegistry;
     use std::sync::Arc;
 
     // Mock predicate evaluator for testing
@@ -555,7 +609,8 @@ mod tests {
     fn test_nfa_engine_creation() {
         let config = NfaEngineConfig::default();
         let evaluator = Arc::new(MockPredicateEvaluator::new());
-        let engine = NfaEngine::new(config, evaluator);
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = NfaEngine::new(config, evaluator, schema);
 
         assert_eq!(engine.sequence_count(), 0);
     }
@@ -566,7 +621,8 @@ mod tests {
         let mut evaluator = MockPredicateEvaluator::new();
         evaluator.set_result("pred1".to_string(), true);
 
-        let mut engine = NfaEngine::new(NfaEngineConfig::default(), Arc::new(evaluator));
+        let schema = Arc::new(SchemaRegistry::new());
+        let mut engine = NfaEngine::new(NfaEngineConfig::default(), Arc::new(evaluator), schema);
 
         let sequence = NfaSequence::new(
             "test_seq".to_string(),
@@ -585,5 +641,36 @@ mod tests {
 
         assert!(engine.load_sequence(compiled).is_ok());
         assert_eq!(engine.sequence_count(), 1);
+    }
+
+    #[test]
+    fn test_event_type_index() {
+        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(MockPredicateEvaluator::new());
+        let schema = Arc::new(SchemaRegistry::new());
+        let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![
+                SeqStep::new(0, "pred1".to_string(), 1),
+                SeqStep::new(1, "pred2".to_string(), 2),
+            ],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        // Check that event type index was populated
+        assert!(engine.event_type_index.contains_key(&1));
+        assert!(engine.event_type_index.contains_key(&2));
     }
 }

@@ -195,6 +195,7 @@ impl SemanticAnalyzer {
                 Ok(IrSeqStep {
                     predicate_id: step.id.clone().unwrap_or(format!("step{}", index)),
                     index,
+                    event_type_name: step.event_type.clone(),
                 })
             })
             .collect();

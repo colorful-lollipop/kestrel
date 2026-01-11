@@ -4,12 +4,11 @@
 //! Implements Host API v1 via FFI, consistent with Wasm runtime.
 
 use anyhow::Result;
-use mlua::{Function, Lua, RegistryKey, Value as LuaValue};
+use mlua::{Function, Lua, RegistryKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 use kestrel_event::Event;
@@ -80,11 +79,15 @@ pub struct LuaEngine {
     lua: Arc<Lua>,
     config: LuaConfig,
     schema: Arc<SchemaRegistry>,
-    predicates: Arc<RwLock<HashMap<String, LuaPredicate>>>,
-    regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
-    glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+    predicates: Arc<StdRwLock<HashMap<String, LuaPredicate>>>,
+    regex_cache: Arc<StdRwLock<HashMap<RegexId, regex::Regex>>>,
+    glob_cache: Arc<StdRwLock<HashMap<GlobId, glob::Pattern>>>,
     next_regex_id: Arc<std::sync::atomic::AtomicU32>,
     next_glob_id: Arc<std::sync::atomic::AtomicU32>,
+    /// Current event (wrapped in Arc for thread-safe access)
+    current_event: Arc<StdRwLock<Option<Event>>>,
+    /// Alert collector (stores emitted alerts)
+    current_alerts: Arc<StdRwLock<Vec<EventHandle>>>,
 }
 
 /// Loaded Lua predicate
@@ -173,16 +176,197 @@ impl LuaEngine {
             // JIT is enabled by default in LuaJIT
         }
 
-        Ok(Self {
+        let engine = Self {
             lua: Arc::new(lua),
             config,
             schema,
-            predicates: Arc::new(RwLock::new(HashMap::new())),
-            regex_cache: Arc::new(RwLock::new(HashMap::new())),
-            glob_cache: Arc::new(RwLock::new(HashMap::new())),
+            predicates: Arc::new(StdRwLock::new(HashMap::new())),
+            regex_cache: Arc::new(StdRwLock::new(HashMap::new())),
+            glob_cache: Arc::new(StdRwLock::new(HashMap::new())),
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
-        })
+            current_event: Arc::new(StdRwLock::new(None)),
+            current_alerts: Arc::new(StdRwLock::new(Vec::new())),
+        };
+
+        // Register Host API functions
+        engine.register_host_api()?;
+
+        Ok(engine)
+    }
+
+    /// Register Host API v1 functions for Lua
+    fn register_host_api(&self) -> Result<(), LuaRuntimeError> {
+        let lua = &self.lua;
+
+        // Create kestrel table for Host API
+        let kestrel = lua
+            .create_table()
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // Capture necessary data for closures
+        let regex_cache = self.regex_cache.clone();
+        let glob_cache = self.glob_cache.clone();
+        let current_event = self.current_event.clone();
+        let current_alerts = self.current_alerts.clone();
+
+        // event_get_i64
+        let event_ref = current_event.clone();
+        let event_get_i64 = lua
+            .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
+                let event_guard = event_ref.read().unwrap();
+                if let Some(event) = event_guard.as_ref() {
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::I64(v)) => Ok(*v),
+                        Some(TypedValue::U64(v)) => {
+                            if *v > i64::MAX as u64 {
+                                Ok(i64::MAX)
+                            } else {
+                                Ok(*v as i64)
+                            }
+                        }
+                        Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
+                        _ => Ok(0i64),
+                    }
+                } else {
+                    Ok(0i64)
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("event_get_i64", event_get_i64)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // event_get_u64
+        let event_ref = current_event.clone();
+        let event_get_u64 = lua
+            .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
+                let event_guard = event_ref.read().unwrap();
+                if let Some(event) = event_guard.as_ref() {
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::U64(v)) => Ok(*v),
+                        Some(TypedValue::I64(v)) => {
+                            if *v < 0 {
+                                Ok(0)
+                            } else {
+                                Ok(*v as u64)
+                            }
+                        }
+                        Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
+                        _ => Ok(0),
+                    }
+                } else {
+                    Ok(0)
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("event_get_u64", event_get_u64)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // event_get_str
+        let event_ref = current_event.clone();
+        let event_get_str = lua
+            .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
+                let event_guard = event_ref.read().unwrap();
+                if let Some(event) = event_guard.as_ref() {
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::String(s)) => Ok(s.to_string()),
+                        _ => Ok(String::new()),
+                    }
+                } else {
+                    Ok(String::new())
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("event_get_str", event_get_str)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // event_get_bool
+        let event_ref = current_event.clone();
+        let event_get_bool = lua
+            .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
+                let event_guard = event_ref.read().unwrap();
+                if let Some(event) = event_guard.as_ref() {
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::Bool(v)) => Ok(*v),
+                        Some(TypedValue::I64(v)) => Ok(*v != 0),
+                        Some(TypedValue::U64(v)) => Ok(*v != 0),
+                        _ => Ok(false),
+                    }
+                } else {
+                    Ok(false)
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("event_get_bool", event_get_bool)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // re_match
+        let re_cache = regex_cache.clone();
+        let re_match = lua
+            .create_function(move |_lua, (re_id, text): (u32, String)| {
+                let cache = re_cache.read().unwrap();
+                if let Some(re) = cache.get(&re_id) {
+                    Ok(re.is_match(&text))
+                } else {
+                    Ok(false)
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("re_match", re_match)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // glob_match
+        let g_cache = glob_cache.clone();
+        let glob_match = lua
+            .create_function(move |_lua, (glob_id, text): (u32, String)| {
+                let cache = g_cache.read().unwrap();
+                if let Some(pattern) = cache.get(&glob_id) {
+                    Ok(pattern.matches(&text))
+                } else {
+                    Ok(false)
+                }
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("glob_match", glob_match)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // alert_emit
+        let alerts_ref = current_alerts.clone();
+        let alert_emit = lua
+            .create_function(move |_lua, event_handle: u32| {
+                let mut alerts = alerts_ref.write().unwrap();
+                alerts.push(event_handle);
+                Ok(0i32)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        kestrel
+            .set("alert_emit", alert_emit)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        // Set kestrel table in globals
+        lua.globals()
+            .set("kestrel", kestrel)
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+
+        info!("Lua Host API registered successfully");
+        Ok(())
     }
 
     /// Load a Lua predicate from script
@@ -198,7 +382,7 @@ impl LuaEngine {
         let lua = &self.lua;
         let predicate = self.load_predicate_internal(lua, &rule_id, script).await?;
 
-        let mut predicates = self.predicates.write().await;
+        let mut predicates = self.predicates.write().unwrap();
         predicates.insert(rule_id.clone(), predicate);
 
         info!(rule_id = %rule_id, "Lua predicate loaded successfully");
@@ -242,11 +426,21 @@ impl LuaEngine {
     }
 
     /// Evaluate an event with a predicate
-    pub async fn eval(&self, rule_id: &str, _event: &Event) -> Result<EvalResult, LuaRuntimeError> {
-        let predicates = self.predicates.read().await;
+    pub async fn eval(
+        &self,
+        rule_id: &str,
+        event: &Event,
+    ) -> Result<EvalResult, LuaRuntimeError> {
+        let predicates = self.predicates.read().unwrap();
         let predicate = predicates
             .get(rule_id)
             .ok_or_else(|| LuaRuntimeError::FunctionNotFound(rule_id.to_string()))?;
+
+        // Set current event
+        *self.current_event.write().unwrap() = Some(event.clone());
+
+        // Clear previous alerts
+        self.current_alerts.write().unwrap().clear();
 
         let lua = &self.lua;
 
@@ -255,8 +449,11 @@ impl LuaEngine {
             .registry_value::<Function>(&predicate.eval_func)
             .map_err(|e| LuaRuntimeError::ExecutionError(e.to_string()))?;
 
-        // Call the predicate (for now, pass no event, just return true)
+        // Call the predicate
         let result: std::result::Result<bool, mlua::Error> = eval_func.call(());
+
+        // Clear current event after evaluation
+        self.current_event.write().unwrap().take();
 
         match result {
             Ok(match_status) => Ok(EvalResult {
@@ -264,11 +461,15 @@ impl LuaEngine {
                 error: None,
                 captured_fields: HashMap::new(),
             }),
-            Err(e) => Ok(EvalResult {
-                matched: false,
-                error: Some(e.to_string()),
-                captured_fields: HashMap::new(),
-            }),
+            Err(e) => {
+                // Clear current event on error too
+                self.current_event.write().unwrap().take();
+                Ok(EvalResult {
+                    matched: false,
+                    error: Some(e.to_string()),
+                    captured_fields: HashMap::new(),
+                })
+            }
         }
     }
 
@@ -280,7 +481,7 @@ impl LuaEngine {
         let id = self
             .next_regex_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.regex_cache.write().await;
+        let mut cache = self.regex_cache.write().unwrap();
         cache.insert(id, re);
         Ok(id)
     }
@@ -293,100 +494,9 @@ impl LuaEngine {
         let id = self
             .next_glob_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.glob_cache.write().await;
+        let mut cache = self.glob_cache.write().unwrap();
         cache.insert(id, glob);
         Ok(id)
-    }
-
-    /// Register Host API v1 functions for Lua
-    pub fn register_host_api(&self) -> Result<(), LuaRuntimeError> {
-        let lua = &self.lua;
-
-        // Create kestrel table for Host API
-        let kestrel = lua
-            .create_table()
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // event_get_i64
-        let event_get_i64 = lua
-            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-                // TODO: Implement actual field reading
-                Ok(0i64)
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("event_get_i64", event_get_i64)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // event_get_u64
-        let event_get_u64 = lua
-            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-                // TODO: Implement actual field reading
-                Ok(0u64)
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("event_get_u64", event_get_u64)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // event_get_str
-        let event_get_str = lua
-            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-                // TODO: Implement actual field reading
-                Ok("")
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("event_get_str", event_get_str)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // re_match
-        let _regex_cache = self.regex_cache.clone();
-        let re_match = lua
-            .create_function(move |_lua, (_re_id, _text): (u32, String)| {
-                // TODO: Implement actual regex matching
-                Ok(false)
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("re_match", re_match)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // glob_match
-        let _glob_cache = self.glob_cache.clone();
-        let glob_match = lua
-            .create_function(move |_lua, (_glob_id, _text): (u32, String)| {
-                // TODO: Implement actual glob matching
-                Ok(false)
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("glob_match", glob_match)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // alert_emit
-        let alert_emit = lua
-            .create_function(move |_lua, _event: LuaValue| {
-                // TODO: Implement actual alert emission
-                Ok(0i32)
-            })
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        kestrel
-            .set("alert_emit", alert_emit)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        // Set kestrel table in globals
-        lua.globals()
-            .set("kestrel", kestrel)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
-
-        Ok(())
     }
 }
 
@@ -407,9 +517,6 @@ mod tests {
         let config = LuaConfig::default();
         let schema = Arc::new(SchemaRegistry::new());
         let engine = LuaEngine::new(config, schema).unwrap();
-
-        // Register Host API first
-        engine.register_host_api().unwrap();
 
         let script = r#"
             function pred_init()
@@ -444,6 +551,59 @@ mod tests {
 
         let result = engine.load_predicate(manifest, script).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_lua_eval_with_event() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema).unwrap();
+
+        let script = r#"
+            function pred_init()
+                return 0
+            end
+
+            function pred_eval(event)
+                local pid = kestrel.event_get_i64(0, 1)
+                return pid > 0 and pid < 10000
+            end
+        "#
+        .to_string();
+
+        let manifest = RuleManifest {
+            format_version: "1.0".to_string(),
+            metadata: RuleMetadata {
+                rule_id: "test-eval".to_string(),
+                rule_name: "Test Eval".to_string(),
+                rule_version: "1.0.0".to_string(),
+                author: None,
+                description: None,
+                tags: vec![],
+                severity: "Low".to_string(),
+                schema_version: "1.0".to_string(),
+            },
+            capabilities: RuleCapabilities {
+                supports_inline: true,
+                requires_alert: true,
+                requires_block: false,
+                max_span_ms: None,
+            },
+        };
+
+        engine.load_predicate(manifest, script).await.unwrap();
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(0)
+            .ts_wall(0)
+            .entity_key(0)
+            .field(1, TypedValue::I64(1234))
+            .build()
+            .unwrap();
+
+        let result = engine.eval("test-eval", &event).await.unwrap();
+        assert!(result.matched);
     }
 
     #[tokio::test]

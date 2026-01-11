@@ -119,7 +119,7 @@ impl SequenceMetrics {
 #[derive(Debug)]
 pub struct NfaMetrics {
     /// Per-sequence metrics indexed by sequence ID
-    pub sequences: AHashMap<String, Arc<SequenceMetrics>>,
+    pub sequences: RwLock<AHashMap<String, Arc<SequenceMetrics>>>,
 
     /// Total events processed across all sequences
     pub total_events_processed: AtomicU64,
@@ -137,7 +137,7 @@ pub struct NfaMetrics {
 impl NfaMetrics {
     pub fn new() -> Self {
         Self {
-            sequences: AHashMap::default(),
+            sequences: RwLock::default(),
             total_events_processed: AtomicU64::new(0),
             total_alerts: AtomicU64::new(0),
             loaded_sequences: AtomicUsize::new(0),
@@ -146,9 +146,10 @@ impl NfaMetrics {
     }
 
     /// Register a new sequence and return its metrics handle
-    pub fn register_sequence(&mut self, sequence_id: String) -> Arc<SequenceMetrics> {
+    pub fn register_sequence(&self, sequence_id: String) -> Arc<SequenceMetrics> {
+        let mut sequences = self.sequences.write();
         let metrics = Arc::new(SequenceMetrics::new());
-        self.sequences.insert(sequence_id.clone(), metrics.clone());
+        sequences.insert(sequence_id.clone(), metrics.clone());
 
         let count = self.loaded_sequences.fetch_add(1, Ordering::Relaxed) + 1;
         loop {
@@ -169,13 +170,13 @@ impl NfaMetrics {
     }
 
     /// Unregister a sequence
-    pub fn unregister_sequence(&mut self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
-        self.sequences.remove(sequence_id)
+    pub fn unregister_sequence(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
+        self.sequences.write().remove(sequence_id)
     }
 
     /// Get metrics for a specific sequence
-    pub fn get_sequence_metrics(&self, sequence_id: &str) -> Option<&Arc<SequenceMetrics>> {
-        self.sequences.get(sequence_id)
+    pub fn get_sequence_metrics(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
+        self.sequences.read().get(sequence_id).cloned()
     }
 
     /// Record an event processed
@@ -209,7 +210,7 @@ impl NfaMetrics {
         let mut total_completions = 0;
         let mut total_evictions = 0;
 
-        for metrics in self.sequences.values() {
+        for metrics in self.sequences.read().values() {
             total_active += metrics.get_active_count();
             total_completions += metrics.get_completions();
             for counter in metrics.evictions.read().values() {

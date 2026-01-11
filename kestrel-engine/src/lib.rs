@@ -179,7 +179,7 @@ impl DetectionEngine {
             let predicate_evaluator = None;
 
             if let Some(evaluator) = predicate_evaluator {
-                let engine = NfaEngine::new(nfa_config, evaluator);
+                let engine = NfaEngine::new(nfa_config, evaluator, schema.clone());
                 info!("NFA engine initialized");
                 Some(engine)
             } else {

@@ -33,6 +33,10 @@ pub struct StateStoreConfig {
 
     /// Cleanup interval for expired states
     pub cleanup_interval: Duration,
+
+    /// Default maxspan for cleanup (in milliseconds)
+    /// Sequences without a maxspan will use this value for cleanup
+    pub default_maxspan_ms: u64,
 }
 
 impl Default for StateStoreConfig {
@@ -43,6 +47,7 @@ impl Default for StateStoreConfig {
             max_total_partial_matches: 1_000_000,
             lru_eviction_threshold: 0.9, // Trigger LRU at 90% capacity
             cleanup_interval: Duration::from_secs(5),
+            default_maxspan_ms: 60_000, // 1 minute default
         }
     }
 }
@@ -280,28 +285,23 @@ impl StateStore {
     }
 
     /// Cleanup expired partial matches based on maxspan
-    pub fn cleanup_expired(&self, now_ns: u64) -> Vec<PartialMatch> {
+    /// Takes maxspan_ms as a parameter since the store doesn't track per-sequence maxspan
+    pub fn cleanup_expired(&self, now_ns: u64, maxspan_ms: u64) -> Vec<PartialMatch> {
         let mut expired = Vec::new();
+        let maxspan_ns = maxspan_ms * 1_000_000;
 
         for shard in &self.shards {
             let mut shard_write = shard.write();
             let keys_to_remove: Vec<_> = shard_write
                 .matches
                 .iter()
-                .filter(|(_, pm)| pm.terminated || !pm.matched_events.is_empty())
-                .filter_map(|(key, pm)| {
-                    if pm.terminated {
-                        Some(key.clone())
-                    } else if let Some(maxspan_ms) =
-                        pm.matched_events.first().map(|e| e.timestamp_ns)
-                    {
-                        // This is a simplified check - in real implementation,
-                        // we'd check against sequence's maxspan
-                        None
-                    } else {
-                        None
+                .filter(|(_, pm)| {
+                    pm.terminated || {
+                        let elapsed = now_ns.saturating_sub(pm.created_ns);
+                        elapsed > maxspan_ns
                     }
                 })
+                .map(|(key, _)| key.clone())
                 .collect();
 
             for key in keys_to_remove {

@@ -146,7 +146,8 @@ pub struct EventBus {
 
 impl EventBus {
     /// Create a new event bus with the given configuration
-    pub fn new(config: EventBusConfig) -> Self {
+    /// The `sink` parameter provides the downstream consumer (e.g., DetectionEngine)
+    pub fn new_with_sink(config: EventBusConfig, sink: mpsc::Sender<Vec<Event>>) -> Self {
         let metrics = Arc::new(EventBusMetrics::default());
         let partition_count = config.partitions.max(1);
 
@@ -175,12 +176,13 @@ impl EventBus {
             let receiver = receivers.remove(0);
             let metrics_clone = metrics.clone();
             let shutdown_clone = shutdown.clone();
+            let sink_tx = sink.clone();
 
             let handle_task = tokio::spawn(async move {
                 Self::worker_partition(
                     partition_id,
                     receiver,
-                    mpsc::channel(config.batch_size).0,
+                    sink_tx,
                     config.batch_size,
                     metrics_clone,
                     shutdown_clone,
@@ -205,6 +207,13 @@ impl EventBus {
         }
     }
 
+    /// Create a new event bus (legacy constructor, does not connect to downstream)
+    #[deprecated(note = "Use new_with_sink() to connect to a downstream consumer")]
+    pub fn new(config: EventBusConfig) -> Self {
+        let (sink_tx, _sink_rx) = mpsc::channel(1);
+        Self::new_with_sink(config, sink_tx)
+    }
+
     /// Get a handle for publishing events
     pub fn handle(&self) -> EventBusHandle {
         self.handle.clone()
@@ -214,7 +223,7 @@ impl EventBus {
     async fn worker_partition(
         partition_id: usize,
         mut receiver: mpsc::Receiver<Event>,
-        worker_tx: mpsc::Sender<Vec<Event>>,
+        sink_tx: mpsc::Sender<Vec<Event>>,
         batch_size: usize,
         metrics: Arc<EventBusMetrics>,
         shutdown: Arc<AtomicBool>,
@@ -238,7 +247,7 @@ impl EventBus {
                                 "Processing batch"
                             );
 
-                            if let Err(e) = worker_tx.send(batch.clone()).await {
+                            if let Err(e) = sink_tx.send(batch).await {
                                 error!(
                                     partition = partition_id,
                                     error = %e,
@@ -247,7 +256,7 @@ impl EventBus {
                             }
 
                             metrics.events_processed.fetch_add(count as u64, Ordering::Relaxed);
-                            batch.clear();
+                            batch = Vec::with_capacity(batch_size);
                         }
                         _ => {}
                     }
@@ -259,10 +268,11 @@ impl EventBus {
         }
 
         if !batch.is_empty() {
-            let _ = worker_tx.send(batch.clone()).await;
+            let batch_len = batch.len();
+            let _ = sink_tx.send(batch).await;
             metrics
                 .events_processed
-                .fetch_add(batch.len() as u64, Ordering::Relaxed);
+                .fetch_add(batch_len as u64, Ordering::Relaxed);
         }
 
         debug!(partition = partition_id, "Worker partition shutting down");
@@ -321,11 +331,19 @@ pub enum PublishError {
 mod tests {
     use super::*;
 
+    async fn create_test_bus(
+        config: EventBusConfig,
+    ) -> (EventBus, EventBusHandle, mpsc::Receiver<Vec<Event>>) {
+        let (sink_tx, sink_rx) = mpsc::channel(1);
+        let bus = EventBus::new_with_sink(config, sink_tx);
+        let handle = bus.handle();
+        (bus, handle, sink_rx)
+    }
+
     #[tokio::test]
     async fn test_event_bus_basic() {
         let config = EventBusConfig::default();
-        let bus = EventBus::new(config);
-        let handle = bus.handle();
+        let (_bus, handle, _rx) = create_test_bus(config).await;
 
         let event = Event::builder()
             .event_type(1)
@@ -351,8 +369,7 @@ mod tests {
             partitions: 1,
             ..Default::default()
         };
-        let bus = EventBus::new(config);
-        let handle = bus.handle();
+        let (_bus, handle, _rx) = create_test_bus(config).await;
 
         for i in 0..20 {
             let event = Event::builder()
@@ -377,8 +394,7 @@ mod tests {
             partitions: 4,
             ..Default::default()
         };
-        let bus = EventBus::new(config);
-        let handle = bus.handle();
+        let (_bus, handle, _rx) = create_test_bus(config).await;
 
         assert_eq!(handle.partition_count(), 4);
 
@@ -397,5 +413,31 @@ mod tests {
 
         let metrics = handle.metrics();
         assert_eq!(metrics.events_received, 10);
+    }
+
+    #[tokio::test]
+    async fn test_event_bus_delivery() {
+        let config = EventBusConfig {
+            channel_size: 100,
+            batch_size: 10,
+            partitions: 1,
+            ..Default::default()
+        };
+        let (_bus, handle, mut rx) = create_test_bus(config).await;
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(0)
+            .ts_wall(0)
+            .entity_key(0)
+            .build()
+            .unwrap();
+
+        handle.publish(event).await.unwrap();
+
+        let received = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
+        assert!(received.is_ok());
+        let batch = received.unwrap().unwrap();
+        assert_eq!(batch.len(), 1);
     }
 }

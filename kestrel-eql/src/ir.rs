@@ -146,6 +146,8 @@ pub struct IrSeqStep {
     pub predicate_id: String,
     /// Step index in sequence
     pub index: usize,
+    /// Event type name for this step
+    pub event_type_name: String,
 }
 
 /// Field capture for alert output
@@ -396,10 +398,12 @@ mod tests {
                 IrSeqStep {
                     predicate_id: "step0".to_string(),
                     index: 0,
+                    event_type_name: "process".to_string(),
                 },
                 IrSeqStep {
                     predicate_id: "step1".to_string(),
                     index: 1,
+                    event_type_name: "file".to_string(),
                 },
             ],
             maxspan_ms: Some(5000),

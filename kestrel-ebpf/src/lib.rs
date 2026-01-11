@@ -147,8 +147,8 @@ impl From<aya::EbpfError> for EbpfError {
 ///
 /// Manages eBPF programs and collects events from the kernel via ring buffer.
 pub struct EbpfCollector {
-    /// eBPF object
-    ebpf: Ebpf,
+    /// eBPF object (wrapped in Arc<Mutex> for safe sharing with async tasks)
+    ebpf: Arc<Mutex<Ebpf>>,
 
     /// Configuration
     config: EbpfConfig,
@@ -206,7 +206,7 @@ impl EbpfCollector {
         });
 
         let collector = Self {
-            ebpf,
+            ebpf: Arc::new(Mutex::new(ebpf)),
             config,
             schema,
             normalizer,
@@ -285,9 +285,13 @@ impl EbpfCollector {
     fn attach_execve_tracepoint(&mut self) -> Result<(), EbpfError> {
         info!("Attaching execve tracepoint");
 
-        // Load the tracepoint program
-        let program: &mut Program = self
+        let mut ebpf = self
             .ebpf
+            .lock()
+            .map_err(|e| EbpfError::Aya(format!("Mutex lock error: {}", e)))?;
+
+        // Load the tracepoint program
+        let program: &mut Program = ebpf
             .program_mut("handle_execve")
             .ok_or_else(|| EbpfError::AttachError("handle_execve program not found".to_string()))?;
 
@@ -308,7 +312,6 @@ impl EbpfCollector {
             .map_err(|e| EbpfError::AttachError(format!("Failed to attach tracepoint: {}", e)))?;
 
         info!("execve tracepoint attached successfully");
-        info!("Ring buffer polling is TODO - requires libbpf integration");
         Ok(())
     }
 
@@ -324,33 +327,162 @@ impl EbpfCollector {
         let running = self.running.clone();
         let event_tx = self.event_tx.clone();
         let event_id_counter = self.event_id_counter.clone();
+        let normalizer = self.normalizer.clone();
+        let ebpf = self.ebpf.clone();
 
         // Spawn the polling task
         let polling_task = tokio::spawn(async move {
-            info!("Ring buffer polling task started");
-
-            // For now, this is a placeholder implementation
-            // In production, this would:
-            // 1. Get the ring buffer fd from the eBPF map
-            // 2. Use io_uring or epoll to wait for events
-            // 3. Read events from the ring buffer
-            // 4. Parse and normalize events
-            // 5. Send to the event channel
-
-            while running.load(std::sync::atomic::Ordering::Relaxed) {
-                // Sleep briefly to avoid busy looping
-                // In production, this would be replaced with proper fd polling
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
-
-            info!("Ring buffer polling task stopped");
+            Self::ringbuf_poll_loop(ebpf, event_tx, event_id_counter, normalizer, running).await;
         });
 
-        // Store the task handle
         self.polling_task = Some(polling_task);
 
         info!("Ring buffer polling started successfully");
         Ok(())
+    }
+
+    /// Ring buffer polling loop
+    async fn ringbuf_poll_loop(
+        ebpf: Arc<Mutex<Ebpf>>,
+        event_tx: mpsc::Sender<Event>,
+        event_id_counter: Arc<std::sync::atomic::AtomicU64>,
+        normalizer: EventNormalizer,
+        running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        debug!("Ring buffer polling loop started");
+
+        // Poll interval for backoff when no events available
+        let poll_interval = std::time::Duration::from_millis(10);
+
+        'outer: loop {
+            // Check running flag at the start of each iteration
+            if !running.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
+            // Scope the lock to ensure it's dropped before any await
+            // Collect events into a vector, then send them after dropping the lock
+            let events_to_send = {
+                let ebpf_guard = ebpf.lock();
+                if let Err(e) = ebpf_guard {
+                    error!(error = %e, "Failed to lock eBPF mutex");
+                    break 'outer;
+                }
+                let ebpf_ref = ebpf_guard.unwrap();
+
+                // Get the ring buffer map
+                let map = match ebpf_ref.map("events") {
+                    Some(m) => m,
+                    None => {
+                        warn!("Ring buffer map 'events' not found, will retry...");
+                        continue 'outer;
+                    }
+                };
+
+                // Create the RingBuf - this borrows from the map/ebpf_ref
+                let mut ring_buf = match RingBuf::try_from(map) {
+                    Ok(rb) => rb,
+                    Err(e) => {
+                        error!(error = %e, "Failed to create RingBuf from map");
+                        continue 'outer;
+                    }
+                };
+
+                // Collect events from the ring buffer
+                let mut events = Vec::new();
+
+                while let Some(data) = ring_buf.next() {
+                    // Parse the raw event
+                    let exec_event: &ExecveEvent =
+                        unsafe { &*(data.as_ptr() as *const ExecveEvent) };
+
+                    // Generate event ID
+                    let event_id =
+                        event_id_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                    // Normalize the execve event
+                    match normalizer.normalize_execve_event(exec_event, event_id) {
+                        Ok(normalized) => events.push(normalized),
+                        Err(e) => warn!(error = %e, "Failed to normalize execve event"),
+                    }
+                }
+
+                events
+            };
+
+            // Lock is dropped here, now we can safely await
+
+            // Check if we have events to process
+            let has_events = !events_to_send.is_empty();
+
+            // Send all collected events
+            for event in events_to_send {
+                if let Err(e) = event_tx.send(event).await {
+                    error!(error = %e, "Failed to send event to channel");
+                }
+            }
+
+            // If no events were processed, sleep briefly to avoid busy-waiting
+            if !has_events {
+                tokio::time::sleep(poll_interval).await;
+            }
+
+            // Small yield to be fair to other tasks
+            tokio::task::yield_now().await;
+        }
+
+        debug!("Ring buffer polling loop exiting");
+    }
+
+    /// Create a Kestrel Event from a raw execve event
+    /// (Deprecated - normalization is now handled by EventNormalizer)
+    #[deprecated(note = "Use EventNormalizer::normalize instead")]
+    fn create_event_from_execve(raw: &ExecveEvent, event_id: u64) -> Option<Event> {
+        // Extract command line from args
+        let cmdline = Self::extract_cstring::<512>(&raw.args)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        // Extract comm (process name)
+        let comm = Self::extract_cstring::<16>(&raw.comm)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Build entity key from PID and timestamp
+        let entity_key = ((raw.pid as u128) << 32) | (raw.ts_mono_ns as u128);
+
+        // Build the event
+        Event::builder()
+            .event_type(1) // exec event type
+            .ts_mono(raw.ts_mono_ns)
+            .ts_wall(raw.ts_mono_ns)
+            .entity_key(entity_key)
+            .field(1000, kestrel_schema::TypedValue::String(comm))
+            .field(1001, kestrel_schema::TypedValue::String(cmdline))
+            .field(1002, kestrel_schema::TypedValue::I64(raw.pid as i64))
+            .field(1003, kestrel_schema::TypedValue::I64(raw.ppid as i64))
+            .field(1004, kestrel_schema::TypedValue::I64(raw.uid as i64))
+            .field(1005, kestrel_schema::TypedValue::I64(raw.gid as i64))
+            .build()
+            .ok()
+    }
+
+    /// Extract null-terminated C string from byte array
+    fn extract_cstring<const N: usize>(arr: &[u8; N]) -> Option<String> {
+        let mut end = 0;
+        for (i, &byte) in arr.iter().enumerate() {
+            if byte == 0 {
+                end = i;
+                break;
+            }
+            end = i + 1;
+        }
+
+        if end == 0 {
+            return None;
+        }
+
+        String::from_utf8(arr[..end].to_vec()).ok()
     }
 
     /// Stop collecting events
