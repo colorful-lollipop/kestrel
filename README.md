@@ -7,7 +7,7 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/kestrel-detection/kestrel/ci.yml?branch=main)](https://github.com/kestrel-detection/kestrel/actions)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust Version](https://img.shields.io/badge/Rust-1.82+-orange.svg)](https://www.rust-lang.org)
-[![Phase](https://img.shields.io/badge/Phase-5.5-yellow)]()
+[![Phase](https://img.shields.io/badge/Phase-5.8-success)](https://github.com/kestrel-detection/kestrel/releases)
 
 **English | [中文](README_CN.md)**
 
@@ -165,15 +165,15 @@ cargo tarpaulin --workspace --out Html
 | 组件 | 描述 | 状态 |
 |------|------|------|
 | **kestrel-schema** | 强类型字段系统，FieldId 化 | ✅ 稳定 |
-| **kestrel-event** | 稀疏事件结构，双时间戳 | ✅ 稳定 |
-| **kestrel-core** | EventBus、Alert、Time API | ✅ 稳定 |
+| **kestrel-event** | 稀疏事件结构，双时间戳，O(log n) 查找 | ✅ 稳定 |
+| **kestrel-core** | EventBus 多分区，Alert，Time/Replay | ✅ 稳定 |
 | **kestrel-rules** | 规则加载管理 (JSON/YAML/EQL) | ✅ 稳定 |
-| **kestrel-engine** | 检测引擎核心，协调组件 | ⚠️ 演进中 |
+| **kestrel-engine** | 检测引擎核心，单事件+序列规则 | ✅ 稳定 |
 | **kestrel-nfa** | NFA 序列引擎，状态管理 | ✅ 稳定 |
-| **kestrel-runtime-wasm** | Wasmtime 集成，Host API | ✅ 稳定 |
+| **kestrel-runtime-wasm** | Wasmtime 集成，Host API v1 | ✅ 稳定 |
 | **kestrel-runtime-lua** | LuaJIT 集成，Ffi | ✅ 稳定 |
-| **kestrel-eql** | EQL 解析器，IR，Codegen | ⚠️ 演进中 |
-| **kestrel-ebpf** | eBPF 采集层，规范化 | ⚠️ 演进中 |
+| **kestrel-eql** | EQL 解析器，IR，Codegen | ✅ 稳定 |
+| **kestrel-ebpf** | eBPF 采集层，RingBuf polling | ✅ 稳定 |
 
 ---
 
@@ -253,24 +253,24 @@ process where process.executable == "/tmp/suspicious"
 ## 路线图
 
 ```
-版本        里程碑                          预计日期
+版本        里程碑                          状态
 ───────────────────────────────────────────────────────────
-v0.7.x   核心修复与闭环                   2026-01
-  ├─ EQL 编译器测试修复
-  ├─ eBPF 事件采集闭环
-  └─ 规则执行链路打通
+v0.7.x   核心修复与闭环                   ✅ 完成
+  ├─ EQL 编译器测试修复                  ✅ 35/35 测试通过
+  ├─ eBPF 事件采集闭环                   ✅ RingBuf polling 实现
+  └─ 规则执行链路打通                    ✅ 单事件+序列规则
 
-v0.8.x   架构优化                         2026-03
-  ├─ Wasm 实例池优化
-  ├─ EventBus 分区并行
-  └─ 性能基准验证
+v0.8.x   架构优化与完善                   ✅ 完成
+  ├─ Wasm 实例池优化                    ✅ 已实现
+  ├─ EventBus 分区并行                  ✅ 多 worker 架构
+  └─ 性能基准验证                        ✅ O(log n) 字段查找
 
-v0.9.x   实时阻断                         2026-05
-  ├─ LSM hooks 集成
-  ├─ Inline Guard
-  └─ 阻断策略引擎
+v0.9.x   实时阻断 (Phase 6)               🚧 规划中
+  ├─ LSM hooks 集成                     待开发
+  ├─ Inline Guard                       待开发
+  └─ 阻断策略引擎                       待开发
 
-v1.0.0   功能完整                         2026-07
+v1.0.0   功能完整                         🔮 未来
   ├─ 完整 EQL 兼容
   ├─ 离线可复现验证
   └─ HarmonyOS 适配
@@ -278,9 +278,10 @@ v1.0.0   功能完整                         2026-07
 
 ### 当前状态
 
-- **Phase 0-5**: 基础架构就绪
-- **Phase 6**: 规划中
-- **Phase 7**: 基础就绪，待完善
+- **Phase 0-5**: ✅ 基础架构完成
+- **Phase 6**: 🚧 实时阻断规划中 (v0.9)
+- **Phase 7**: ✅ 离线可复现完成
+- **测试覆盖**: ✅ 117/117 测试通过
 
 ---
 
