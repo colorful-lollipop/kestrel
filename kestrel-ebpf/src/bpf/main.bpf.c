@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
-/* Kestrel eBPF Event Collection
+/* Kestrel eBPF Event Collection and Enforcement
  *
- * This eBPF program captures system events for security detection.
- * Initial focus: process execution events (execve)
+ * This eBPF program captures system events and provides enforcement hooks.
+ * Features:
+ * - Event collection via tracepoints
+ * - LSM hooks for real-time blocking
  *
  * Uses Aya framework for cross-kernel compatibility (CO-RE).
  */
@@ -14,6 +16,7 @@
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <linux/types.h>
 
 /* Basic type definitions */
 typedef unsigned char __u8;
@@ -34,7 +37,6 @@ struct task_struct {
     int __state;
     unsigned int flags;
     int prio;
-    /* ... minimal fields needed ... */
     int pid;
     int tgid;
     struct task_struct *real_parent;
@@ -48,6 +50,19 @@ struct cred {
     gid_t gid;
 };
 
+struct linux_binprm {
+    const char *filename;
+    int interp_flags;
+};
+
+struct file {
+    const char *f_path;
+};
+
+struct inode {
+    u64 i_ino;
+};
+
 struct trace_event_raw_sys_enter {
     short unsigned int type;
     unsigned char flags;
@@ -56,11 +71,17 @@ struct trace_event_raw_sys_enter {
     unsigned long id;
     long args[6];
 };
+
+struct sockaddr {
+    __u16 sa_family;
+    char sa_data[14];
+};
 #endif
 
 #define MAX_PATH_LEN 256
 #define MAX_ARGS_LEN 512
 #define TASK_COMM_LEN 16
+#define MAX_BLOCKED_PIDS 1024
 
 /* Event structure shared with userspace */
 struct execve_event {
@@ -75,11 +96,27 @@ struct execve_event {
     char args[MAX_ARGS_LEN];
 } __attribute__((packed));
 
+/* Enforcement decision from userspace */
+struct enforcement_decision {
+    u32 pid;             /* Target PID */
+    u32 action;          /* 0=allow, 1=block, 2=kill */
+    u64 ttl_ns;          /* Time-to-live for this decision */
+    u64 timestamp_ns;    /* When this decision was made */
+} __attribute__((packed));
+
 /* Ring buffer for sending events to userspace */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 4096);
 } rb SEC(".maps");
+
+/* Hash map for enforcement decisions (userspace -> kernel) */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_BLOCKED_PIDS);
+    __type(key, u32);
+    __type(value, struct enforcement_decision);
+} enforcement_map SEC(".maps");
 
 /* Get monotonic timestamp */
 static __always_inline u64 get_mono_time(void)
@@ -94,7 +131,7 @@ static __always_inline u32 get_entity_key(void)
     u64 start_time;
     u32 pid;
 
-    /* Read start_time - may need BPF_CORE_READ with CO-RE */
+    /* Read start_time */
     __builtin_memset(&start_time, 0, sizeof(start_time));
     bpf_probe_read_kernel(&start_time, sizeof(start_time), &task->start_time);
 
@@ -103,6 +140,106 @@ static __always_inline u32 get_entity_key(void)
     /* Combine pid and start_time for uniqueness */
     return pid ^ (u32)(start_time >> 32);
 }
+
+/* Check if action should be enforced for current PID */
+static __always_inline int check_enforcement(u32 pid)
+{
+    struct enforcement_decision *decision;
+    u64 now = get_mono_time();
+
+    decision = bpf_map_lookup_elem(&enforcement_map, &pid);
+    if (!decision)
+        return 0; /* No decision = allow */
+
+    /* Check if decision expired */
+    if (decision->ttl_ns > 0 && (now - decision->timestamp_ns) > decision->ttl_ns) {
+        bpf_map_delete_elem(&enforcement_map, &pid);
+        return 0; /* Expired = allow */
+    }
+
+    return decision->action; /* 0=allow, 1=block, 2=kill */
+}
+
+/* ============================================================================
+ * LSM HOOKS - Real-time Enforcement Points
+ * ============================================================================ */
+
+/* LSM hook: bprm_check_security - Called before process execution
+ * Return 0 to allow, negative to deny
+ */
+SEC("lsm/bprm_check_security")
+int lsm_bprm_check_security(struct bpf_lsm_ctx *ctx)
+{
+    struct linux_binprm *bprm = (struct linux_binprm *)ctx;
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    int action = check_enforcement(pid);
+
+    if (action == 1) {
+        /* Block this execution */
+        bpf_printk("Kestrel: Blocking exec of PID %d\n", pid);
+        return -EPERM;
+    }
+
+    return 0; /* Allow */
+}
+
+/* LSM hook: file_open - Called before file open
+ * Return 0 to allow, negative to deny
+ */
+SEC("lsm/file_open")
+int lsm_file_open(struct bpf_lsm_ctx *ctx, struct file *file)
+{
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    int action = check_enforcement(pid);
+
+    if (action == 1) {
+        /* Block file operations for this PID */
+        bpf_printk("Kestrel: Blocking file open for PID %d\n", pid);
+        return -EPERM;
+    }
+
+    return 0; /* Allow */
+}
+
+/* LSM hook: inode_permission - Called before file permission check
+ * Return 0 to allow, negative to deny
+ */
+SEC("lsm/inode_permission")
+int lsm_inode_permission(struct bpf_lsm_ctx *ctx, struct inode *inode, int mask)
+{
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    int action = check_enforcement(pid);
+
+    if (action == 1) {
+        /* Block file access for this PID */
+        bpf_printk("Kestrel: Blocking inode permission for PID %d\n", pid);
+        return -EPERM;
+    }
+
+    return 0; /* Allow */
+}
+
+/* LSM hook: socket_connect - Called before socket connection
+ * Return 0 to allow, negative to deny
+ */
+SEC("lsm/socket_connect")
+int lsm_socket_connect(struct bpf_lsm_ctx *ctx, struct sockaddr *addr, int addr_len)
+{
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    int action = check_enforcement(pid);
+
+    if (action == 1) {
+        /* Block network connections for this PID */
+        bpf_printk("Kestrel: Blocking socket connect for PID %d\n", pid);
+        return -EPERM;
+    }
+
+    return 0; /* Allow */
+}
+
+/* ============================================================================
+ * TRACEPOINTS - Event Collection
+ * ============================================================================ */
 
 /* Tracepoint for sys_enter_execve */
 SEC("tp/syscalls/sys_enter_execve")

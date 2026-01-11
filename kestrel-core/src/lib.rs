@@ -7,11 +7,16 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, warn};
 
+pub mod action;
 pub mod alert;
 pub mod eventbus;
 pub mod replay;
 pub mod time;
 
+pub use action::{
+    ActionCapabilities, ActionDecision, ActionError, ActionEvidence, ActionExecutor,
+    ActionResult, ActionType, ActionTarget, NoOpExecutor,
+};
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle};
