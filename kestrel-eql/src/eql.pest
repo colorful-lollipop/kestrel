@@ -12,7 +12,7 @@ field_ref = @{ identifier ~ ("." ~ identifier)* }
 
 // Operators (longest first for proper matching)
 comparison_op = { "!=" | "==" | "<=" | ">=" | "<" | ">" }
-arithmetic_op = { "+" | "-" | "*" | "/" }
+arithmetic_op = { "*" | "/" | "+" | "-" }  // * and / before + and - for proper parsing
 and_op = { "and" | "&&" }
 or_op = { "or" | "||" }
 not_op = { "not" | "!" }
@@ -59,13 +59,17 @@ primary = {
     atom
 }
 
-// Comparison expressions (left-assoc)
+// Comparison expressions (left-assoc, allowing arithmetic on both sides)
+arithmetic_expr = {
+    primary ~ (arithmetic_op ~ primary)*
+}
+
 comparison_rhs = {
-    comparison_op ~ primary ~ comparison_rhs?
+    comparison_op ~ arithmetic_expr ~ comparison_rhs?
 }
 
 comparison_expr = {
-    primary ~ comparison_rhs?
+    arithmetic_expr ~ comparison_rhs?
 }
 
 // Logical NOT
