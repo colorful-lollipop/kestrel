@@ -28,7 +28,7 @@ impl EqlCompiler {
     }
 
     /// Compile EQL query to Wasm
-    pub fn compile_to_wasm(&self, eql: &str) -> Result<String> {
+    pub fn compile_to_wasm(&mut self, eql: &str) -> Result<String> {
         // Step 1: Parse EQL to AST
         let ast = parser::parse(eql)?;
 
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_compile_simple_event() {
         let schema = Arc::new(SchemaRegistry::new());
-        let compiler = EqlCompiler::new(schema);
+        let mut compiler = EqlCompiler::new(schema);
 
         let result = compiler.compile_to_wasm("process where process.pid == 1000");
 

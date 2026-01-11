@@ -1,0 +1,23 @@
+[package]
+name = "kestrel-ebpf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+aya = { version = "0.13" }
+aya-log = { version = "0.2" }
+nix = { version = "0.29", features = ["user"] }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-core = { path = "../kestrel-core" }
+
+[build-dependencies]
+# aya-build = { version = "0.1" }  # Not using aya-build, using clang directly

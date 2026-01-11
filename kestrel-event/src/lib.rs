@@ -9,6 +9,9 @@ use smallvec::SmallVec;
 /// Represents a single event in the system
 #[derive(Debug, Clone)]
 pub struct Event {
+    /// Unique event ID (monotonically increasing, for stable sorting in replay)
+    pub event_id: u64,
+
     /// Event type identifier
     pub event_type_id: EventTypeId,
 
@@ -37,6 +40,7 @@ impl Event {
         entity_key: EntityKey,
     ) -> Self {
         Self {
+            event_id: 0, // Will be assigned by event collector
             event_type_id,
             ts_mono_ns,
             ts_wall_ns,
@@ -77,6 +81,7 @@ impl Event {
 /// Event builder for convenient event construction
 #[derive(Debug, Default)]
 pub struct EventBuilder {
+    event_id: Option<u64>,
     event_type_id: Option<EventTypeId>,
     ts_mono_ns: Option<TimestampMono>,
     ts_wall_ns: Option<TimestampWall>,
@@ -86,6 +91,12 @@ pub struct EventBuilder {
 }
 
 impl EventBuilder {
+    /// Set event ID
+    pub fn event_id(mut self, event_id: u64) -> Self {
+        self.event_id = Some(event_id);
+        self
+    }
+
     /// Set event type
     pub fn event_type(mut self, event_type_id: EventTypeId) -> Self {
         self.event_type_id = Some(event_type_id);
@@ -125,6 +136,7 @@ impl EventBuilder {
     /// Build the event
     pub fn build(self) -> Result<Event, BuildError> {
         Ok(Event {
+            event_id: self.event_id.unwrap_or(0),
             event_type_id: self
                 .event_type_id
                 .ok_or(BuildError::MissingField("event_type_id"))?,

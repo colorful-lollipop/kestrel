@@ -16,3 +16,7 @@ regex = { workspace = true }
 glob = { workspace = true }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
+kestrel-nfa = { path = "../kestrel-nfa" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

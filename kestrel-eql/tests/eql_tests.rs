@@ -175,7 +175,7 @@ fn test_parse_with_not_operator() {
 
 #[test]
 fn test_compile_to_wasm_simple() {
-    let compiler = create_test_compiler();
+    let mut compiler = create_test_compiler();
 
     let result = compiler.compile_to_wasm("process where process.pid == 1000");
 

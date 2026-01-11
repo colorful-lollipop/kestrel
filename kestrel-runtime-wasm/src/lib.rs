@@ -337,6 +337,23 @@ impl WasmEngine {
             0
         }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
+        // Event field reading: event_get_bool
+        linker.func_wrap("kestrel", "event_get_bool", |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
+            let ctx = caller.data();
+            let event = match ctx.event.as_ref() {
+                Some(e) => e,
+                None => return 0,
+            };
+
+            let value = event.get_field(field_id);
+            match value {
+                Some(TypedValue::Bool(v)) => if *v { 1 } else { 0 },
+                Some(TypedValue::I64(v)) => if *v != 0 { 1 } else { 0 },
+                Some(TypedValue::U64(v)) => if *v != 0 { 1 } else { 0 },
+                _ => 0,
+            }
+        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+
         // Regex matching
         linker.func_wrap("kestrel", "re_match", |mut caller: Caller<'_, WasmContext>, re_id: u32, ptr: u32, len: u32| -> i32 {
             let mem = match caller.get_export("memory") {
@@ -508,6 +525,112 @@ impl Clone for WasmEngine {
             next_regex_id: self.next_regex_id.clone(),
             next_glob_id: self.next_glob_id.clone(),
         }
+    }
+}
+
+/// Implement PredicateEvaluator trait for NFA engine integration
+///
+/// This allows the Wasm runtime to be used as a predicate evaluator
+/// for the NFA sequence engine.
+impl kestrel_nfa::PredicateEvaluator for WasmEngine {
+    /// Evaluate a predicate against an event
+    ///
+    /// The predicate_id should be in the format "rule_id:predicate_id" where:
+    /// - rule_id is the Wasm module identifier
+    /// - predicate_id is the index of the predicate within the module
+    fn evaluate(&self, predicate_id: &str, event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+        // Parse predicate_id as "rule_id:predicate_index"
+        let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(kestrel_nfa::NfaError::PredicateError(format!(
+                "Invalid predicate_id format: {}, expected 'rule_id:predicate_index'",
+                predicate_id
+            )));
+        }
+
+        let rule_id = parts[0];
+        let predicate_index: u32 = parts[1].parse().map_err(|_| {
+            kestrel_nfa::NfaError::PredicateError(format!(
+                "Invalid predicate index: {}",
+                parts[1]
+            ))
+        })?;
+
+        // Run async evaluation in blocking context
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let modules = self.modules.read().await;
+                let compiled = modules.get(rule_id).ok_or_else(|| {
+                    kestrel_nfa::NfaError::PredicateError(format!(
+                        "Module not found: {}",
+                        rule_id
+                    ))
+                })?;
+
+                // Create a new store for this evaluation
+                let mut store = Store::new(
+                    &self.engine,
+                    WasmContext {
+                        event: Some(event.clone()),
+                        schema: self.schema.clone(),
+                        alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                        regex_cache: self.regex_cache.clone(),
+                        glob_cache: self.glob_cache.clone(),
+                    },
+                );
+
+                // Instantiate the module
+                let instance = compiled.instance_pre.instantiate(&mut store).map_err(|e| {
+                    kestrel_nfa::NfaError::PredicateError(format!(
+                        "Instantiation failed: {}",
+                        e
+                    ))
+                })?;
+
+                // Get the pred_eval dispatcher function
+                // Signature: (predicate_id: i32, event_handle: i32) -> i32
+                let pred_eval = instance
+                    .get_typed_func::<(u32, u32), i32>(&mut store, "pred_eval")
+                    .map_err(|_| kestrel_nfa::NfaError::PredicateError(
+                        "pred_eval function not found".to_string()
+                    ))?;
+
+                // Call the predicate with the predicate index
+                let result = pred_eval
+                    .call(&mut store, (predicate_index, 0))
+                    .map_err(|e| {
+                        kestrel_nfa::NfaError::PredicateError(format!(
+                            "Execution failed: {}",
+                            e
+                        ))
+                    })?;
+
+                Ok(result == 1)
+            })
+        });
+
+        result
+    }
+
+    /// Get the field IDs required by a predicate
+    ///
+    /// For now, returns empty vec since we don't track required fields
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+        Ok(Vec::new())
+    }
+
+    /// Check if a predicate exists
+    fn has_predicate(&self, predicate_id: &str) -> bool {
+        let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return false;
+        }
+
+        let rule_id = parts[0];
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.modules.read().await.contains_key(rule_id) })
+        })
     }
 }
 

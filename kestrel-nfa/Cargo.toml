@@ -1,0 +1,24 @@
+[package]
+name = "kestrel-nfa"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+# Workspace dependencies
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-eql = { path = "../kestrel-eql" }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ahash = { workspace = true }
+smallvec = { workspace = true }
+
+# Additional dependencies
+parking_lot = "0.12"
+priority-queue = "2.0"

@@ -59,15 +59,14 @@ fn build_event_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
 fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
     let mut inner = pair.into_inner();
 
-    // Skip "sequence" keyword
-    inner.next();
-
-    // Parse "by" clause
-    inner.next(); // Skip "by"
-    let by_field = inner.next().unwrap();
+    // Pest doesn't include literals like "sequence" and "by" in inner pairs
+    // The first element is the field_ref for "by"
+    let by_field = inner.next().ok_or_else(|| {
+        EqlError::syntax("sequence_query", "Expected 'by' field reference")
+    })?;
     let by = Some(by_field.as_str().to_string());
 
-    // Parse sequence steps
+    // Parse sequence steps and optional clauses
     let mut steps = Vec::new();
     let mut maxspan = None;
     let mut until = None;
@@ -79,18 +78,16 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
             }
             Rule::maxspan_clause => {
                 let mut maxspan_inner = pair.into_inner();
-                // Skip "with", "maxspan", "="
-                maxspan_inner.next();
-                maxspan_inner.next();
-                maxspan_inner.next();
+                // maxspan_clause = "with" ~ "maxspan" ~ "=" ~ duration
+                // Literals are not included, so we just get duration
                 if let Some(duration_pair) = maxspan_inner.next() {
                     maxspan = Some(build_duration(duration_pair)?);
                 }
             }
             Rule::until_clause => {
                 let mut until_inner = pair.into_inner();
-                // Skip "until"
-                until_inner.next();
+                // until_clause = "until" ~ sequence_step
+                // "until" literal is not included, so we just get sequence_step
                 if let Some(until_step) = until_inner.next() {
                     until = Some(Box::new(build_sequence_step(until_step)?));
                 }
@@ -111,12 +108,13 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
 fn build_sequence_step(pair: pest::iterators::Pair<Rule>) -> Result<SequenceStep> {
     let mut inner = pair.into_inner();
 
-    // Skip "["
-    inner.next();
+    // In Pest, literals like "[" and "]" are not included in inner pairs
+    // The first element is the identifier (event type)
+    let event_type = inner.next().ok_or_else(|| {
+        EqlError::syntax("sequence_step", "Expected event type identifier")
+    })?.as_str().to_string();
 
-    let event_type = inner.next().unwrap().as_str().to_string();
-
-    // Check for where clause
+    // Check for where clause (optional)
     let condition = if let Some(where_pair) = inner.next() {
         Some(build_expr_from_where(where_pair)?)
     } else {
@@ -132,9 +130,11 @@ fn build_sequence_step(pair: pest::iterators::Pair<Rule>) -> Result<SequenceStep
 
 fn build_expr_from_where(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let mut inner = pair.into_inner();
-    // Skip "where"
-    inner.next();
-    let expr_pair = inner.next().unwrap();
+
+    // Find the expr child (skip the "where" keyword)
+    let expr_pair = inner.find(|p| p.as_rule() != Rule::where_clause)
+        .ok_or_else(|| EqlError::syntax("where clause", "Expected expression after 'where'"))?;
+
     build_expr(expr_pair)
 }
 
@@ -230,14 +230,12 @@ fn build_function_call(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 fn build_in_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let mut inner = pair.into_inner();
 
+    // Pest doesn't include literals like "in" and "(" in inner pairs
+    // First element is the atom (value to check)
     let value = Box::new(build_expr(inner.next().unwrap())?);
 
+    // Second element is the expr_list (values to check against)
     let mut values = Vec::new();
-
-    // Skip "in", "(", and parse expr_list
-    inner.next(); // skip "in"
-    inner.next(); // skip "("
-
     if let Some(expr_list_pair) = inner.next() {
         for val_pair in expr_list_pair.into_inner() {
             values.push(build_expr(val_pair)?);

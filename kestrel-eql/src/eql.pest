@@ -10,8 +10,9 @@ int_literal = @{ '0'..'9'+ }
 // Field references (e.g., process.executable, file.path)
 field_ref = @{ identifier ~ ("." ~ identifier)* }
 
-// Operators
-comparison_op = { "==" | "!=" | "<" | "<=" | ">" | ">=" }
+// Operators (longest first for proper matching)
+comparison_op = { "!=" | "==" | "<=" | ">=" | "<" | ">" }
+arithmetic_op = { "+" | "-" | "*" | "/" }
 and_op = { "and" | "&&" }
 or_op = { "or" | "||" }
 not_op = { "not" | "!" }
@@ -22,12 +23,21 @@ duration = @{ int_literal ~ ("ms" | "s" | "m" | "h") }
 // Boolean literals
 bool_literal = { "true" | "false" }
 
+// Null literal (separate to avoid keyword conflicts)
+null_literal = @{
+    "null"
+}
+
+expr_list = {
+    expr ~ ("," ~ expr)*
+}
+
 // Atom expressions (basic values)
 atom = {
     bool_literal |
     int_literal |
     string_literal |
-    "null" |
+    null_literal |
     field_ref |
     "(" ~ expr ~ ")"
 }
@@ -35,10 +45,6 @@ atom = {
 // Function calls
 function_call = {
     identifier ~ "(" ~ expr_list ~ ")"
-}
-
-expr_list = {
-    expr ~ ("," ~ expr)*
 }
 
 // In expression (must come before function_call to avoid ambiguity)
@@ -53,7 +59,7 @@ primary = {
     atom
 }
 
-// Comparison expressions (left-assoc but right-recursive to avoid cycles)
+// Comparison expressions (left-assoc)
 comparison_rhs = {
     comparison_op ~ primary ~ comparison_rhs?
 }
@@ -128,6 +134,6 @@ sequence_query = {
 // Top-level query
 query = {
     SOI ~
-    (event_query | sequence_query) ~
+    (sequence_query | event_query) ~
     EOI
 }

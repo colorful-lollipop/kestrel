@@ -8,6 +8,8 @@ members = [
     "kestrel-runtime-wasm",
     "kestrel-runtime-lua",
     "kestrel-eql",
+    "kestrel-nfa",
+    "kestrel-ebpf",
     "kestrel-cli",
 ]
 resolver = "2"

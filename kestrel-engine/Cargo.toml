@@ -21,6 +21,7 @@ kestrel-core = { path = "../kestrel-core" }
 kestrel-rules = { path = "../kestrel-rules" }
 kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm", optional = true }
 kestrel-runtime-lua = { path = "../kestrel-runtime-lua", optional = true }
+kestrel-nfa = { path = "../kestrel-nfa" }
 
 [features]
 default = ["wasm", "lua"]
