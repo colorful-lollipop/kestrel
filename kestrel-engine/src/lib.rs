@@ -1,10 +1,12 @@
 //! Kestrel Detection Engine
 //!
 //! This is the core detection engine that coordinates event processing,
-// //! rule evaluation, and alert generation.
+// //! rule evaluation, alert generation, and enforcement actions.
 
 use kestrel_core::{
-    Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, Severity,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionType,
+    ActionTarget, Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence,
+    Severity, NoOpExecutor,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
@@ -19,8 +21,21 @@ use kestrel_eql::{EqlCompiler, IrRuleType};
 #[cfg(feature = "wasm")]
 use kestrel_runtime_wasm::{WasmConfig, WasmEngine};
 
+/// Engine operation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EngineMode {
+    /// Inline enforcement mode - real-time blocking with strict budget
+    Inline,
+
+    /// Online detection mode - full sequence evaluation, alert-only
+    Detect,
+
+    /// Offline replay mode - no enforcement, deterministic results
+    Offline,
+}
+
 /// Detection engine configuration
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EngineConfig {
     /// Event bus configuration
     pub event_bus: EventBusConfig,
@@ -30,6 +45,12 @@ pub struct EngineConfig {
 
     /// Rule manager configuration
     pub rules_dir: std::path::PathBuf,
+
+    /// Engine operation mode
+    pub mode: EngineMode,
+
+    /// Action executor for enforcement (optional, uses NoOpExecutor if None)
+    pub action_executor: Option<Arc<dyn ActionExecutor>>,
 
     /// Wasm runtime configuration (optional)
     #[cfg(feature = "wasm")]
@@ -45,6 +66,8 @@ impl Default for EngineConfig {
             event_bus: EventBusConfig::default(),
             alert_output: AlertOutputConfig::default(),
             rules_dir: std::path::PathBuf::from("./rules"),
+            mode: EngineMode::Detect,
+            action_executor: None,
             #[cfg(feature = "wasm")]
             wasm_config: None,
             nfa_config: Some(NfaEngineConfig::default()),
@@ -61,6 +84,10 @@ pub struct SingleEventRule {
     pub severity: Severity,
     pub description: Option<String>,
     pub predicate: CompiledPredicate,
+    /// Whether this rule can be enforced (inline mode only)
+    pub blockable: bool,
+    /// Action to take when rule matches (None = alert only)
+    pub action_type: Option<ActionType>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,12 +116,29 @@ fn rule_severity_to_severity(severity: RuleSeverity) -> Severity {
     }
 }
 
+/// Determine action target from event
+fn determine_action_target(event: &Event) -> ActionTarget {
+    // For now, use a simple default target based on entity key
+    // In a full implementation, this would extract PID and executable from event fields
+    let pid = (event.entity_key & 0xFFFFFFFF) as u32;
+    let executable = format!("entity_{}", event.entity_key);
+
+    // Default to process execution target
+    ActionTarget::ProcessExec { pid, executable }
+}
+
 /// Detection engine
 pub struct DetectionEngine {
     _event_bus: EventBus,
     _alert_output: AlertOutput,
     rule_manager: Arc<RuleManager>,
     schema: Arc<SchemaRegistry>,
+
+    /// Engine operation mode
+    mode: EngineMode,
+
+    /// Action executor for enforcement
+    action_executor: Arc<dyn ActionExecutor>,
 
     #[cfg(feature = "wasm")]
     wasm_engine: Option<Arc<WasmEngine>>,
@@ -110,6 +154,9 @@ pub struct DetectionEngine {
 
     /// Alert counter (atomic for thread safety)
     alerts_generated: Arc<std::sync::atomic::AtomicU64>,
+
+    /// Action counter (atomic for thread safety)
+    actions_generated: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl DetectionEngine {
@@ -192,21 +239,29 @@ impl DetectionEngine {
 
         let single_event_rules = Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
+        // Initialize action executor
+        let action_executor = config.action_executor.unwrap_or_else(|| {
+            Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>
+        });
+
+        // Log the engine mode
+        info!(mode = ?config.mode, "Detection engine mode");
+
         Ok(Self {
             _event_bus: event_bus,
             _alert_output: alert_output,
             rule_manager,
             schema,
-
+            mode: config.mode,
+            action_executor,
             #[cfg(feature = "wasm")]
             wasm_engine,
-
             #[cfg(feature = "wasm")]
             eql_compiler,
-
             nfa_engine,
             single_event_rules,
             alerts_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            actions_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -284,6 +339,8 @@ impl DetectionEngine {
                         wasm_bytes,
                         required_fields,
                     },
+                    blockable: false, // Default to non-blockable for now
+                    action_type: None, // Default to alert-only for now
                 };
 
                 let mut rules = self.single_event_rules.write().await;
@@ -327,13 +384,16 @@ impl DetectionEngine {
         let alerts_generated = self
             .alerts_generated
             .load(std::sync::atomic::Ordering::Relaxed);
-
+        let actions_generated = self
+            .actions_generated
+            .load(std::sync::atomic::Ordering::Relaxed);
         let single_event_rule_count = self.single_event_rules.read().await.len();
 
         EngineStats {
             rule_count,
             single_event_rule_count,
             alerts_generated,
+            actions_generated,
         }
     }
 
@@ -435,7 +495,7 @@ impl DetectionEngine {
                     let alert_id = format!("{}-{}", single_rule.rule_id, event.ts_mono_ns);
 
                     let alert = Alert {
-                        id: alert_id,
+                        id: alert_id.clone(),
                         rule_id: single_rule.rule_id.clone(),
                         rule_name: single_rule.rule_name.clone(),
                         severity: single_rule.severity,
@@ -455,6 +515,49 @@ impl DetectionEngine {
 
                     self.alerts_generated
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                    // In Inline mode, execute action if rule is blockable
+                    if self.mode == EngineMode::Inline && single_rule.blockable {
+                        if let Some(action_type) = single_rule.action_type {
+                            let decision = ActionDecision {
+                                id: alert_id,
+                                rule_id: single_rule.rule_id.clone(),
+                                action: action_type,
+                                target: determine_action_target(event),
+                                timestamp_ns: event.ts_mono_ns,
+                                reason: format!("Rule matched: {}", single_rule.rule_name),
+                                evidence: vec![],
+                            };
+
+                            match self.action_executor.execute(&decision) {
+                                Ok(result) if result.success => {
+                                    self.actions_generated
+                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    debug!(
+                                        action_id = %decision.id,
+                                        action = ?action_type,
+                                        "Action executed successfully"
+                                    );
+                                }
+                                Ok(result) => {
+                                    debug!(
+                                        action_id = %decision.id,
+                                        action = ?action_type,
+                                        error = %result.error.as_deref().unwrap_or(""),
+                                        "Action not executed (executor decision)"
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        action_id = %decision.id,
+                                        action = ?action_type,
+                                        error = %e,
+                                        "Action execution failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -492,6 +595,7 @@ pub struct EngineStats {
     pub rule_count: usize,
     pub single_event_rule_count: usize,
     pub alerts_generated: u64,
+    pub actions_generated: u64,
 }
 
 /// Engine errors
@@ -546,6 +650,8 @@ mod tests {
             severity: Severity::Medium,
             description: Some("A test rule that always matches".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         assert_eq!(rule.rule_id, "test-always-match");
@@ -569,6 +675,7 @@ mod tests {
         assert_eq!(stats.rule_count, 0);
         assert_eq!(stats.single_event_rule_count, 0);
         assert_eq!(stats.alerts_generated, 0);
+        assert_eq!(stats.actions_generated, 0);
     }
 
     #[tokio::test]
@@ -601,6 +708,8 @@ mod tests {
             severity: Severity::Medium,
             description: Some("A test rule that always matches".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         {
@@ -653,6 +762,8 @@ mod tests {
             severity: Severity::High,
             description: Some("A test rule for event type 99".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         {
@@ -703,6 +814,8 @@ mod tests {
             severity: Severity::Low,
             description: Some("First test rule".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         let rule2 = SingleEventRule {
@@ -712,6 +825,8 @@ mod tests {
             severity: Severity::High,
             description: Some("Second test rule".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         let rule3 = SingleEventRule {
@@ -721,6 +836,8 @@ mod tests {
             severity: Severity::Critical,
             description: Some("Third test rule (different event type)".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false,
+            action_type: None,
         };
 
         {
