@@ -58,7 +58,10 @@ impl Event {
 
     /// Get a field value by field ID
     pub fn get_field(&self, field_id: FieldId) -> Option<&TypedValue> {
-        self.fields.iter().find(|(id, _)| *id == field_id).map(|(_, v)| v)
+        self.fields
+            .iter()
+            .find(|(id, _)| *id == field_id)
+            .map(|(_, v)| v)
     }
 
     /// Check if event has a specific field

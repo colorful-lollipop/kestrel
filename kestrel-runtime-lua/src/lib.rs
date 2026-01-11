@@ -3,17 +3,17 @@
 //! This module provides LuaJIT runtime support for predicate execution using mlua.
 //! Implements Host API v1 via FFI, consistent with Wasm runtime.
 
+use anyhow::Result;
+use mlua::{Function, Lua, RegistryKey, Value as LuaValue};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, info};
-use mlua::{Lua, Function, RegistryKey, Value as LuaValue};
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
-use kestrel_schema::{FieldId, TypedValue, SchemaRegistry};
 use kestrel_event::Event;
+use kestrel_schema::{FieldId, SchemaRegistry, TypedValue};
 
 /// Host API v1 for Lua predicates (same as Wasm)
 ///
@@ -186,7 +186,11 @@ impl LuaEngine {
     }
 
     /// Load a Lua predicate from script
-    pub async fn load_predicate(&self, manifest: RuleManifest, script: String) -> Result<String, LuaRuntimeError> {
+    pub async fn load_predicate(
+        &self,
+        manifest: RuleManifest,
+        script: String,
+    ) -> Result<String, LuaRuntimeError> {
         let rule_id = manifest.metadata.rule_id.clone();
 
         info!(rule_id = %rule_id, "Loading Lua predicate");
@@ -202,7 +206,12 @@ impl LuaEngine {
     }
 
     /// Internal predicate loading
-    async fn load_predicate_internal(&self, lua: &Lua, rule_id: &str, script: String) -> Result<LuaPredicate, LuaRuntimeError> {
+    async fn load_predicate_internal(
+        &self,
+        lua: &Lua,
+        rule_id: &str,
+        script: String,
+    ) -> Result<LuaPredicate, LuaRuntimeError> {
         // Load and execute the script
         lua.load(&script)
             .set_name(rule_id)
@@ -210,14 +219,19 @@ impl LuaEngine {
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // Get pred_init function (optional)
-        let init_func: Option<Function> = lua.globals().get("pred_init")
+        let init_func: Option<Function> = lua
+            .globals()
+            .get("pred_init")
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // Get pred_eval function (required)
-        let eval_func: Function = lua.globals().get("pred_eval")
+        let eval_func: Function = lua
+            .globals()
+            .get("pred_eval")
             .map_err(|_| LuaRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
 
-        let eval_key = lua.create_registry_value(eval_func)
+        let eval_key = lua
+            .create_registry_value(eval_func)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         Ok(LuaPredicate {
@@ -230,42 +244,42 @@ impl LuaEngine {
     /// Evaluate an event with a predicate
     pub async fn eval(&self, rule_id: &str, _event: &Event) -> Result<EvalResult, LuaRuntimeError> {
         let predicates = self.predicates.read().await;
-        let predicate = predicates.get(rule_id)
+        let predicate = predicates
+            .get(rule_id)
             .ok_or_else(|| LuaRuntimeError::FunctionNotFound(rule_id.to_string()))?;
 
         let lua = &self.lua;
 
         // Get eval function from registry
-        let eval_func = lua.registry_value::<Function>(&predicate.eval_func)
+        let eval_func = lua
+            .registry_value::<Function>(&predicate.eval_func)
             .map_err(|e| LuaRuntimeError::ExecutionError(e.to_string()))?;
 
         // Call the predicate (for now, pass no event, just return true)
         let result: std::result::Result<bool, mlua::Error> = eval_func.call(());
 
         match result {
-            Ok(match_status) => {
-                Ok(EvalResult {
-                    matched: match_status,
-                    error: None,
-                    captured_fields: HashMap::new(),
-                })
-            }
-            Err(e) => {
-                Ok(EvalResult {
-                    matched: false,
-                    error: Some(e.to_string()),
-                    captured_fields: HashMap::new(),
-                })
-            }
+            Ok(match_status) => Ok(EvalResult {
+                matched: match_status,
+                error: None,
+                captured_fields: HashMap::new(),
+            }),
+            Err(e) => Ok(EvalResult {
+                matched: false,
+                error: Some(e.to_string()),
+                captured_fields: HashMap::new(),
+            }),
         }
     }
 
     /// Register a compiled regex pattern
     pub async fn register_regex(&self, pattern: &str) -> Result<RegexId, LuaRuntimeError> {
-        let re = regex::Regex::new(pattern)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let re =
+            regex::Regex::new(pattern).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        let id = self.next_regex_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_regex_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut cache = self.regex_cache.write().await;
         cache.insert(id, re);
         Ok(id)
@@ -273,10 +287,12 @@ impl LuaEngine {
 
     /// Register a compiled glob pattern
     pub async fn register_glob(&self, pattern: &str) -> Result<GlobId, LuaRuntimeError> {
-        let glob = glob::Pattern::new(pattern)
-            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let glob =
+            glob::Pattern::new(pattern).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        let id = self.next_glob_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_glob_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut cache = self.glob_cache.write().await;
         cache.insert(id, glob);
         Ok(id)
@@ -287,67 +303,87 @@ impl LuaEngine {
         let lua = &self.lua;
 
         // Create kestrel table for Host API
-        let kestrel = lua.create_table()
+        let kestrel = lua
+            .create_table()
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // event_get_i64
-        let event_get_i64 = lua.create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-            // TODO: Implement actual field reading
-            Ok(0i64)
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let event_get_i64 = lua
+            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
+                // TODO: Implement actual field reading
+                Ok(0i64)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("event_get_i64", event_get_i64)
+        kestrel
+            .set("event_get_i64", event_get_i64)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // event_get_u64
-        let event_get_u64 = lua.create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-            // TODO: Implement actual field reading
-            Ok(0u64)
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let event_get_u64 = lua
+            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
+                // TODO: Implement actual field reading
+                Ok(0u64)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("event_get_u64", event_get_u64)
+        kestrel
+            .set("event_get_u64", event_get_u64)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // event_get_str
-        let event_get_str = lua.create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
-            // TODO: Implement actual field reading
-            Ok("")
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let event_get_str = lua
+            .create_function(move |_lua, (_event, _field_id): (LuaValue, u32)| {
+                // TODO: Implement actual field reading
+                Ok("")
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("event_get_str", event_get_str)
+        kestrel
+            .set("event_get_str", event_get_str)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // re_match
         let _regex_cache = self.regex_cache.clone();
-        let re_match = lua.create_function(move |_lua, (_re_id, _text): (u32, String)| {
-            // TODO: Implement actual regex matching
-            Ok(false)
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let re_match = lua
+            .create_function(move |_lua, (_re_id, _text): (u32, String)| {
+                // TODO: Implement actual regex matching
+                Ok(false)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("re_match", re_match)
+        kestrel
+            .set("re_match", re_match)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // glob_match
         let _glob_cache = self.glob_cache.clone();
-        let glob_match = lua.create_function(move |_lua, (_glob_id, _text): (u32, String)| {
-            // TODO: Implement actual glob matching
-            Ok(false)
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let glob_match = lua
+            .create_function(move |_lua, (_glob_id, _text): (u32, String)| {
+                // TODO: Implement actual glob matching
+                Ok(false)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("glob_match", glob_match)
+        kestrel
+            .set("glob_match", glob_match)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // alert_emit
-        let alert_emit = lua.create_function(move |_lua, _event: LuaValue| {
-            // TODO: Implement actual alert emission
-            Ok(0i32)
-        }).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+        let alert_emit = lua
+            .create_function(move |_lua, _event: LuaValue| {
+                // TODO: Implement actual alert emission
+                Ok(0i32)
+            })
+            .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
-        kestrel.set("alert_emit", alert_emit)
+        kestrel
+            .set("alert_emit", alert_emit)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // Set kestrel table in globals
-        lua.globals().set("kestrel", kestrel)
+        lua.globals()
+            .set("kestrel", kestrel)
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         Ok(())
@@ -383,7 +419,8 @@ mod tests {
             function pred_eval(event)
                 return 1  -- Match
             end
-        "#.to_string();
+        "#
+        .to_string();
 
         let manifest = RuleManifest {
             format_version: "1.0".to_string(),

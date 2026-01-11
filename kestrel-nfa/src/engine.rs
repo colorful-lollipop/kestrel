@@ -7,13 +7,13 @@
 // - Generates alerts when sequences complete
 // - Handles maxspan, until, and by semantics
 
-use crate::state::{NfaSequence, PartialMatch, SeqStep, NfaStateId};
+use crate::metrics::{EvictionReason, NfaMetrics};
+use crate::state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 use crate::store::{StateStore, StateStoreConfig};
-use crate::metrics::{NfaMetrics, EvictionReason};
-use crate::{PredicateEvaluator, NfaError, NfaResult, CompiledSequence, SequenceAlert};
+use crate::{CompiledSequence, NfaError, NfaResult, PredicateEvaluator, SequenceAlert};
 use ahash::AHashMap;
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Configuration for the NFA engine
@@ -55,10 +55,7 @@ pub struct NfaEngine {
 
 impl NfaEngine {
     /// Create a new NFA engine
-    pub fn new(
-        config: NfaEngineConfig,
-        predicate_evaluator: Arc<dyn PredicateEvaluator>,
-    ) -> Self {
+    pub fn new(config: NfaEngineConfig, predicate_evaluator: Arc<dyn PredicateEvaluator>) -> Self {
         let metrics = Arc::new(RwLock::new(NfaMetrics::new()));
         let state_store = StateStore::new(config.state_store.clone());
 
@@ -87,7 +84,8 @@ impl NfaEngine {
         self.metrics.write().register_sequence(compiled.id.clone());
 
         // Store the sequence
-        self.sequences.insert(compiled.id.clone(), compiled.sequence);
+        self.sequences
+            .insert(compiled.id.clone(), compiled.sequence);
 
         Ok(())
     }
@@ -129,7 +127,11 @@ impl NfaEngine {
         // Process event through each sequence
         for sequence_id in sequence_ids {
             // Get sequence metrics handle before processing
-            let metrics_handle = self.metrics.read().get_sequence_metrics(&sequence_id).cloned();
+            let metrics_handle = self
+                .metrics
+                .read()
+                .get_sequence_metrics(&sequence_id)
+                .cloned();
 
             if let Some(seq_metrics) = metrics_handle {
                 seq_metrics.record_event();
@@ -195,13 +197,19 @@ impl NfaEngine {
                 self.start_partial_match(sequence, event.clone(), entity_key)?;
             } else {
                 // Try to advance existing partial matches
-                if let Some(alert) = self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)? {
+                if let Some(alert) =
+                    self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
+                {
                     alerts.push(alert);
                 }
             }
         }
 
-        Ok(if alerts.is_empty() { None } else { Some(alerts) })
+        Ok(if alerts.is_empty() {
+            None
+        } else {
+            Some(alerts)
+        })
     }
 
     /// Check if a step matches an event
@@ -243,7 +251,11 @@ impl NfaEngine {
         self.state_store.insert(partial_match)?;
 
         // Update metrics
-        let metrics_handle = self.metrics.read().get_sequence_metrics(sequence_id(sequence)).cloned();
+        let metrics_handle = self
+            .metrics
+            .read()
+            .get_sequence_metrics(sequence_id(sequence))
+            .cloned();
         if let Some(seq_metrics) = metrics_handle {
             seq_metrics.partial_match_created();
         }
@@ -269,14 +281,22 @@ impl NfaEngine {
         let prev_state = step_state_id.saturating_sub(1);
 
         // Try to get a partial match at the previous state
-        if let Some(mut partial_match) = self.state_store.get(sequence_id(sequence), entity_key, prev_state) {
+        if let Some(mut partial_match) =
+            self.state_store
+                .get(sequence_id(sequence), entity_key, prev_state)
+        {
             // Check if the partial match is expired
             let now_ns = event.ts_mono_ns;
             if partial_match.is_expired(now_ns, sequence.maxspan_ms) {
                 // Partial match expired - remove it
-                self.state_store.remove(sequence_id(sequence), entity_key, prev_state);
+                self.state_store
+                    .remove(sequence_id(sequence), entity_key, prev_state);
 
-                let metrics_handle = self.metrics.read().get_sequence_metrics(sequence_id(sequence)).cloned();
+                let metrics_handle = self
+                    .metrics
+                    .read()
+                    .get_sequence_metrics(sequence_id(sequence))
+                    .cloned();
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Expired);
@@ -294,9 +314,14 @@ impl NfaEngine {
                 let alert = self.generate_alert(sequence, partial_match)?;
 
                 // Remove the partial match
-                self.state_store.remove(sequence_id(sequence), entity_key, step_state_id);
+                self.state_store
+                    .remove(sequence_id(sequence), entity_key, step_state_id);
 
-                let metrics_handle = self.metrics.read().get_sequence_metrics(sequence_id(sequence)).cloned();
+                let metrics_handle = self
+                    .metrics
+                    .read()
+                    .get_sequence_metrics(sequence_id(sequence))
+                    .cloned();
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.sequence_completed();
@@ -307,7 +332,8 @@ impl NfaEngine {
                 return Ok(Some(alert));
             } else {
                 // Store the advanced partial match at the new state
-                self.state_store.remove(sequence_id(sequence), entity_key, prev_state);
+                self.state_store
+                    .remove(sequence_id(sequence), entity_key, prev_state);
                 self.state_store.insert(partial_match)?;
             }
         }
@@ -324,10 +350,17 @@ impl NfaEngine {
         // For simplicity, we'll terminate all states for this entity and sequence
         // In a more optimized implementation, we'd track all states per entity
         for state_id in 0..sequence.step_count() as NfaStateId {
-            if let Some(mut pm) = self.state_store.remove(sequence_id(sequence), entity_key, state_id) {
+            if let Some(mut pm) =
+                self.state_store
+                    .remove(sequence_id(sequence), entity_key, state_id)
+            {
                 pm.terminate();
 
-                let metrics_handle = self.metrics.read().get_sequence_metrics(sequence_id(sequence)).cloned();
+                let metrics_handle = self
+                    .metrics
+                    .read()
+                    .get_sequence_metrics(sequence_id(sequence))
+                    .cloned();
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Terminated);
@@ -382,7 +415,11 @@ impl NfaEngine {
         let expired = self.state_store.cleanup_expired(now_ns);
 
         for pm in expired {
-            let metrics_handle = self.metrics.read().get_sequence_metrics(&pm.sequence_id).cloned();
+            let metrics_handle = self
+                .metrics
+                .read()
+                .get_sequence_metrics(&pm.sequence_id)
+                .cloned();
             if let Some(seq_metrics) = metrics_handle {
                 seq_metrics.partial_match_removed();
 
@@ -401,11 +438,17 @@ impl NfaEngine {
         let max = self.config.state_store.max_total_partial_matches;
 
         if max > 0 && total as f32 > max as f32 * self.config.state_store.lru_eviction_threshold {
-            let to_evict = total - (max as f32 * (1.0 - self.config.state_store.lru_eviction_threshold) as f32) as usize;
+            let to_evict = total
+                - (max as f32 * (1.0 - self.config.state_store.lru_eviction_threshold) as f32)
+                    as usize;
             let evicted = self.state_store.evict_lru(to_evict);
 
             for pm in evicted {
-                let metrics_handle = self.metrics.read().get_sequence_metrics(&pm.sequence_id).cloned();
+                let metrics_handle = self
+                    .metrics
+                    .read()
+                    .get_sequence_metrics(&pm.sequence_id)
+                    .cloned();
                 if let Some(seq_metrics) = metrics_handle {
                     seq_metrics.partial_match_removed();
                     seq_metrics.record_eviction(EvictionReason::Lru);
@@ -433,7 +476,10 @@ fn sequence_id(seq: &NfaSequence) -> &str {
 /// Compile an IR sequence to an NFA sequence
 impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
     fn from((ir_rule, rule_id): (&kestrel_eql::ir::IrRule, &str)) -> Self {
-        let sequence = ir_rule.sequence.as_ref().expect("IR rule must have a sequence");
+        let sequence = ir_rule
+            .sequence
+            .as_ref()
+            .expect("IR rule must have a sequence");
 
         let steps = sequence
             .steps

@@ -2,11 +2,11 @@
 //!
 //! Compiles EQL queries to Wasm predicates.
 
+use crate::codegen_wasm::WasmCodeGenerator;
 use crate::error::{EqlError, Result};
 use crate::ir::*;
 use crate::parser;
 use crate::semantic::SemanticAnalyzer;
-use crate::codegen_wasm::WasmCodeGenerator;
 use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 

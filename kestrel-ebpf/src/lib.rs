@@ -9,8 +9,8 @@ mod pushdown;
 pub use normalize::EventNormalizer;
 pub use pushdown::InterestPushdown;
 
-use aya::{Ebpf, maps::RingBuf, EbpfLoader, programs::Program};
 use anyhow::Result;
+use aya::{maps::RingBuf, programs::Program, Ebpf, EbpfLoader};
 use kestrel_core::EventBus;
 use kestrel_event::Event;
 use kestrel_schema::SchemaRegistry;
@@ -42,8 +42,8 @@ impl Default for EbpfConfig {
     fn default() -> Self {
         Self {
             enable_process: true,
-            enable_file: false,  // Not implemented yet
-            enable_network: false,  // Not implemented yet
+            enable_file: false,    // Not implemented yet
+            enable_network: false, // Not implemented yet
             event_channel_size: 4096,
         }
     }
@@ -137,7 +137,7 @@ pub enum EbpfError {
     Aya(String),
 }
 
-impl From<aya:: EbpfError> for EbpfError {
+impl From<aya::EbpfError> for EbpfError {
     fn from(err: aya::EbpfError) -> Self {
         EbpfError::Aya(format!("{}", err))
     }
@@ -220,8 +220,10 @@ impl EbpfCollector {
     fn load_ebpf() -> Result<Ebpf, EbpfError> {
         // Try to load the compiled eBPF object file
         // The build script compiles to OUT_DIR/main.bpf.o
-        let out_dir = PathBuf::from(std::env::var("OUT_DIR")
-            .map_err(|e| EbpfError::LoadError(format!("OUT_DIR not set: {}", e)))?);
+        let out_dir = PathBuf::from(
+            std::env::var("OUT_DIR")
+                .map_err(|e| EbpfError::LoadError(format!("OUT_DIR not set: {}", e)))?,
+        );
 
         let obj_path = out_dir.join("main.bpf.o");
 
@@ -233,9 +235,7 @@ impl EbpfCollector {
                 return Self::load_ebpf_from_path(&alt_path);
             }
 
-            return Err(EbpfError::ObjectNotFound(
-                obj_path.display().to_string()
-            ));
+            return Err(EbpfError::ObjectNotFound(obj_path.display().to_string()));
         }
 
         Self::load_ebpf_from_path(&obj_path)
@@ -282,19 +282,25 @@ impl EbpfCollector {
         info!("Attaching execve tracepoint");
 
         // Load the tracepoint program
-        let program: &mut Program = self.ebpf.program_mut("handle_execve")
+        let program: &mut Program = self
+            .ebpf
+            .program_mut("handle_execve")
             .ok_or_else(|| EbpfError::AttachError("handle_execve program not found".to_string()))?;
 
         // Try to downcast to TracePoint using TryInto trait
         use std::convert::TryInto;
-        let tracepoint_program: &mut aya::programs::TracePoint = program.try_into()
-            .map_err(|_| EbpfError::AttachError("handle_execve is not a TracePoint program".to_string()))?;
+        let tracepoint_program: &mut aya::programs::TracePoint =
+            program.try_into().map_err(|_| {
+                EbpfError::AttachError("handle_execve is not a TracePoint program".to_string())
+            })?;
 
         // Attach to sys_enter_execve tracepoint
-        tracepoint_program.load()
+        tracepoint_program
+            .load()
             .map_err(|e| EbpfError::AttachError(format!("Failed to load tracepoint: {}", e)))?;
 
-        tracepoint_program.attach("syscalls", "sys_enter_execve")
+        tracepoint_program
+            .attach("syscalls", "sys_enter_execve")
             .map_err(|e| EbpfError::AttachError(format!("Failed to attach tracepoint: {}", e)))?;
 
         info!("execve tracepoint attached successfully");
@@ -314,7 +320,8 @@ impl EbpfCollector {
         // For now, this is a placeholder that sets up the framework
         // The actual polling would be implemented here when eBPF programs are loaded
 
-        self.running.store(true, std::sync::atomic::Ordering::Release);
+        self.running
+            .store(true, std::sync::atomic::Ordering::Release);
 
         info!("Ring buffer polling: Framework ready, awaiting eBPF program load");
         info!("TODO: Implement blocking poll task or libbpf integration");
@@ -324,7 +331,8 @@ impl EbpfCollector {
     pub async fn stop(&mut self) -> Result<(), EbpfError> {
         info!("Stopping eBPF event collection");
 
-        self.running.store(false, std::sync::atomic::Ordering::Release);
+        self.running
+            .store(false, std::sync::atomic::Ordering::Release);
 
         // TODO: Detach eBPF programs
 

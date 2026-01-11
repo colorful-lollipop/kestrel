@@ -3,17 +3,19 @@
 //! This is the core detection engine that coordinates event processing,
 //! rule evaluation, and alert generation.
 
-use kestrel_core::{Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, Severity};
+use kestrel_core::{
+    Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, Severity,
+};
 use kestrel_event::Event;
+use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
 use kestrel_rules::RuleManager;
 use kestrel_schema::SchemaRegistry;
-use kestrel_nfa::{NfaEngine, NfaEngineConfig, PredicateEvaluator, CompiledSequence};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "wasm")]
-use kestrel_runtime_wasm::{WasmEngine, WasmConfig};
+use kestrel_runtime_wasm::{WasmConfig, WasmEngine};
 
 /// Detection engine configuration
 #[derive(Debug, Clone)]
@@ -93,11 +95,7 @@ impl DetectionEngine {
 
         // Load initial rules
         let stats = rule_manager.load_all().await?;
-        info!(
-            loaded = stats.loaded,
-            failed = stats.failed,
-            "Rules loaded"
-        );
+        info!(loaded = stats.loaded, failed = stats.failed, "Rules loaded");
 
         // Initialize Wasm engine if configured
         #[cfg(feature = "wasm")]
@@ -117,9 +115,9 @@ impl DetectionEngine {
         // Initialize NFA engine with Wasm runtime as predicate evaluator
         let nfa_engine = if let Some(nfa_config) = config.nfa_config {
             #[cfg(feature = "wasm")]
-            let predicate_evaluator = wasm_engine.clone().map(|engine| {
-                engine as Arc<dyn PredicateEvaluator>
-            });
+            let predicate_evaluator = wasm_engine
+                .clone()
+                .map(|engine| engine as Arc<dyn PredicateEvaluator>);
 
             #[cfg(not(feature = "wasm"))]
             let predicate_evaluator = None;
@@ -158,7 +156,9 @@ impl DetectionEngine {
     /// Get engine statistics
     pub async fn stats(&self) -> EngineStats {
         let rule_count = self.rule_manager.rule_count().await;
-        let alerts_generated = self.alerts_generated.load(std::sync::atomic::Ordering::Relaxed);
+        let alerts_generated = self
+            .alerts_generated
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         EngineStats {
             rule_count,
@@ -182,13 +182,15 @@ impl DetectionEngine {
                 Ok(sequence_alerts) => {
                     for seq_alert in sequence_alerts {
                         // Convert events to EventEvidence
-                        let events: Vec<EventEvidence> = seq_alert.events.iter().map(|e| {
-                            EventEvidence {
+                        let events: Vec<EventEvidence> = seq_alert
+                            .events
+                            .iter()
+                            .map(|e| EventEvidence {
                                 event_type_id: e.event_type_id,
                                 timestamp_ns: e.ts_mono_ns,
                                 fields: vec![],
-                            }
-                        }).collect();
+                            })
+                            .collect();
 
                         // Create context from captures
                         let context = serde_json::json!({
@@ -217,7 +219,8 @@ impl DetectionEngine {
                         alerts.push(alert);
 
                         // Increment alert counter
-                        self.alerts_generated.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.alerts_generated
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
                 Err(e) => {
@@ -238,7 +241,8 @@ impl DetectionEngine {
     /// Load a compiled sequence into the NFA engine
     pub fn load_sequence(&mut self, sequence: CompiledSequence) -> Result<(), EngineError> {
         if let Some(ref mut nfa_engine) = self.nfa_engine {
-            nfa_engine.load_sequence(sequence)
+            nfa_engine
+                .load_sequence(sequence)
                 .map_err(|e| EngineError::NfaError(e.to_string()))?;
         }
         Ok(())

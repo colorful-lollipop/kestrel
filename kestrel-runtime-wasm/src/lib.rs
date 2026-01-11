@@ -3,21 +3,21 @@
 //! This module provides Wasm runtime support for predicate execution using Wasmtime.
 //! Implements Host API v1 for event field access, regex/glob matching, and alert emission.
 
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, info};
 use wasmtime::{
-    Engine, Module, Store, Instance, Linker, Caller, Extern, TypedFunc,
-    Config, InstancePre, InstanceAllocationStrategy,
+    Caller, Config, Engine, Extern, Instance, InstanceAllocationStrategy, InstancePre, Linker,
+    Module, Store, TypedFunc,
 };
-use tokio::sync::{RwLock, Semaphore};
 
-use kestrel_schema::{FieldId, TypedValue, SchemaRegistry};
 use kestrel_event::Event;
+use kestrel_schema::{FieldId, SchemaRegistry, TypedValue};
 
 /// Host API v1 for Wasm predicates
 ///
@@ -231,7 +231,7 @@ impl WasmEngine {
 
         // Configure pooling allocation for better performance
         engine_config.allocation_strategy(InstanceAllocationStrategy::Pooling(
-            wasmtime::PoolingAllocationConfig::default()
+            wasmtime::PoolingAllocationConfig::default(),
         ));
 
         // Configure fuel metering
@@ -272,164 +272,237 @@ impl WasmEngine {
     /// Register Host API v1 functions
     fn register_host_api(linker: &mut Linker<WasmContext>) -> Result<(), WasmRuntimeError> {
         // Event field reading: event_get_i64
-        linker.func_wrap("kestrel", "event_get_i64", |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i64 {
-            let ctx = caller.data();
-            let event = match ctx.event.as_ref() {
-                Some(e) => e,
-                None => return 0,
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "event_get_i64",
+                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i64 {
+                    let ctx = caller.data();
+                    let event = match ctx.event.as_ref() {
+                        Some(e) => e,
+                        None => return 0,
+                    };
 
-            let value = event.get_field(field_id);
-            match value {
-                Some(TypedValue::I64(v)) => *v,
-                Some(TypedValue::U64(v)) => i64::try_from(*v).unwrap_or(i64::MAX),
-                _ => 0,
-            }
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::I64(v)) => *v,
+                        Some(TypedValue::U64(v)) => i64::try_from(*v).unwrap_or(i64::MAX),
+                        _ => 0,
+                    }
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Event field reading: event_get_u64
-        linker.func_wrap("kestrel", "event_get_u64", |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> u64 {
-            let ctx = caller.data();
-            let event = match ctx.event.as_ref() {
-                Some(e) => e,
-                None => return 0,
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "event_get_u64",
+                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> u64 {
+                    let ctx = caller.data();
+                    let event = match ctx.event.as_ref() {
+                        Some(e) => e,
+                        None => return 0,
+                    };
 
-            let value = event.get_field(field_id);
-            match value {
-                Some(TypedValue::U64(v)) => *v,
-                Some(TypedValue::I64(v)) => u64::try_from(*v).unwrap_or(u64::MAX),
-                _ => 0,
-            }
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::U64(v)) => *v,
+                        Some(TypedValue::I64(v)) => u64::try_from(*v).unwrap_or(u64::MAX),
+                        _ => 0,
+                    }
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Event field reading: event_get_str
-        linker.func_wrap("kestrel", "event_get_str", |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32, ptr: u32, len: u32| -> u32 {
-            // Get event data first
-            let (event, has_event) = {
-                let ctx = caller.data();
-                (ctx.event.clone(), ctx.event.is_some())
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "event_get_str",
+                |mut caller: Caller<'_, WasmContext>,
+                 _event_handle: u32,
+                 field_id: u32,
+                 ptr: u32,
+                 len: u32|
+                 -> u32 {
+                    // Get event data first
+                    let (event, has_event) = {
+                        let ctx = caller.data();
+                        (ctx.event.clone(), ctx.event.is_some())
+                    };
 
-            if !has_event {
-                return 0;
-            }
+                    if !has_event {
+                        return 0;
+                    }
 
-            let event = match event.as_ref() {
-                Some(e) => e,
-                None => return 0,
-            };
+                    let event = match event.as_ref() {
+                        Some(e) => e,
+                        None => return 0,
+                    };
 
-            // Get memory
-            let mem = match caller.get_export("memory") {
-                Some(Extern::Memory(m)) => m,
-                _ => return 0,
-            };
+                    // Get memory
+                    let mem = match caller.get_export("memory") {
+                        Some(Extern::Memory(m)) => m,
+                        _ => return 0,
+                    };
 
-            let value = event.get_field(field_id);
-            if let Some(TypedValue::String(s)) = value {
-                let bytes_to_write = std::cmp::min(len as usize, s.len());
-                if let Err(_) = mem.write(&mut caller, ptr as usize, s.as_bytes()[..bytes_to_write].as_ref()) {
-                    return 0;
-                }
-                return bytes_to_write as u32;
-            }
-            0
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    let value = event.get_field(field_id);
+                    if let Some(TypedValue::String(s)) = value {
+                        let bytes_to_write = std::cmp::min(len as usize, s.len());
+                        if let Err(_) = mem.write(
+                            &mut caller,
+                            ptr as usize,
+                            s.as_bytes()[..bytes_to_write].as_ref(),
+                        ) {
+                            return 0;
+                        }
+                        return bytes_to_write as u32;
+                    }
+                    0
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Event field reading: event_get_bool
-        linker.func_wrap("kestrel", "event_get_bool", |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
-            let ctx = caller.data();
-            let event = match ctx.event.as_ref() {
-                Some(e) => e,
-                None => return 0,
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "event_get_bool",
+                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
+                    let ctx = caller.data();
+                    let event = match ctx.event.as_ref() {
+                        Some(e) => e,
+                        None => return 0,
+                    };
 
-            let value = event.get_field(field_id);
-            match value {
-                Some(TypedValue::Bool(v)) => if *v { 1 } else { 0 },
-                Some(TypedValue::I64(v)) => if *v != 0 { 1 } else { 0 },
-                Some(TypedValue::U64(v)) => if *v != 0 { 1 } else { 0 },
-                _ => 0,
-            }
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    let value = event.get_field(field_id);
+                    match value {
+                        Some(TypedValue::Bool(v)) => {
+                            if *v {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        Some(TypedValue::I64(v)) => {
+                            if *v != 0 {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        Some(TypedValue::U64(v)) => {
+                            if *v != 0 {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        _ => 0,
+                    }
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Regex matching
-        linker.func_wrap("kestrel", "re_match", |mut caller: Caller<'_, WasmContext>, re_id: u32, ptr: u32, len: u32| -> i32 {
-            let mem = match caller.get_export("memory") {
-                Some(Extern::Memory(m)) => m,
-                _ => return 0,
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "re_match",
+                |mut caller: Caller<'_, WasmContext>, re_id: u32, ptr: u32, len: u32| -> i32 {
+                    let mem = match caller.get_export("memory") {
+                        Some(Extern::Memory(m)) => m,
+                        _ => return 0,
+                    };
 
-            let ctx = caller.data();
-            let cache = ctx.regex_cache.clone();
+                    let ctx = caller.data();
+                    let cache = ctx.regex_cache.clone();
 
-            let mut data = vec![0u8; len as usize];
-            if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
-                return 0;
-            }
+                    let mut data = vec![0u8; len as usize];
+                    if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
+                        return 0;
+                    }
 
-            let s = match std::str::from_utf8(&data) {
-                Ok(s) => s,
-                Err(_) => return 0,
-            };
+                    let s = match std::str::from_utf8(&data) {
+                        Ok(s) => s,
+                        Err(_) => return 0,
+                    };
 
-            let cache_guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(cache.read())
-            });
+                    let cache_guard = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(cache.read())
+                    });
 
-            if let Some(re) = cache_guard.get(&re_id) {
-                if re.is_match(s) {
-                    return 1;
-                }
-            }
-            0
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    if let Some(re) = cache_guard.get(&re_id) {
+                        if re.is_match(s) {
+                            return 1;
+                        }
+                    }
+                    0
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Glob matching
-        linker.func_wrap("kestrel", "glob_match", |mut caller: Caller<'_, WasmContext>, glob_id: u32, ptr: u32, len: u32| -> i32 {
-            let mem = match caller.get_export("memory") {
-                Some(Extern::Memory(m)) => m,
-                _ => return 0,
-            };
+        linker
+            .func_wrap(
+                "kestrel",
+                "glob_match",
+                |mut caller: Caller<'_, WasmContext>, glob_id: u32, ptr: u32, len: u32| -> i32 {
+                    let mem = match caller.get_export("memory") {
+                        Some(Extern::Memory(m)) => m,
+                        _ => return 0,
+                    };
 
-            let ctx = caller.data();
-            let cache = ctx.glob_cache.clone();
+                    let ctx = caller.data();
+                    let cache = ctx.glob_cache.clone();
 
-            let mut data = vec![0u8; len as usize];
-            if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
-                return 0;
-            }
+                    let mut data = vec![0u8; len as usize];
+                    if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
+                        return 0;
+                    }
 
-            let s = match std::str::from_utf8(&data) {
-                Ok(s) => s,
-                Err(_) => return 0,
-            };
+                    let s = match std::str::from_utf8(&data) {
+                        Ok(s) => s,
+                        Err(_) => return 0,
+                    };
 
-            let cache_guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(cache.read())
-            });
+                    let cache_guard = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(cache.read())
+                    });
 
-            if let Some(pattern) = cache_guard.get(&glob_id) {
-                if pattern.matches(s) {
-                    return 1;
-                }
-            }
-            0
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+                    if let Some(pattern) = cache_guard.get(&glob_id) {
+                        if pattern.matches(s) {
+                            return 1;
+                        }
+                    }
+                    0
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         // Alert emission
-        linker.func_wrap("kestrel", "alert_emit", |mut _caller: Caller<'_, WasmContext>, _event_handle: u32| -> i32 {
-            // For now, just return success
-            // In a full implementation, this would capture event details
-            0
-        }).map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+        linker
+            .func_wrap(
+                "kestrel",
+                "alert_emit",
+                |mut _caller: Caller<'_, WasmContext>, _event_handle: u32| -> i32 {
+                    // For now, just return success
+                    // In a full implementation, this would capture event details
+                    0
+                },
+            )
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         Ok(())
     }
 
     /// Load a Wasm module from a rule package
-    pub async fn load_module(&self, manifest: RuleManifest, wasm_bytes: Vec<u8>) -> Result<String, WasmRuntimeError> {
+    pub async fn load_module(
+        &self,
+        manifest: RuleManifest,
+        wasm_bytes: Vec<u8>,
+    ) -> Result<String, WasmRuntimeError> {
         let rule_id = manifest.metadata.rule_id.clone();
 
         info!(rule_id = %rule_id, "Loading Wasm module");
@@ -439,7 +512,8 @@ impl WasmEngine {
             .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
 
         // Pre-instantiate for pooling
-        let instance_pre = self.instance_pre(&module)
+        let instance_pre = self
+            .instance_pre(&module)
             .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
 
         // AOT cache if enabled
@@ -484,7 +558,8 @@ impl WasmEngine {
 
     /// Pre-instantiate a module for pooling
     fn instance_pre(&self, module: &Module) -> Result<InstancePre<WasmContext>, WasmRuntimeError> {
-        self.linker.instantiate_pre(module)
+        self.linker
+            .instantiate_pre(module)
             .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))
     }
 
@@ -493,7 +568,9 @@ impl WasmEngine {
         let re = regex::Regex::new(pattern)
             .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
 
-        let id = self.next_regex_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_regex_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut cache = self.regex_cache.write().await;
         cache.insert(id, re);
         Ok(id)
@@ -504,7 +581,9 @@ impl WasmEngine {
         let glob = glob::Pattern::new(pattern)
             .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
 
-        let id = self.next_glob_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_glob_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut cache = self.glob_cache.write().await;
         cache.insert(id, glob);
         Ok(id)
@@ -538,7 +617,11 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
     /// The predicate_id should be in the format "rule_id:predicate_id" where:
     /// - rule_id is the Wasm module identifier
     /// - predicate_id is the index of the predicate within the module
-    fn evaluate(&self, predicate_id: &str, event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    fn evaluate(
+        &self,
+        predicate_id: &str,
+        event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
         if parts.len() != 2 {
@@ -550,10 +633,7 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
 
         let rule_id = parts[0];
         let predicate_index: u32 = parts[1].parse().map_err(|_| {
-            kestrel_nfa::NfaError::PredicateError(format!(
-                "Invalid predicate index: {}",
-                parts[1]
-            ))
+            kestrel_nfa::NfaError::PredicateError(format!("Invalid predicate index: {}", parts[1]))
         })?;
 
         // Run async evaluation in blocking context
@@ -561,10 +641,7 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
             tokio::runtime::Handle::current().block_on(async {
                 let modules = self.modules.read().await;
                 let compiled = modules.get(rule_id).ok_or_else(|| {
-                    kestrel_nfa::NfaError::PredicateError(format!(
-                        "Module not found: {}",
-                        rule_id
-                    ))
+                    kestrel_nfa::NfaError::PredicateError(format!("Module not found: {}", rule_id))
                 })?;
 
                 // Create a new store for this evaluation
@@ -581,28 +658,24 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
 
                 // Instantiate the module
                 let instance = compiled.instance_pre.instantiate(&mut store).map_err(|e| {
-                    kestrel_nfa::NfaError::PredicateError(format!(
-                        "Instantiation failed: {}",
-                        e
-                    ))
+                    kestrel_nfa::NfaError::PredicateError(format!("Instantiation failed: {}", e))
                 })?;
 
                 // Get the pred_eval dispatcher function
                 // Signature: (predicate_id: i32, event_handle: i32) -> i32
                 let pred_eval = instance
                     .get_typed_func::<(u32, u32), i32>(&mut store, "pred_eval")
-                    .map_err(|_| kestrel_nfa::NfaError::PredicateError(
-                        "pred_eval function not found".to_string()
-                    ))?;
+                    .map_err(|_| {
+                        kestrel_nfa::NfaError::PredicateError(
+                            "pred_eval function not found".to_string(),
+                        )
+                    })?;
 
                 // Call the predicate with the predicate index
                 let result = pred_eval
                     .call(&mut store, (predicate_index, 0))
                     .map_err(|e| {
-                        kestrel_nfa::NfaError::PredicateError(format!(
-                            "Execution failed: {}",
-                            e
-                        ))
+                        kestrel_nfa::NfaError::PredicateError(format!("Execution failed: {}", e))
                     })?;
 
                 Ok(result == 1)
@@ -645,8 +718,9 @@ impl WasmPredicate {
     /// Evaluate an event
     pub async fn eval(&self, event: &Event) -> Result<EvalResult, WasmRuntimeError> {
         let modules = self.engine.modules.read().await;
-        let compiled = modules.get(&self.rule_id)
-            .ok_or_else(|| WasmRuntimeError::CompilationError(format!("Module not found: {}", self.rule_id)))?;
+        let compiled = modules.get(&self.rule_id).ok_or_else(|| {
+            WasmRuntimeError::CompilationError(format!("Module not found: {}", self.rule_id))
+        })?;
 
         // Create a new store for this evaluation
         let mut store = Store::new(
@@ -661,15 +735,19 @@ impl WasmPredicate {
         );
 
         // Instantiate the module
-        let instance = compiled.instance_pre.instantiate(&mut store)
+        let instance = compiled
+            .instance_pre
+            .instantiate(&mut store)
             .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
 
         // Get the pred_eval function
-        let pred_eval = instance.get_typed_func::<u32, i32>(&mut store, "pred_eval")
+        let pred_eval = instance
+            .get_typed_func::<u32, i32>(&mut store, "pred_eval")
             .map_err(|_| WasmRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
 
         // Call the predicate
-        let result = pred_eval.call(&mut store, 0)
+        let result = pred_eval
+            .call(&mut store, 0)
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         Ok(EvalResult {

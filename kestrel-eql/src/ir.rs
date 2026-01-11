@@ -26,13 +26,9 @@ pub struct IrRule {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrRuleType {
     /// Single event rule
-    Event {
-        event_type: String,
-    },
+    Event { event_type: String },
     /// Sequence rule
-    Sequence {
-        event_types: Vec<String>,
-    },
+    Sequence { event_types: Vec<String> },
 }
 
 /// Predicate DAG (Directed Acyclic Graph)
@@ -56,13 +52,9 @@ pub struct IrPredicate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrNode {
     /// Literal value
-    Literal {
-        value: IrLiteral,
-    },
+    Literal { value: IrLiteral },
     /// Load field value
-    LoadField {
-        field_id: u32,
-    },
+    LoadField { field_id: u32 },
     /// Binary operation
     BinaryOp {
         op: IrBinaryOp,
@@ -70,15 +62,9 @@ pub enum IrNode {
         right: Box<IrNode>,
     },
     /// Unary operation
-    UnaryOp {
-        op: IrUnaryOp,
-        operand: Box<IrNode>,
-    },
+    UnaryOp { op: IrUnaryOp, operand: Box<IrNode> },
     /// Function call
-    FunctionCall {
-        func: IrFunction,
-        args: Vec<IrNode>,
-    },
+    FunctionCall { func: IrFunction, args: Vec<IrNode> },
     /// In operation (constant set membership)
     In {
         value: Box<IrNode>,
@@ -277,7 +263,10 @@ impl IrNode {
         match self {
             IrNode::FunctionCall { func, args } => {
                 if *func == IrFunction::Regex {
-                    if let Some(IrNode::Literal { value: IrLiteral::String(pattern) }) = args.first() {
+                    if let Some(IrNode::Literal {
+                        value: IrLiteral::String(pattern),
+                    }) = args.first()
+                    {
                         patterns.push(pattern.clone());
                     }
                 }
@@ -313,7 +302,10 @@ impl IrNode {
         match self {
             IrNode::FunctionCall { func, args } => {
                 if *func == IrFunction::Wildcard {
-                    if let Some(IrNode::Literal { value: IrLiteral::String(pattern) }) = args.first() {
+                    if let Some(IrNode::Literal {
+                        value: IrLiteral::String(pattern),
+                    }) = args.first()
+                    {
                         patterns.push(pattern.clone());
                     }
                 }

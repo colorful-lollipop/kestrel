@@ -64,7 +64,7 @@ struct LogHeader {
 }
 
 impl LogHeader {
-    const MAGIC: [u8; 4] = [b'K', b'E', b'S', b'T'];  // "KEST"
+    const MAGIC: [u8; 4] = [b'K', b'E', b'S', b'T']; // "KEST"
     const CURRENT_VERSION: u32 = 1;
 
     fn new(event_count: u64, start_ts: u64, end_ts: u64) -> Self {
@@ -177,9 +177,13 @@ impl BinaryLog {
         let header = LogHeader::new(events.len() as u64, start_ts, end_ts);
 
         // Write header as JSON
-        writeln!(writer, "{}", serde_json::to_string_pretty(&header)
-            .map_err(|e| ReplayError::Serialization(e.to_string()))?)
-            .map_err(|e| ReplayError::Io(e))?;
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string_pretty(&header)
+                .map_err(|e| ReplayError::Serialization(e.to_string()))?
+        )
+        .map_err(|e| ReplayError::Io(e))?;
 
         // Write events
         for event in events {
@@ -189,14 +193,20 @@ impl BinaryLog {
                 ts_mono_ns: event.ts_mono_ns,
                 ts_wall_ns: event.ts_wall_ns,
                 entity_key: event.entity_key,
-                fields: event.fields.iter()
+                fields: event
+                    .fields
+                    .iter()
                     .map(|(id, val)| (*id, SerializedValue::from(val.clone())))
                     .collect(),
             };
 
-            writeln!(writer, "{}", serde_json::to_string(&serialized)
-                .map_err(|e| ReplayError::Serialization(e.to_string()))?)
-                .map_err(|e| ReplayError::Io(e))?;
+            writeln!(
+                writer,
+                "{}",
+                serde_json::to_string(&serialized)
+                    .map_err(|e| ReplayError::Serialization(e.to_string()))?
+            )
+            .map_err(|e| ReplayError::Io(e))?;
         }
 
         info!(path = %path.display(), count = events.len(), "Wrote event log");
@@ -218,13 +228,17 @@ impl BinaryLog {
             .map_err(|e| ReplayError::Serialization(e.to_string()))?;
 
         if !header.is_valid() {
-            return Err(ReplayError::InvalidFormat("Invalid magic bytes or version".to_string()));
+            return Err(ReplayError::InvalidFormat(
+                "Invalid magic bytes or version".to_string(),
+            ));
         }
 
         // Validate schema version
         if header.schema_version != 1 {
-            warn!(log_version = header.schema_version,
-                  "Schema version mismatch, may have compatibility issues");
+            warn!(
+                log_version = header.schema_version,
+                "Schema version mismatch, may have compatibility issues"
+            );
         }
 
         // Read events (one per line)
@@ -239,13 +253,16 @@ impl BinaryLog {
                 .map_err(|e| ReplayError::Serialization(e.to_string()))?;
 
             // Convert back to Event
-            let fields: smallvec::SmallVec<[(kestrel_schema::FieldId, kestrel_schema::TypedValue); 8]> =
-                serialized.fields.into_iter()
-                    .map(|(id, val)| (id, val.into()))
-                    .collect();
+            let fields: smallvec::SmallVec<
+                [(kestrel_schema::FieldId, kestrel_schema::TypedValue); 8],
+            > = serialized
+                .fields
+                .into_iter()
+                .map(|(id, val)| (id, val.into()))
+                .collect();
 
             let event = Event {
-                event_id: 0,  // Will be assigned during replay
+                event_id: 0, // Will be assigned during replay
                 event_type_id: serialized.event_type_id,
                 ts_mono_ns: serialized.ts_mono_ns,
                 ts_wall_ns: serialized.ts_wall_ns,
@@ -337,10 +354,9 @@ impl ReplaySource {
 
         // Set mock time to first event's timestamp
         if let Some(first_event) = events.first() {
-            self.time_manager.provider().set_time(
-                first_event.ts_mono_ns,
-                first_event.ts_wall_ns,
-            );
+            self.time_manager
+                .provider()
+                .set_time(first_event.ts_mono_ns, first_event.ts_wall_ns);
         }
 
         let event_bus_handle = event_bus.handle();
@@ -360,17 +376,17 @@ impl ReplaySource {
                 let delay_ns = target_ts.saturating_sub(prev_ts);
 
                 if delay_ns > 0 && self.config.speed_multiplier > 0.0 {
-                    let delay_ms = (delay_ns as f64 / 1_000_000.0 / self.config.speed_multiplier) as u64;
+                    let delay_ms =
+                        (delay_ns as f64 / 1_000_000.0 / self.config.speed_multiplier) as u64;
                     if delay_ms > 0 {
                         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                     }
                 }
 
                 // Advance mock time
-                self.time_manager.provider().set_time(
-                    event.ts_mono_ns,
-                    event.ts_wall_ns,
-                );
+                self.time_manager
+                    .provider()
+                    .set_time(event.ts_mono_ns, event.ts_wall_ns);
             }
 
             // Save timestamp for logging before moving event

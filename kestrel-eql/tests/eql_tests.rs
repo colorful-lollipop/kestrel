@@ -30,9 +30,8 @@ fn test_parse_simple_event_query() {
 fn test_parse_event_with_string_condition() {
     let compiler = create_test_compiler();
 
-    let result = compiler.parse(
-        "process where process.executable == \"/bin/bash\" and process.pid > 1000",
-    );
+    let result =
+        compiler.parse("process where process.executable == \"/bin/bash\" and process.pid > 1000");
     assert!(result.is_ok());
 
     let query = result.unwrap();
@@ -71,8 +70,7 @@ fn test_parse_sequence_query() {
 fn test_parse_sequence_with_maxspan() {
     let compiler = create_test_compiler();
 
-    let result =
-        compiler.parse("sequence by process.pid [process] [file] with maxspan=5s");
+    let result = compiler.parse("sequence by process.pid [process] [file] with maxspan=5s");
 
     assert!(result.is_ok());
 
@@ -130,7 +128,8 @@ fn test_parse_with_wildcard_function() {
 fn test_parse_with_in_expression() {
     let compiler = create_test_compiler();
 
-    let result = compiler.parse("process where process.executable in (\"/bin/bash\", \"/bin/sh\", \"/bin/zsh\")");
+    let result = compiler
+        .parse("process where process.executable in (\"/bin/bash\", \"/bin/sh\", \"/bin/zsh\")");
 
     assert!(result.is_ok());
 
@@ -267,9 +266,7 @@ fn test_null_handling() {
 fn test_nested_field_references() {
     let compiler = create_test_compiler();
 
-    let result = compiler.parse(
-        "process where process.executable.path == \"/usr/bin/test\""
-    );
+    let result = compiler.parse("process where process.executable.path == \"/usr/bin/test\"");
 
     assert!(result.is_ok());
 
@@ -291,7 +288,10 @@ fn test_maxspan_durations() {
     let durations = vec!["5ms", "10s", "2m", "1h"];
 
     for duration in durations {
-        let query = format!("sequence by process.pid [process] [file] with maxspan={}", duration);
+        let query = format!(
+            "sequence by process.pid [process] [file] with maxspan={}",
+            duration
+        );
         let result = compiler.parse(&query);
         assert!(
             result.is_ok(),
@@ -300,4 +300,34 @@ fn test_maxspan_durations() {
             result.err()
         );
     }
+}
+
+#[test]
+fn debug_duration() {
+    use kestrel_eql::EqlCompiler;
+    use kestrel_schema::SchemaRegistry;
+    use std::sync::Arc;
+
+    let schema = Arc::new(SchemaRegistry::new());
+    let compiler = EqlCompiler::new(schema);
+
+    let durations = vec!["5ms", "10s", "2m", "1h"];
+    for d in durations {
+        let result = compiler.parse(&format!(
+            "sequence by process.pid [process] [file] with maxspan={}",
+            d
+        ));
+        println!("Duration {}: {:?}", d, result);
+    }
+}
+
+#[test]
+fn debug_duration_raw() {
+    use kestrel_eql::parser::parse;
+
+    let result = parse("sequence by process.pid [process] [file] with maxspan=10s");
+    println!("Raw parse 10s: {:?}", result);
+
+    let result2 = parse("sequence by process.pid [process] [file] with maxspan=5ms");
+    println!("Raw parse 5ms: {:?}", result2);
 }

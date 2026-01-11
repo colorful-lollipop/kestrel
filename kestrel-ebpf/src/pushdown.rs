@@ -161,10 +161,7 @@ mod tests {
     fn test_update_event_types() {
         let pushdown = InterestPushdown::new();
 
-        pushdown.update_event_types(vec![
-            EbpfEventType::ProcessExec,
-            EbpfEventType::ProcessExit,
-        ]);
+        pushdown.update_event_types(vec![EbpfEventType::ProcessExec, EbpfEventType::ProcessExit]);
 
         assert!(pushdown.is_event_type_interesting(EbpfEventType::ProcessExec));
         assert!(pushdown.is_event_type_interesting(EbpfEventType::ProcessExit));

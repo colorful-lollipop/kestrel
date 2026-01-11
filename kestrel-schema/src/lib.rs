@@ -3,10 +3,10 @@
 //! This module defines the type system and schema for events in the Kestrel detection engine.
 //! Events are strongly typed with field IDs for performance and reproducibility.
 
-use std::sync::Arc;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Field identifier (u32 for fast lookup)
@@ -117,7 +117,10 @@ impl SchemaRegistry {
 
     /// List all registered event types
     pub fn list_event_types(&self) -> Vec<(EventTypeId, &EventTypeDef)> {
-        self.event_types.iter().map(|(id, def)| (*id, def)).collect()
+        self.event_types
+            .iter()
+            .map(|(id, def)| (*id, def))
+            .collect()
     }
 }
 
@@ -187,9 +190,15 @@ impl serde::Serialize for TypedValue {
             TypedValue::U64(v) => serializer.serialize_newtype_variant("TypedValue", 1, "U64", v),
             TypedValue::F64(v) => serializer.serialize_newtype_variant("TypedValue", 2, "F64", v),
             TypedValue::Bool(v) => serializer.serialize_newtype_variant("TypedValue", 3, "Bool", v),
-            TypedValue::String(v) => serializer.serialize_newtype_variant("TypedValue", 4, "String", v),
-            TypedValue::Bytes(v) => serializer.serialize_newtype_variant("TypedValue", 5, "Bytes", v),
-            TypedValue::Array(v) => serializer.serialize_newtype_variant("TypedValue", 6, "Array", v),
+            TypedValue::String(v) => {
+                serializer.serialize_newtype_variant("TypedValue", 4, "String", v)
+            }
+            TypedValue::Bytes(v) => {
+                serializer.serialize_newtype_variant("TypedValue", 5, "Bytes", v)
+            }
+            TypedValue::Array(v) => {
+                serializer.serialize_newtype_variant("TypedValue", 6, "Array", v)
+            }
             TypedValue::Null => serializer.serialize_unit_variant("TypedValue", 7, "Null"),
         }
     }
@@ -244,7 +253,13 @@ impl<'de> serde::Deserialize<'de> for TypedValue {
             }
         }
 
-        deserializer.deserialize_enum("TypedValue", &["i64", "u64", "f64", "bool", "string", "bytes", "array", "null"], TypedValueVisitor)
+        deserializer.deserialize_enum(
+            "TypedValue",
+            &[
+                "i64", "u64", "f64", "bool", "string", "bytes", "array", "null",
+            ],
+            TypedValueVisitor,
+        )
     }
 }
 

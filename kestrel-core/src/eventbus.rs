@@ -58,12 +58,10 @@ impl EventBusHandle {
 
     /// Try to publish without blocking
     pub fn try_publish(&self, event: Event) -> Result<(), PublishError> {
-        self.sender
-            .try_send(event)
-            .map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => PublishError::Full,
-                mpsc::error::TrySendError::Closed(_) => PublishError::Closed,
-            })?;
+        self.sender.try_send(event).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => PublishError::Full,
+            mpsc::error::TrySendError::Closed(_) => PublishError::Closed,
+        })?;
         self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }

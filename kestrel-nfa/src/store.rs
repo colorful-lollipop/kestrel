@@ -6,14 +6,14 @@
 // - Per-sequence and per-entity quotas
 // - Sharded storage for parallelism
 
-use crate::state::{PartialMatch, NfaStateId};
 use crate::metrics::EvictionReason;
+use crate::state::{NfaStateId, PartialMatch};
 use crate::{NfaError, NfaResult};
 use ahash::AHashMap;
 use parking_lot::RwLock;
 use priority_queue::PriorityQueue;
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Configuration for the state store
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ impl Default for StateStoreConfig {
             max_partial_matches_per_sequence: 10_000,
             max_partial_matches_per_entity: 100,
             max_total_partial_matches: 1_000_000,
-            lru_eviction_threshold: 0.9,  // Trigger LRU at 90% capacity
+            lru_eviction_threshold: 0.9, // Trigger LRU at 90% capacity
             cleanup_interval: Duration::from_secs(5),
         }
     }
@@ -97,7 +97,12 @@ impl StateShard {
         }
     }
 
-    fn insert(&mut self, key: (String, u128, NfaStateId), match_state: PartialMatch, timestamp: u64) {
+    fn insert(
+        &mut self,
+        key: (String, u128, NfaStateId),
+        match_state: PartialMatch,
+        timestamp: u64,
+    ) {
         self.entity_counts
             .entry((key.0.clone(), key.1))
             .and_modify(|c| *c += 1)
@@ -140,7 +145,10 @@ impl StateShard {
     }
 
     fn get_entity_count(&self, sequence_id: &str, entity_key: u128) -> usize {
-        self.entity_counts.get(&(sequence_id.to_string(), entity_key)).copied().unwrap_or(0)
+        self.entity_counts
+            .get(&(sequence_id.to_string(), entity_key))
+            .copied()
+            .unwrap_or(0)
     }
 
     fn get_sequence_count(&self, sequence_id: &str) -> usize {
@@ -214,7 +222,12 @@ impl StateStore {
     }
 
     /// Remove a partial match
-    pub fn remove(&self, sequence_id: &str, entity_key: u128, state_id: NfaStateId) -> Option<PartialMatch> {
+    pub fn remove(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch> {
         let shard_idx = self.get_shard_index(entity_key);
         let key = (sequence_id.to_string(), entity_key, state_id);
         let mut shard = self.shards[shard_idx].write();
@@ -222,7 +235,12 @@ impl StateStore {
     }
 
     /// Get a partial match
-    pub fn get(&self, sequence_id: &str, entity_key: u128, state_id: NfaStateId) -> Option<PartialMatch> {
+    pub fn get(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch> {
         let shard_idx = self.get_shard_index(entity_key);
         let key = (sequence_id.to_string(), entity_key, state_id);
         let shard = self.shards[shard_idx].read();
@@ -239,7 +257,10 @@ impl StateStore {
         if entity_count >= self.config.max_partial_matches_per_entity {
             return Err(NfaError::QuotaExceeded {
                 rule_id: key.0.clone(),
-                reason: format!("entity quota exceeded: {} >= {}", entity_count, self.config.max_partial_matches_per_entity),
+                reason: format!(
+                    "entity quota exceeded: {} >= {}",
+                    entity_count, self.config.max_partial_matches_per_entity
+                ),
             });
         }
 
@@ -248,7 +269,10 @@ impl StateStore {
         if seq_count >= self.config.max_partial_matches_per_sequence {
             return Err(NfaError::QuotaExceeded {
                 rule_id: key.0.clone(),
-                reason: format!("sequence quota exceeded: {} >= {}", seq_count, self.config.max_partial_matches_per_sequence),
+                reason: format!(
+                    "sequence quota exceeded: {} >= {}",
+                    seq_count, self.config.max_partial_matches_per_sequence
+                ),
             });
         }
 
@@ -268,7 +292,9 @@ impl StateStore {
                 .filter_map(|(key, pm)| {
                     if pm.terminated {
                         Some(key.clone())
-                    } else if let Some(maxspan_ms) = pm.matched_events.first().map(|e| e.timestamp_ns) {
+                    } else if let Some(maxspan_ms) =
+                        pm.matched_events.first().map(|e| e.timestamp_ns)
+                    {
                         // This is a simplified check - in real implementation,
                         // we'd check against sequence's maxspan
                         None
@@ -312,10 +338,7 @@ impl StateStore {
 
     /// Get total number of partial matches across all shards
     pub fn total_matches(&self) -> usize {
-        self.shards
-            .iter()
-            .map(|s| s.read().total_matches())
-            .sum()
+        self.shards.iter().map(|s| s.read().total_matches()).sum()
     }
 
     /// Get configuration
@@ -327,10 +350,14 @@ impl StateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{PartialMatch, NfaSequence};
+    use crate::state::{NfaSequence, PartialMatch};
     use kestrel_event::Event;
 
-    fn create_test_partial_match(sequence_id: &str, entity_key: u128, state_id: NfaStateId) -> PartialMatch {
+    fn create_test_partial_match(
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> PartialMatch {
         let event = Event::builder()
             .event_type(1)
             .ts_mono(1000)
@@ -389,7 +416,10 @@ mod tests {
         let pm3 = create_test_partial_match("seq1", 12345, 2);
         let result = store.insert(pm3);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NfaError::QuotaExceeded { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            NfaError::QuotaExceeded { .. }
+        ));
     }
 
     #[test]
@@ -424,9 +454,15 @@ mod tests {
 
         assert_eq!(store.total_matches(), 0);
 
-        store.insert(create_test_partial_match("seq1", 11111, 0)).unwrap();
-        store.insert(create_test_partial_match("seq1", 22222, 0)).unwrap();
-        store.insert(create_test_partial_match("seq2", 33333, 0)).unwrap();
+        store
+            .insert(create_test_partial_match("seq1", 11111, 0))
+            .unwrap();
+        store
+            .insert(create_test_partial_match("seq1", 22222, 0))
+            .unwrap();
+        store
+            .insert(create_test_partial_match("seq2", 33333, 0))
+            .unwrap();
 
         assert_eq!(store.total_matches(), 3);
     }

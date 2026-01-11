@@ -34,7 +34,10 @@ fn main() {
     let bpf_obj = out_dir.join("main.bpf.o");
 
     let clang_version = std::env::var("CLANG_VERSION").ok();
-    let clang_cmd = clang_version.as_ref().map(|v| format!("clang-{}", v)).unwrap_or_else(|| "clang".to_string());
+    let clang_cmd = clang_version
+        .as_ref()
+        .map(|v| format!("clang-{}", v))
+        .unwrap_or_else(|| "clang".to_string());
 
     let status = Command::new(&clang_cmd)
         .arg("-g")

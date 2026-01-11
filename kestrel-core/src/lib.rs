@@ -7,16 +7,16 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, warn};
 
-pub mod eventbus;
 pub mod alert;
-pub mod time;
+pub mod eventbus;
 pub mod replay;
+pub mod time;
 
+pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle};
-pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, Severity, EventEvidence};
-pub use time::{TimeProvider, RealTimeProvider, MockTimeProvider, TimeManager};
-pub use replay::{BinaryLog, ReplaySource, ReplayConfig, ReplayError, ReplayStats};
+pub use replay::{BinaryLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
+pub use time::{MockTimeProvider, RealTimeProvider, TimeManager, TimeProvider};
 
 /// Configuration for backpressure handling
 #[derive(Debug, Clone)]

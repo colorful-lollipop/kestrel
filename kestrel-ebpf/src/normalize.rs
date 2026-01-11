@@ -3,7 +3,7 @@
 //! Normalizes raw eBPF events into Kestrel Event format.
 //! Handles process tree resolution, path normalization, and user information.
 
-use crate::{RawEbpfEvent, ExecveEvent, EbpfError};
+use crate::{EbpfError, ExecveEvent, RawEbpfEvent};
 use kestrel_event::Event;
 use kestrel_schema::{SchemaRegistry, TypedValue};
 use std::sync::Arc;
@@ -50,7 +50,11 @@ impl EventNormalizer {
     /// Normalize an execve event from ring buffer
     ///
     /// This handles the actual C struct format from eBPF programs.
-    pub fn normalize_execve_event(&self, exec: &ExecveEvent, event_id: u64) -> Result<Event, EbpfError> {
+    pub fn normalize_execve_event(
+        &self,
+        exec: &ExecveEvent,
+        event_id: u64,
+    ) -> Result<Event, EbpfError> {
         debug!(pid = exec.pid, comm = ?self.parse_bytes(&exec.comm), "Normalizing execve event");
 
         let mut builder = Event::builder()
@@ -116,17 +120,11 @@ impl EventNormalizer {
             return None;
         }
 
-        std::str::from_utf8(bytes)
-            .ok()
-            .map(|s| s.to_string())
+        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
     }
 
     /// Normalize process exec event
-    fn normalize_process_exec(
-        &self,
-        raw: &RawEbpfEvent,
-        data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_process_exec(&self, raw: &RawEbpfEvent, data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(1) // PROCESS_EXEC
             .ts_mono(raw.ts_mono_ns)
@@ -176,11 +174,7 @@ impl EventNormalizer {
     }
 
     /// Normalize process exit event
-    fn normalize_process_exit(
-        &self,
-        raw: &RawEbpfEvent,
-        _data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_process_exit(&self, raw: &RawEbpfEvent, _data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(2) // PROCESS_EXIT
             .ts_mono(raw.ts_mono_ns)
@@ -208,11 +202,7 @@ impl EventNormalizer {
     }
 
     /// Normalize file open event
-    fn normalize_file_open(
-        &self,
-        raw: &RawEbpfEvent,
-        data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_file_open(&self, raw: &RawEbpfEvent, data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(3) // FILE_OPEN
             .ts_mono(raw.ts_mono_ns)
@@ -238,11 +228,7 @@ impl EventNormalizer {
     }
 
     /// Normalize file rename event
-    fn normalize_file_rename(
-        &self,
-        raw: &RawEbpfEvent,
-        _data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_file_rename(&self, raw: &RawEbpfEvent, _data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(4) // FILE_RENAME
             .ts_mono(raw.ts_mono_ns)
@@ -260,11 +246,7 @@ impl EventNormalizer {
     }
 
     /// Normalize file unlink event
-    fn normalize_file_unlink(
-        &self,
-        raw: &RawEbpfEvent,
-        _data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_file_unlink(&self, raw: &RawEbpfEvent, _data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(5) // FILE_UNLINK
             .ts_mono(raw.ts_mono_ns)
@@ -299,19 +281,12 @@ impl EventNormalizer {
         }
 
         builder.build().map_err(|e| {
-            EbpfError::NormalizationError(format!(
-                "Failed to build network connect event: {}",
-                e
-            ))
+            EbpfError::NormalizationError(format!("Failed to build network connect event: {}", e))
         })
     }
 
     /// Normalize network send event
-    fn normalize_network_send(
-        &self,
-        raw: &RawEbpfEvent,
-        _data: &[u8],
-    ) -> Result<Event, EbpfError> {
+    fn normalize_network_send(&self, raw: &RawEbpfEvent, _data: &[u8]) -> Result<Event, EbpfError> {
         let mut builder = Event::builder()
             .event_type(7) // NETWORK_SEND
             .ts_mono(raw.ts_mono_ns)
@@ -339,9 +314,7 @@ impl EventNormalizer {
         let end = slice.iter().position(|&b| b == 0).unwrap_or(len);
         let bytes = &slice[..end];
 
-        std::str::from_utf8(bytes)
-            .ok()
-            .map(|s| s.to_string())
+        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
     }
 }
 

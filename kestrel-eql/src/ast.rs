@@ -168,7 +168,8 @@ impl Query {
         match self {
             Query::Event(eq) => vec![eq.event_type.clone()],
             Query::Sequence(sq) => {
-                let mut types: Vec<String> = sq.steps.iter().map(|s| s.event_type.clone()).collect();
+                let mut types: Vec<String> =
+                    sq.steps.iter().map(|s| s.event_type.clone()).collect();
                 if let Some(until) = &sq.until {
                     types.push(until.event_type.clone());
                 }

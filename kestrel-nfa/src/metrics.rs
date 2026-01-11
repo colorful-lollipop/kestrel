@@ -3,10 +3,10 @@
 // This module provides comprehensive metrics collection for the NFA engine,
 // including per-sequence metrics and overall engine statistics.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
 use ahash::AHashMap;
 use parking_lot::RwLock;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Reason for a partial match eviction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,9 +81,7 @@ impl SequenceMetrics {
 
     pub fn record_eviction(&self, reason: EvictionReason) {
         let mut evictions = self.evictions.write();
-        let counter = evictions
-            .entry(reason)
-            .or_insert_with(|| AtomicU64::new(0));
+        let counter = evictions.entry(reason).or_insert_with(|| AtomicU64::new(0));
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -94,9 +92,11 @@ impl SequenceMetrics {
             if current <= peak {
                 break;
             }
-            if self.peak_concurrent_matches.compare_exchange_weak(
-                peak, current, Ordering::Relaxed, Ordering::Relaxed
-            ).is_ok() {
+            if self
+                .peak_concurrent_matches
+                .compare_exchange_weak(peak, current, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
                 break;
             }
         }
@@ -156,9 +156,11 @@ impl NfaMetrics {
             if count <= peak {
                 break;
             }
-            if self.peak_loaded_sequences.compare_exchange_weak(
-                peak, count, Ordering::Relaxed, Ordering::Relaxed
-            ).is_ok() {
+            if self
+                .peak_loaded_sequences
+                .compare_exchange_weak(peak, count, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
                 break;
             }
         }
@@ -280,8 +282,14 @@ mod tests {
         metrics.record_eviction(EvictionReason::Terminated);
 
         let evictions = metrics.evictions.read();
-        assert_eq!(evictions[&EvictionReason::Expired].load(Ordering::Relaxed), 2);
-        assert_eq!(evictions[&EvictionReason::Terminated].load(Ordering::Relaxed), 1);
+        assert_eq!(
+            evictions[&EvictionReason::Expired].load(Ordering::Relaxed),
+            2
+        );
+        assert_eq!(
+            evictions[&EvictionReason::Terminated].load(Ordering::Relaxed),
+            1
+        );
     }
 
     #[test]

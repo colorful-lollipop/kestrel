@@ -93,7 +93,9 @@ impl SemanticAnalyzer {
             ir_rule.add_capture(self.analyze_capture(capture)?);
         }
 
-        ir_rule.validate().map_err(|e| EqlError::IrError { message: e.to_string() })?;
+        ir_rule.validate().map_err(|e| EqlError::IrError {
+            message: e.to_string(),
+        })?;
 
         self.current_event_type = None;
 
@@ -175,10 +177,8 @@ impl SemanticAnalyzer {
         };
 
         // Resolve "by" field to field ID
-        let by_field = query.by.as_ref().ok_or_else(|| {
-            EqlError::SemanticError {
-                message: "Sequence query must have 'by' clause".to_string(),
-            }
+        let by_field = query.by.as_ref().ok_or_else(|| EqlError::SemanticError {
+            message: "Sequence query must have 'by' clause".to_string(),
         })?;
 
         let by_field_id = self.resolve_field(by_field)?;
@@ -213,7 +213,9 @@ impl SemanticAnalyzer {
             ir_rule.add_capture(self.analyze_capture(capture)?);
         }
 
-        ir_rule.validate().map_err(|e| EqlError::IrError { message: e.to_string() })?;
+        ir_rule.validate().map_err(|e| EqlError::IrError {
+            message: e.to_string(),
+        })?;
 
         self.current_event_type = None;
 
@@ -284,10 +286,7 @@ impl SemanticAnalyzer {
 
         let args: Result<Vec<IrNode>> = fc.args.iter().map(|a| self.analyze_expr(a)).collect();
 
-        Ok(IrNode::FunctionCall {
-            func,
-            args: args?,
-        })
+        Ok(IrNode::FunctionCall { func, args: args? })
     }
 
     /// Analyze an in expression

@@ -6,7 +6,7 @@
 // - SeqStep: Individual step in a sequence
 
 use kestrel_event::Event;
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 use std::time::Duration;
 
 /// Unique identifier for an NFA state (position in sequence)
@@ -106,7 +106,12 @@ pub struct MatchedEvent {
 
 impl PartialMatch {
     /// Create a new partial match starting at the first state
-    pub fn new(sequence_id: String, entity_key: u128, initial_event: Event, initial_state_id: NfaStateId) -> Self {
+    pub fn new(
+        sequence_id: String,
+        entity_key: u128,
+        initial_event: Event,
+        initial_state_id: NfaStateId,
+    ) -> Self {
         let timestamp_ns = initial_event.ts_mono_ns;
         let matched_event = MatchedEvent {
             state_id: initial_state_id,

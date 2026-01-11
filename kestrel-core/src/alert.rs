@@ -104,12 +104,10 @@ impl AlertHandle {
 
     /// Try to emit without blocking
     pub fn try_emit(&self, alert: Alert) -> Result<(), AlertError> {
-        self.sender
-            .try_send(alert)
-            .map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => AlertError::OutputFull,
-                mpsc::error::TrySendError::Closed(_) => AlertError::OutputClosed,
-            })?;
+        self.sender.try_send(alert).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => AlertError::OutputFull,
+            mpsc::error::TrySendError::Closed(_) => AlertError::OutputClosed,
+        })?;
         Ok(())
     }
 }
@@ -158,7 +156,10 @@ impl AlertOutput {
     /// Output alert to stdout
     fn output_stdout(alert: &Alert) {
         let json = serde_json::to_string_pretty(alert).unwrap_or_else(|_| {
-            format!("{{ \"error\": \"Failed to serialize alert {}\" }}", alert.id)
+            format!(
+                "{{ \"error\": \"Failed to serialize alert {}\" }}",
+                alert.id
+            )
         });
         println!("{}", json);
     }

@@ -8,19 +8,19 @@
 // - State management (TTL/LRU/quota)
 // - Entity grouping (sequence by)
 
-mod state;
 mod engine;
-mod store;
 mod metrics;
+mod state;
+mod store;
 
 pub use engine::{NfaEngine, NfaEngineConfig};
-pub use state::{PartialMatch, NfaSequence, SeqStep, NfaStateId};
-pub use store::{StateStore, StateStoreConfig, QuotaConfig};
-pub use metrics::{NfaMetrics, SequenceMetrics, EvictionReason};
+pub use metrics::{EvictionReason, NfaMetrics, SequenceMetrics};
+pub use state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
+pub use store::{QuotaConfig, StateStore, StateStoreConfig};
 
+use kestrel_eql::ir::{IrRule, IrSeqStep, IrSequence};
 use kestrel_event::Event;
 use kestrel_schema::SchemaRegistry;
-use kestrel_eql::ir::{IrRule, IrSequence, IrSeqStep};
 use thiserror::Error;
 
 /// Errors that can occur in the NFA engine

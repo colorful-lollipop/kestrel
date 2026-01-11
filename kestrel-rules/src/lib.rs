@@ -2,11 +2,11 @@
 //!
 //! This module handles rule loading, hot-reloading, and lifecycle management.
 
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
@@ -139,7 +139,8 @@ impl RuleManager {
             .map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
+            let entry =
+                entry.map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
             let path = entry.path();
 
             if path.is_dir() {

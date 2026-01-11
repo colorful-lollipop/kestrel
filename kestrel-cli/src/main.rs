@@ -70,9 +70,7 @@ async fn main() -> Result<()> {
 fn setup_logging(level: &str) -> Result<()> {
     let level = level.parse::<Level>().unwrap_or(Level::INFO);
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .finish();
+    let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
 
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| anyhow::anyhow!("Failed to set tracing subscriber: {}", e))?;
