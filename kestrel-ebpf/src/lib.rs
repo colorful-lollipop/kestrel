@@ -14,6 +14,9 @@ mod pushdown;
 pub use normalize::EventNormalizer;
 pub use pushdown::InterestPushdown;
 
+// Optional: ebpf executor module (always compiled for tests)
+mod executor;
+
 use anyhow::Result;
 use aya::{maps::RingBuf, programs::Program, Ebpf, EbpfLoader};
 use kestrel_core::EventBus;

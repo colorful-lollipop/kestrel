@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 build = "build.rs"
 
+[features]
+default = []
+enforcement = []
+
 [dependencies]
 tokio = { workspace = true }
 anyhow = { workspace = true }

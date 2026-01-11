@@ -863,4 +863,265 @@ mod tests {
         assert!(rule_ids.contains(&"test-rule-2"));
         assert!(!rule_ids.contains(&"test-rule-3"));
     }
+
+    #[tokio::test]
+    async fn test_inline_mode_with_blockable_rule() {
+        use kestrel_event::Event;
+        use kestrel_core::{NoOpExecutor, ActionType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            mode: EngineMode::Inline,
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            mode: EngineMode::Inline,
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        // Create a blockable rule with Block action
+        let rule = SingleEventRule {
+            rule_id: "test-blockable-rule".to_string(),
+            rule_name: "Test Blockable Rule".to_string(),
+            event_type: 1,
+            severity: Severity::High,
+            description: Some("A test rule that should trigger enforcement".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+            blockable: true,
+            action_type: Some(ActionType::Block),
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        // Process event
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        // Verify alert was generated
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].rule_id, "test-blockable-rule");
+
+        // Verify action was executed in Inline mode
+        let stats = engine.stats().await;
+        assert_eq!(stats.actions_generated, 1);
+        assert_eq!(stats.alerts_generated, 1);
+    }
+
+    #[tokio::test]
+    async fn test_detect_mode_no_enforcement() {
+        use kestrel_event::Event;
+        use kestrel_core::{NoOpExecutor, ActionType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            mode: EngineMode::Detect, // Detect mode (default)
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            mode: EngineMode::Detect, // Detect mode (default)
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        // Create a blockable rule with Block action
+        let rule = SingleEventRule {
+            rule_id: "test-no-enforce-rule".to_string(),
+            rule_name: "Test No Enforcement Rule".to_string(),
+            event_type: 1,
+            severity: Severity::High,
+            description: Some("A blockable rule in Detect mode".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+            blockable: true,
+            action_type: Some(ActionType::Block),
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        // Process event
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        // Verify alert was generated
+        assert_eq!(alerts.len(), 1);
+
+        // Verify NO action was executed in Detect mode (alert-only)
+        let stats = engine.stats().await;
+        assert_eq!(stats.actions_generated, 0); // No actions in Detect mode
+        assert_eq!(stats.alerts_generated, 1);
+    }
+
+    #[tokio::test]
+    async fn test_non_blockable_rule_no_enforcement() {
+        use kestrel_event::Event;
+        use kestrel_core::{NoOpExecutor, ActionType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            mode: EngineMode::Inline, // Inline mode
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            mode: EngineMode::Inline, // Inline mode
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        // Create a non-blockable rule (blockable=false)
+        let rule = SingleEventRule {
+            rule_id: "test-non-blockable".to_string(),
+            rule_name: "Test Non-Blockable Rule".to_string(),
+            event_type: 1,
+            severity: Severity::Medium,
+            description: Some("A non-blockable rule".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+            blockable: false, // Not blockable
+            action_type: Some(ActionType::Block), // Has action but not blockable
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        // Process event
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        // Verify alert was generated
+        assert_eq!(alerts.len(), 1);
+
+        // Verify NO action was executed (rule not blockable)
+        let stats = engine.stats().await;
+        assert_eq!(stats.actions_generated, 0);
+        assert_eq!(stats.alerts_generated, 1);
+    }
+
+    #[tokio::test]
+    async fn test_action_type_kill() {
+        use kestrel_event::Event;
+        use kestrel_core::{NoOpExecutor, ActionType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            mode: EngineMode::Inline,
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            mode: EngineMode::Inline,
+            action_executor: Some(Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>),
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        // Create a blockable rule with Kill action
+        let rule = SingleEventRule {
+            rule_id: "test-kill-rule".to_string(),
+            rule_name: "Test Kill Rule".to_string(),
+            event_type: 1,
+            severity: Severity::Critical,
+            description: Some("A kill rule for critical threats".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+            blockable: true,
+            action_type: Some(ActionType::Kill),
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        // Process event
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        // Verify alert was generated
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].severity, Severity::Critical);
+
+        // Verify Kill action was executed
+        let stats = engine.stats().await;
+        assert_eq!(stats.actions_generated, 1);
+    }
 }
