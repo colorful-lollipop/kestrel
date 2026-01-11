@@ -3,18 +3,18 @@
 //! The EventBus is responsible for transporting events from sources to detection workers.
 //! It supports batching, backpressure, and partitioning.
 
-use crate::{BackpressureConfig, Metrics};
-use kestrel_event::{Event, EventBuilder};
-use std::sync::atomic::{AtomicU64, Ordering};
+use crate::BackpressureConfig;
+use kestrel_event::Event;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info};
 
 /// Event bus configuration
 #[derive(Debug, Clone)]
 pub struct EventBusConfig {
-    /// Channel buffer size
+    /// Channel buffer size per partition
     pub channel_size: usize,
 
     /// Batch size for worker delivery
@@ -25,6 +25,9 @@ pub struct EventBusConfig {
 
     /// Backpressure configuration
     pub backpressure: BackpressureConfig,
+
+    /// Enable event type based partitioning
+    pub partition_by_event_type: bool,
 }
 
 impl Default for EventBusConfig {
@@ -34,6 +37,7 @@ impl Default for EventBusConfig {
             batch_size: 100,
             partitions: 4,
             backpressure: BackpressureConfig::default(),
+            partition_by_event_type: false,
         }
     }
 }
@@ -41,34 +45,95 @@ impl Default for EventBusConfig {
 /// Handle for publishing events to the bus
 #[derive(Debug, Clone)]
 pub struct EventBusHandle {
-    sender: mpsc::Sender<Event>,
+    senders: Arc<Vec<mpsc::Sender<Event>>>,
+    partition_count: usize,
     metrics: Arc<EventBusMetrics>,
+    backpressure_config: BackpressureConfig,
 }
 
 impl EventBusHandle {
+    /// Get partition index for an event
+    fn get_partition(&self, event: &Event) -> usize {
+        if self.partition_count == 1 {
+            return 0;
+        }
+        let key = event.entity_key;
+        (key % self.partition_count as u128) as usize
+    }
+
     /// Publish a single event
     pub async fn publish(&self, event: Event) -> Result<(), PublishError> {
-        self.sender
-            .send(event)
-            .await
-            .map_err(|_| PublishError::Closed)?;
+        let partition = self.get_partition(&event);
+        let sender = &self.senders[partition];
+
+        match sender.send(event).await {
+            Ok(()) => {
+                self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
+            Err(_) => {
+                self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
+                Err(PublishError::Closed)
+            }
+        }
+    }
+
+    /// Publish with backpressure - blocks until there's capacity
+    pub async fn publish_with_backpressure(&self, event: Event) -> Result<(), PublishError> {
+        let partition = self.get_partition(&event);
+
+        let sender = &self.senders[partition];
+        if sender.capacity() == 0 {
+            self.metrics
+                .backpressure_count
+                .fetch_add(1, Ordering::Relaxed);
+
+            let timeout_duration = Duration::from_millis(
+                self.backpressure_config.backpressure_timeout.as_millis() as u64,
+            );
+            match timeout(timeout_duration, sender.reserve()).await {
+                Ok(Ok(permit)) => {
+                    permit.send(event);
+                    self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                    return Ok(());
+                }
+                _ => return Err(PublishError::BackpressureTimeout),
+            }
+        }
+
+        sender.send(event).await.map_err(|_| PublishError::Closed)?;
         self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
     /// Try to publish without blocking
     pub fn try_publish(&self, event: Event) -> Result<(), PublishError> {
-        self.sender.try_send(event).map_err(|e| match e {
-            mpsc::error::TrySendError::Full(_) => PublishError::Full,
-            mpsc::error::TrySendError::Closed(_) => PublishError::Closed,
-        })?;
-        self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
-        Ok(())
+        let partition = self.get_partition(&event);
+        let sender = &self.senders[partition];
+
+        match sender.try_send(event) {
+            Ok(()) => {
+                self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
+            Err(e) => {
+                self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
+                match e {
+                    mpsc::error::TrySendError::Full(_) => Err(PublishError::Full),
+                    mpsc::error::TrySendError::Closed(_) => Err(PublishError::Closed),
+                }
+            }
+        }
     }
 
     /// Get current metrics snapshot
     pub fn metrics(&self) -> EventBusMetricsSnapshot {
         self.metrics.snapshot()
+    }
+
+    /// Get number of partitions
+    pub fn partition_count(&self) -> usize {
+        self.partition_count
     }
 }
 
@@ -76,40 +141,67 @@ impl EventBusHandle {
 pub struct EventBus {
     _handles: Vec<tokio::task::JoinHandle<()>>,
     handle: EventBusHandle,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl EventBus {
     /// Create a new event bus with the given configuration
     pub fn new(config: EventBusConfig) -> Self {
         let metrics = Arc::new(EventBusMetrics::default());
-        let (sender, receiver) = mpsc::channel(config.channel_size);
+        let partition_count = config.partitions.max(1);
+
+        let mut senders = Vec::with_capacity(partition_count);
+        let mut receivers = Vec::with_capacity(partition_count);
+
+        for _ in 0..partition_count {
+            let (sender, receiver) = mpsc::channel(config.channel_size);
+            senders.push(sender);
+            receivers.push(receiver);
+        }
+
+        let senders = Arc::new(senders);
 
         let handle = EventBusHandle {
-            sender,
+            senders: senders.clone(),
+            partition_count,
             metrics: metrics.clone(),
+            backpressure_config: config.backpressure.clone(),
         };
 
         let mut handles = Vec::new();
+        let shutdown = Arc::new(AtomicBool::new(false));
 
-        // Create a single worker that processes events from the receiver
-        // TODO: In the future, create multiple workers with proper partitioning
-        let metrics_clone = metrics.clone();
-        let handle_task = tokio::spawn(async move {
-            Self::worker_partition(
-                0,
-                receiver,
-                mpsc::channel(config.batch_size).0, // Dummy channel for now
-                config.batch_size,
-                metrics_clone,
-            )
-            .await;
-        });
+        for partition_id in 0..partition_count {
+            let receiver = receivers.remove(0);
+            let metrics_clone = metrics.clone();
+            let shutdown_clone = shutdown.clone();
 
-        handles.push(handle_task);
+            let handle_task = tokio::spawn(async move {
+                Self::worker_partition(
+                    partition_id,
+                    receiver,
+                    mpsc::channel(config.batch_size).0,
+                    config.batch_size,
+                    metrics_clone,
+                    shutdown_clone,
+                )
+                .await;
+            });
+
+            handles.push(handle_task);
+        }
+
+        info!(
+            partitions = partition_count,
+            batch_size = config.batch_size,
+            channel_size = config.channel_size,
+            "EventBus initialized with multiple workers"
+        );
 
         Self {
             _handles: handles,
             handle,
+            shutdown,
         }
     }
 
@@ -125,31 +217,61 @@ impl EventBus {
         worker_tx: mpsc::Sender<Vec<Event>>,
         batch_size: usize,
         metrics: Arc<EventBusMetrics>,
+        shutdown: Arc<AtomicBool>,
     ) {
         let mut batch = Vec::with_capacity(batch_size);
 
         loop {
+            if shutdown.load(Ordering::Relaxed) {
+                debug!(partition = partition_id, "Shutdown signal received");
+                break;
+            }
+
             tokio::select! {
                 result = receiver.recv_many(&mut batch, batch_size) => {
                     match result {
                         0 => break, // Channel closed
-                        _ => {
+                        count if count > 0 => {
                             debug!(
                                 partition = partition_id,
-                                batch_size = batch.len(),
+                                batch_size = count,
                                 "Processing batch"
                             );
 
-                            // Process batch (for now, just count)
-                            metrics.events_processed.fetch_add(batch.len() as u64, Ordering::Relaxed);
+                            if let Err(e) = worker_tx.send(batch.clone()).await {
+                                error!(
+                                    partition = partition_id,
+                                    error = %e,
+                                    "Failed to deliver batch"
+                                );
+                            }
+
+                            metrics.events_processed.fetch_add(count as u64, Ordering::Relaxed);
                             batch.clear();
                         }
+                        _ => {}
                     }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    // Periodic check for shutdown
                 }
             }
         }
 
+        if !batch.is_empty() {
+            let _ = worker_tx.send(batch.clone()).await;
+            metrics
+                .events_processed
+                .fetch_add(batch.len() as u64, Ordering::Relaxed);
+        }
+
         debug!(partition = partition_id, "Worker partition shutting down");
+    }
+}
+
+impl Drop for EventBus {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
     }
 }
 
@@ -215,7 +337,6 @@ mod tests {
 
         handle.publish(event).await.unwrap();
 
-        // Give time for processing
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metrics = handle.metrics();
@@ -244,10 +365,37 @@ mod tests {
             handle.publish(event).await.unwrap();
         }
 
-        // Give time for processing
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metrics = handle.metrics();
         assert_eq!(metrics.events_received, 20);
+    }
+
+    #[tokio::test]
+    async fn test_event_bus_partitioning() {
+        let config = EventBusConfig {
+            partitions: 4,
+            ..Default::default()
+        };
+        let bus = EventBus::new(config);
+        let handle = bus.handle();
+
+        assert_eq!(handle.partition_count(), 4);
+
+        for i in 0..10 {
+            let event = Event::builder()
+                .event_type(1)
+                .ts_mono(i)
+                .ts_wall(i)
+                .entity_key(i as u128)
+                .build()
+                .unwrap();
+            handle.publish(event).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metrics = handle.metrics();
+        assert_eq!(metrics.events_received, 10);
     }
 }

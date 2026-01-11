@@ -5,7 +5,6 @@
 
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -33,6 +32,8 @@ pub struct SchemaRegistry {
     field_paths: Arc<AHashMap<String, FieldId>>,
     /// Event type definitions
     event_types: Arc<AHashMap<EventTypeId, EventTypeDef>>,
+    /// Event type name to ID mapping
+    event_type_names: Arc<AHashMap<String, EventTypeId>>,
     /// Next available field ID
     next_field_id: FieldId,
     /// Next available event type ID
@@ -52,6 +53,7 @@ impl SchemaRegistry {
             fields: Arc::new(AHashMap::default()),
             field_paths: Arc::new(AHashMap::default()),
             event_types: Arc::new(AHashMap::default()),
+            event_type_names: Arc::new(AHashMap::default()),
             next_field_id: 1,
             next_event_type_id: 1,
         }
@@ -80,7 +82,7 @@ impl SchemaRegistry {
 
     /// Register an event type definition
     pub fn register_event_type(&mut self, def: EventTypeDef) -> Result<EventTypeId, SchemaError> {
-        if self.event_types.values().any(|t| t.name == def.name) {
+        if self.event_type_names.contains_key(&def.name) {
             return Err(SchemaError::EventTypeAlreadyExists(def.name));
         }
 
@@ -88,11 +90,20 @@ impl SchemaRegistry {
         self.next_event_type_id += 1;
 
         let mut types = (*self.event_types).clone();
-        types.insert(id, def);
+        types.insert(id, def.clone());
+
+        let mut names = (*self.event_type_names).clone();
+        names.insert(def.name.clone(), id);
 
         self.event_types = Arc::new(types);
+        self.event_type_names = Arc::new(names);
 
         Ok(id)
+    }
+
+    /// Get event type ID by name
+    pub fn get_event_type_id(&self, name: &str) -> Option<EventTypeId> {
+        self.event_type_names.get(name).copied()
     }
 
     /// Get field definition by ID
@@ -184,7 +195,6 @@ impl serde::Serialize for TypedValue {
     where
         S: serde::Serializer,
     {
-        use serde::Serialize;
         match self {
             TypedValue::I64(v) => serializer.serialize_newtype_variant("TypedValue", 0, "I64", v),
             TypedValue::U64(v) => serializer.serialize_newtype_variant("TypedValue", 1, "U64", v),

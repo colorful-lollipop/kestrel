@@ -1,19 +1,21 @@
 //! Kestrel Detection Engine
 //!
 //! This is the core detection engine that coordinates event processing,
-//! rule evaluation, and alert generation.
+// //! rule evaluation, and alert generation.
 
 use kestrel_core::{
     Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, Severity,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
-use kestrel_rules::RuleManager;
+use kestrel_rules::{Rule, RuleDefinition, RuleManager, Severity as RuleSeverity};
 use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "wasm")]
+use kestrel_eql::{EqlCompiler, IrRuleType};
 #[cfg(feature = "wasm")]
 use kestrel_runtime_wasm::{WasmConfig, WasmEngine};
 
@@ -50,6 +52,43 @@ impl Default for EngineConfig {
     }
 }
 
+/// Single-event rule with compiled predicate
+#[derive(Debug, Clone)]
+pub struct SingleEventRule {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub event_type: u16,
+    pub severity: Severity,
+    pub description: Option<String>,
+    pub predicate: CompiledPredicate,
+}
+
+#[derive(Debug, Clone)]
+pub enum CompiledPredicate {
+    #[cfg(feature = "wasm")]
+    Wasm {
+        wasm_bytes: Vec<u8>,
+        required_fields: Vec<u32>,
+    },
+    #[cfg(feature = "lua")]
+    Lua {
+        script: String,
+        required_fields: Vec<u32>,
+    },
+    AlwaysMatch,
+}
+
+/// Convert RuleSeverity to Severity
+fn rule_severity_to_severity(severity: RuleSeverity) -> Severity {
+    match severity {
+        RuleSeverity::Informational => Severity::Informational,
+        RuleSeverity::Low => Severity::Low,
+        RuleSeverity::Medium => Severity::Medium,
+        RuleSeverity::High => Severity::High,
+        RuleSeverity::Critical => Severity::Critical,
+    }
+}
+
 /// Detection engine
 pub struct DetectionEngine {
     _event_bus: EventBus,
@@ -60,8 +99,14 @@ pub struct DetectionEngine {
     #[cfg(feature = "wasm")]
     wasm_engine: Option<Arc<WasmEngine>>,
 
+    #[cfg(feature = "wasm")]
+    eql_compiler: std::sync::Mutex<Option<EqlCompiler>>,
+
     /// NFA engine for sequence detection
     nfa_engine: Option<NfaEngine>,
+
+    /// Compiled single-event rules
+    single_event_rules: Arc<tokio::sync::RwLock<Vec<SingleEventRule>>>,
 
     /// Alert counter (atomic for thread safety)
     alerts_generated: Arc<std::sync::atomic::AtomicU64>,
@@ -86,8 +131,8 @@ impl DetectionEngine {
 
         // Initialize rule manager
         let rule_config = kestrel_rules::RuleManagerConfig {
-            rules_dir: config.rules_dir,
-            watch_enabled: false, // TODO: implement hot-reload
+            rules_dir: config.rules_dir.clone(),
+            watch_enabled: false,
             max_concurrent_loads: 4,
         };
 
@@ -96,6 +141,17 @@ impl DetectionEngine {
         // Load initial rules
         let stats = rule_manager.load_all().await?;
         info!(loaded = stats.loaded, failed = stats.failed, "Rules loaded");
+
+        // Initialize EQL compiler if Wasm is enabled
+        #[cfg(feature = "wasm")]
+        let eql_compiler = std::sync::Mutex::new(if config.wasm_config.is_some() {
+            Some(EqlCompiler::new(schema.clone()))
+        } else {
+            None
+        });
+
+        #[cfg(not(feature = "wasm"))]
+        let eql_compiler = std::sync::Mutex::new(None);
 
         // Initialize Wasm engine if configured
         #[cfg(feature = "wasm")]
@@ -134,6 +190,8 @@ impl DetectionEngine {
             None
         };
 
+        let single_event_rules = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+
         Ok(Self {
             _event_bus: event_bus,
             _alert_output: alert_output,
@@ -143,7 +201,11 @@ impl DetectionEngine {
             #[cfg(feature = "wasm")]
             wasm_engine,
 
+            #[cfg(feature = "wasm")]
+            eql_compiler,
+
             nfa_engine,
+            single_event_rules,
             alerts_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
@@ -153,6 +215,112 @@ impl DetectionEngine {
         &self.rule_manager
     }
 
+    /// Compile and register a single-event rule
+    #[cfg(feature = "wasm")]
+    pub async fn compile_single_event_rule(&self, rule: &Rule) -> Result<(), EngineError> {
+        let mut compiler_guard = self
+            .eql_compiler
+            .lock()
+            .map_err(|e| EngineError::WasmRuntimeError(format!("Mutex lock error: {}", e)))?;
+
+        let compiler = match &mut *compiler_guard {
+            Some(c) => c,
+            None => {
+                return Err(EngineError::WasmRuntimeError(
+                    "EQL compiler not initialized".to_string(),
+                ))
+            }
+        };
+
+        let wasm_engine = match &self.wasm_engine {
+            Some(e) => e,
+            None => {
+                return Err(EngineError::WasmRuntimeError(
+                    "Wasm engine not initialized".to_string(),
+                ))
+            }
+        };
+
+        let definition = match &rule.definition {
+            RuleDefinition::Eql(eql) => eql.clone(),
+            RuleDefinition::Wasm(_) => return Ok(()),
+            RuleDefinition::Lua(_) => return Ok(()),
+        };
+
+        let ir = compiler
+            .compile_to_ir(&definition)
+            .map_err(|e| EngineError::WasmRuntimeError(format!("EQL compilation error: {}", e)))?;
+
+        match &ir.rule_type {
+            IrRuleType::Event { event_type } => {
+                let event_type_id = self.schema.get_event_type_id(event_type).ok_or_else(|| {
+                    EngineError::WasmRuntimeError(format!(
+                        "Event type '{}' not registered in schema",
+                        event_type
+                    ))
+                })?;
+
+                let predicate = ir.predicates.get("main").ok_or_else(|| {
+                    EngineError::WasmRuntimeError("No main predicate found".to_string())
+                })?;
+
+                let required_fields: Vec<u32> = predicate.required_fields.clone();
+
+                let wasm_bytes = compiler.compile_to_wasm(&definition).map_err(|e| {
+                    EngineError::WasmRuntimeError(format!("Wasm compilation error: {}", e))
+                })?;
+
+                let wasm_bytes = wat::parse_str(&wasm_bytes).map_err(|e| {
+                    EngineError::WasmRuntimeError(format!("WAT parsing error: {}", e))
+                })?;
+
+                let single_rule = SingleEventRule {
+                    rule_id: rule.metadata.id.clone(),
+                    rule_name: rule.metadata.name.clone(),
+                    event_type: event_type_id,
+                    severity: rule_severity_to_severity(rule.metadata.severity),
+                    description: rule.metadata.description.clone(),
+                    predicate: CompiledPredicate::Wasm {
+                        wasm_bytes,
+                        required_fields,
+                    },
+                };
+
+                let mut rules = self.single_event_rules.write().await;
+                rules.push(single_rule);
+                info!(rule_id = %rule.metadata.id, "Compiled single-event rule");
+            }
+            IrRuleType::Sequence { .. } => {
+                info!(rule_id = %rule.metadata.id, "Skipping sequence rule (handled by NFA engine)");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    pub async fn compile_single_event_rule(&self, _rule: &Rule) -> Result<(), EngineError> {
+        Ok(())
+    }
+
+    /// Compile all loaded rules into single-event and sequence rules
+    pub async fn compile_rules(&self) -> Result<(), EngineError> {
+        info!("Compiling rules");
+
+        let rule_ids = self.rule_manager.list_rules().await;
+
+        for rule_id in rule_ids {
+            if let Some(rule) = self.rule_manager.get_rule(&rule_id).await {
+                self.compile_single_event_rule(&rule).await?;
+            }
+        }
+
+        let count = self.single_event_rules.read().await.len();
+        info!(count, "Single-event rules compiled");
+
+        Ok(())
+    }
+
     /// Get engine statistics
     pub async fn stats(&self) -> EngineStats {
         let rule_count = self.rule_manager.rule_count().await;
@@ -160,8 +328,11 @@ impl DetectionEngine {
             .alerts_generated
             .load(std::sync::atomic::Ordering::Relaxed);
 
+        let single_event_rule_count = self.single_event_rules.read().await.len();
+
         EngineStats {
             rule_count,
+            single_event_rule_count,
             alerts_generated,
         }
     }
@@ -206,7 +377,7 @@ impl DetectionEngine {
                             id: alert_id,
                             rule_id: seq_alert.rule_id.clone(),
                             rule_name: seq_alert.rule_name.clone(),
-                            severity: Severity::High, // TODO: Get from rule
+                            severity: Severity::High,
                             title: format!("Sequence matched: {}", seq_alert.sequence_id),
                             description: Some(format!(
                                 "Entity {} completed sequence {}",
@@ -229,13 +400,79 @@ impl DetectionEngine {
             }
         }
 
-        // TODO: Evaluate single-event rules
-        // This would involve:
-        // 1. Getting all single-event rules from RuleManager
-        // 2. Evaluating predicates against the event
-        // 3. Generating alerts for matches
+        // Evaluate single-event rules
+        #[cfg(feature = "wasm")]
+        {
+            let rules = self.single_event_rules.read().await;
+            let wasm_engine = match &self.wasm_engine {
+                Some(e) => e,
+                None => return Ok(alerts),
+            };
+
+            for single_rule in rules.iter() {
+                // Check if event type matches
+                if single_rule.event_type != event.event_type_id {
+                    continue;
+                }
+
+                // Evaluate predicate
+                let matched = match &single_rule.predicate {
+                    CompiledPredicate::Wasm {
+                        wasm_bytes,
+                        required_fields,
+                    } => {
+                        self.eval_wasm_predicate(wasm_engine, wasm_bytes, event)
+                            .await?
+                    }
+                    CompiledPredicate::AlwaysMatch => true,
+                    #[cfg(feature = "wasm")]
+                    CompiledPredicate::Lua { .. } => false,
+                    #[cfg(not(feature = "wasm"))]
+                    CompiledPredicate::Lua { .. } => false,
+                };
+
+                if matched {
+                    let alert_id = format!("{}-{}", single_rule.rule_id, event.ts_mono_ns);
+
+                    let alert = Alert {
+                        id: alert_id,
+                        rule_id: single_rule.rule_id.clone(),
+                        rule_name: single_rule.rule_name.clone(),
+                        severity: single_rule.severity,
+                        title: format!("Single-event rule matched: {}", single_rule.rule_name),
+                        description: single_rule.description.clone(),
+                        timestamp_ns: event.ts_mono_ns,
+                        events: vec![EventEvidence {
+                            event_type_id: event.event_type_id,
+                            timestamp_ns: event.ts_mono_ns,
+                            fields: vec![],
+                        }],
+                        context: serde_json::json!({
+                            "rule_type": "single_event",
+                        }),
+                    };
+                    alerts.push(alert);
+
+                    self.alerts_generated
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
 
         Ok(alerts)
+    }
+
+    #[cfg(feature = "wasm")]
+    async fn eval_wasm_predicate(
+        &self,
+        wasm_engine: &WasmEngine,
+        wasm_bytes: &[u8],
+        event: &Event,
+    ) -> Result<bool, EngineError> {
+        wasm_engine
+            .eval_adhoc_predicate(wasm_bytes, event)
+            .await
+            .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))
     }
 
     /// Load a compiled sequence into the NFA engine
@@ -253,6 +490,7 @@ impl DetectionEngine {
 #[derive(Debug, Clone)]
 pub struct EngineStats {
     pub rule_count: usize,
+    pub single_event_rule_count: usize,
     pub alerts_generated: u64,
 }
 
@@ -278,6 +516,7 @@ pub enum EngineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_event::Event;
 
     #[tokio::test]
     async fn test_engine_create() {
@@ -296,5 +535,215 @@ mod tests {
         let engine = engine.unwrap();
         let stats = engine.stats().await;
         assert_eq!(stats.rule_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_single_event_rule_always_match() {
+        let rule = SingleEventRule {
+            rule_id: "test-always-match".to_string(),
+            rule_name: "Test Always Match".to_string(),
+            event_type: 1,
+            severity: Severity::Medium,
+            description: Some("A test rule that always matches".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        assert_eq!(rule.rule_id, "test-always-match");
+        assert_eq!(rule.event_type, 1);
+    }
+
+    #[tokio::test]
+    async fn test_stats_includes_single_event_rules() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        let config = EngineConfig {
+            rules_dir,
+            ..Default::default()
+        };
+
+        let engine = DetectionEngine::new(config).await.unwrap();
+        let stats = engine.stats().await;
+
+        assert_eq!(stats.rule_count, 0);
+        assert_eq!(stats.single_event_rule_count, 0);
+        assert_eq!(stats.alerts_generated, 0);
+    }
+
+    #[tokio::test]
+    async fn test_single_event_rule_eval_always_match() {
+        use kestrel_event::Event;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        let rule = SingleEventRule {
+            rule_id: "test-always-match-rule".to_string(),
+            rule_name: "Test Always Match Rule".to_string(),
+            event_type: 1,
+            severity: Severity::Medium,
+            description: Some("A test rule that always matches".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].rule_id, "test-always-match-rule");
+        assert_eq!(alerts[0].severity, Severity::Medium);
+    }
+
+    #[tokio::test]
+    async fn test_single_event_rule_no_match_different_event_type() {
+        use kestrel_event::Event;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        let rule = SingleEventRule {
+            rule_id: "test-type-match-rule".to_string(),
+            rule_name: "Test Type Match Rule".to_string(),
+            event_type: 99,
+            severity: Severity::High,
+            description: Some("A test rule for event type 99".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        assert_eq!(alerts.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_eval_event_multiple_single_event_rules() {
+        use kestrel_event::Event;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rules_dir = temp_dir.path().join("rules");
+        std::fs::create_dir(&rules_dir).unwrap();
+
+        #[cfg(feature = "wasm")]
+        let config = EngineConfig {
+            rules_dir,
+            wasm_config: Some(kestrel_runtime_wasm::WasmConfig::default()),
+            ..Default::default()
+        };
+
+        #[cfg(not(feature = "wasm"))]
+        let config = EngineConfig {
+            rules_dir,
+            ..Default::default()
+        };
+
+        let mut engine = DetectionEngine::new(config).await.unwrap();
+
+        let rule1 = SingleEventRule {
+            rule_id: "test-rule-1".to_string(),
+            rule_name: "Test Rule 1".to_string(),
+            event_type: 1,
+            severity: Severity::Low,
+            description: Some("First test rule".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        let rule2 = SingleEventRule {
+            rule_id: "test-rule-2".to_string(),
+            rule_name: "Test Rule 2".to_string(),
+            event_type: 1,
+            severity: Severity::High,
+            description: Some("Second test rule".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        let rule3 = SingleEventRule {
+            rule_id: "test-rule-3".to_string(),
+            rule_name: "Test Rule 3".to_string(),
+            event_type: 2,
+            severity: Severity::Critical,
+            description: Some("Third test rule (different event type)".to_string()),
+            predicate: CompiledPredicate::AlwaysMatch,
+        };
+
+        {
+            let mut rules = engine.single_event_rules.write().await;
+            rules.push(rule1);
+            rules.push(rule2);
+            rules.push(rule3);
+        }
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1234567890)
+            .ts_wall(1234567890)
+            .entity_key(42)
+            .build()
+            .unwrap();
+
+        let alerts = engine.eval_event(&event).await.unwrap();
+
+        assert_eq!(alerts.len(), 2);
+        let rule_ids: Vec<&str> = alerts.iter().map(|a| a.rule_id.as_str()).collect();
+        assert!(rule_ids.contains(&"test-rule-1"));
+        assert!(rule_ids.contains(&"test-rule-2"));
+        assert!(!rule_ids.contains(&"test-rule-3"));
     }
 }

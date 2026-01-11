@@ -50,23 +50,26 @@ impl Event {
         }
     }
 
-    /// Add a field to the event
+    /// Add a field to the event (inserts in sorted order for binary search)
     pub fn with_field(mut self, field_id: FieldId, value: TypedValue) -> Self {
-        self.fields.push((field_id, value));
+        let pos = self.fields.partition_point(|(id, _)| *id < field_id);
+        self.fields.insert(pos, (field_id, value));
         self
     }
 
-    /// Get a field value by field ID
+    /// Get a field value by field ID using binary search (O(log n))
     pub fn get_field(&self, field_id: FieldId) -> Option<&TypedValue> {
         self.fields
-            .iter()
-            .find(|(id, _)| *id == field_id)
-            .map(|(_, v)| v)
+            .binary_search_by_key(&field_id, |(id, _)| *id)
+            .ok()
+            .map(|idx| &self.fields[idx].1)
     }
 
-    /// Check if event has a specific field
+    /// Check if event has a specific field using binary search (O(log n))
     pub fn has_field(&self, field_id: FieldId) -> bool {
-        self.fields.iter().any(|(id, _)| *id == field_id)
+        self.fields
+            .binary_search_by_key(&field_id, |(id, _)| *id)
+            .is_ok()
     }
 
     /// Set source identifier
@@ -136,8 +139,10 @@ impl EventBuilder {
         self
     }
 
-    /// Build the event
+    /// Build the event (sorts fields for binary search optimization)
     pub fn build(self) -> Result<Event, BuildError> {
+        let mut fields = self.fields;
+        fields.sort_by_key(|(id, _)| *id);
         Ok(Event {
             event_id: self.event_id.unwrap_or(0),
             event_type_id: self
@@ -152,7 +157,7 @@ impl EventBuilder {
             entity_key: self
                 .entity_key
                 .ok_or(BuildError::MissingField("entity_key"))?,
-            fields: self.fields,
+            fields,
             source_id: self.source_id,
         })
     }
@@ -213,6 +218,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(event.source_id.as_ref().map(|s| s.as_str()), Some("ebpf"));
+    }
+
+    #[test]
+    fn test_event_fields_sorted_for_binary_search() {
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(0)
+            .ts_wall(0)
+            .entity_key(0)
+            .field(5, TypedValue::I64(50))
+            .field(1, TypedValue::I64(10))
+            .field(3, TypedValue::I64(30))
+            .field(2, TypedValue::I64(20))
+            .field(4, TypedValue::I64(40))
+            .build()
+            .unwrap();
+
+        let ids: Vec<FieldId> = event.fields.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec![1, 2, 3, 4, 5]);
+
+        assert_eq!(event.get_field(1).unwrap().as_i64(), Some(10));
+        assert_eq!(event.get_field(3).unwrap().as_i64(), Some(30));
+        assert_eq!(event.get_field(5).unwrap().as_i64(), Some(50));
+        assert_eq!(event.get_field(99), None);
+
+        assert!(event.has_field(1));
+        assert!(event.has_field(5));
+        assert!(!event.has_field(99));
+    }
+
+    #[test]
+    fn test_event_with_field_maintains_sort_order() {
+        let event = Event::new(1, 0, 0, 0)
+            .with_field(3, TypedValue::String("third".into()))
+            .with_field(1, TypedValue::String("first".into()))
+            .with_field(5, TypedValue::String("fifth".into()))
+            .with_field(2, TypedValue::String("second".into()))
+            .with_field(4, TypedValue::String("fourth".into()));
+
+        let ids: Vec<FieldId> = event.fields.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec![1, 2, 3, 4, 5]);
     }
 }
 

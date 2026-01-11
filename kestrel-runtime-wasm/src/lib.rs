@@ -100,16 +100,16 @@ impl Default for WasmConfig {
 /// - pred_capture(event_handle, ctx) -> captures_ptr (optional)
 
 pub struct WasmEngine {
-    engine: Engine,
-    linker: Linker<WasmContext>,
-    config: WasmConfig,
-    schema: Arc<SchemaRegistry>,
-    modules: Arc<RwLock<HashMap<String, CompiledModule>>>,
-    instance_pool: Arc<RwLock<HashMap<String, InstancePool>>>,
-    regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
-    glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
-    next_regex_id: Arc<std::sync::atomic::AtomicU32>,
-    next_glob_id: Arc<std::sync::atomic::AtomicU32>,
+    pub engine: Engine,
+    pub linker: Linker<WasmContext>,
+    pub config: WasmConfig,
+    pub schema: Arc<SchemaRegistry>,
+    pub modules: Arc<RwLock<HashMap<String, CompiledModule>>>,
+    pub instance_pool: Arc<RwLock<HashMap<String, InstancePool>>>,
+    pub regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
+    pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+    pub next_regex_id: Arc<std::sync::atomic::AtomicU32>,
+    pub next_glob_id: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// Compiled Wasm module with metadata
@@ -164,12 +164,12 @@ struct PooledInstance {
 
 /// Wasm context (per-store)
 #[derive(Clone)]
-struct WasmContext {
-    event: Option<Event>,
-    schema: Arc<SchemaRegistry>,
-    alerts: Arc<std::sync::Mutex<Vec<AlertRecord>>>,
-    regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
-    glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+pub struct WasmContext {
+    pub event: Option<Event>,
+    pub schema: Arc<SchemaRegistry>,
+    pub alerts: Arc<std::sync::Mutex<Vec<AlertRecord>>>,
+    pub regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
+    pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
 }
 
 /// Wasm predicate
@@ -507,21 +507,16 @@ impl WasmEngine {
 
         info!(rule_id = %rule_id, "Loading Wasm module");
 
-        // Compile the module
         let module = Module::from_binary(&self.engine, &wasm_bytes)
             .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
 
-        // Pre-instantiate for pooling
         let instance_pre = self
             .instance_pre(&module)
             .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
 
-        // AOT cache if enabled
         if self.config.enable_aot_cache {
             if let Some(ref cache_dir) = self.config.aot_cache_dir {
                 let _cache_path = cache_dir.join(format!("{}.cwasm", rule_id));
-                // Serialize compiled module for future use
-                // (Wasmtime doesn't directly support this yet, but we could cache the original bytes)
             }
         }
 
@@ -531,7 +526,6 @@ impl WasmEngine {
             metadata: manifest.metadata,
         };
 
-        // Initialize instance pool
         let pool = InstancePool {
             instances: Vec::with_capacity(self.config.pool_size),
             semaphore: Arc::new(Semaphore::new(self.config.pool_size)),
@@ -545,6 +539,42 @@ impl WasmEngine {
 
         info!(rule_id = %rule_id, "Wasm module loaded successfully");
         Ok(rule_id)
+    }
+
+    /// Compile and run an ad-hoc Wasm predicate
+    pub async fn eval_adhoc_predicate(
+        &self,
+        wasm_bytes: &[u8],
+        event: &Event,
+    ) -> Result<bool, WasmRuntimeError> {
+        use wasmtime::{Instance, Module, Store};
+
+        let module = Module::from_binary(&self.engine, wasm_bytes)
+            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+
+        let mut store = Store::new(
+            &self.engine,
+            WasmContext {
+                event: Some(event.clone()),
+                schema: self.schema.clone(),
+                alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                regex_cache: self.regex_cache.clone(),
+                glob_cache: self.glob_cache.clone(),
+            },
+        );
+
+        let instance = Instance::new(&mut store, &module, &[])
+            .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
+
+        let pred_eval = instance
+            .get_typed_func::<(), i32>(&mut store, "pred_eval")
+            .map_err(|_| WasmRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
+
+        let result = pred_eval
+            .call(&mut store, ())
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+
+        Ok(result == 1)
     }
 
     /// Create a predicate for a rule

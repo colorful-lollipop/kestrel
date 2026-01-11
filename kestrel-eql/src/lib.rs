@@ -13,4 +13,4 @@ pub mod semantic;
 // Re-exports
 pub use compiler::EqlCompiler;
 pub use error::{EqlError, Result};
-pub use ir::{IrLiteral, IrNode, IrRule, IrRuleType};
+pub use ir::{IrLiteral, IrNode, IrPredicate, IrRule, IrRuleType};

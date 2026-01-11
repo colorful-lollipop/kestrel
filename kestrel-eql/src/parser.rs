@@ -140,7 +140,7 @@ fn build_expr_from_where(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 
 fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let span = pair.as_span().as_str();
-    let mut inner = pair
+    let inner = pair
         .into_inner()
         .next()
         .ok_or_else(|| EqlError::syntax(span, "Expected expression"))?;
@@ -150,7 +150,7 @@ fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::and_expr => build_binary_op(inner),
         Rule::not_expr => build_unary_op(inner),
         Rule::comparison_expr => build_binary_op(inner),
-        Rule::arithmetic_expr => build_binary_op(inner), // Handle arithmetic expressions
+        Rule::arithmetic_expr => build_binary_op(inner),
         Rule::primary => build_primary_expr(inner),
         Rule::atom => build_primary_expr(inner),
         Rule::field_ref => Ok(Expr::FieldRef(inner.as_span().as_str().to_string())),
@@ -165,7 +165,7 @@ fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 
 fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let outer_span = pair.as_span().as_str();
-    let mut inner = pair
+    let inner = pair
         .into_inner()
         .next()
         .ok_or_else(|| EqlError::syntax(outer_span, "Expected primary expression"))?;
