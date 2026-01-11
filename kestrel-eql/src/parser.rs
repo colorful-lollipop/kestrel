@@ -2,8 +2,8 @@
 
 use crate::ast::*;
 use crate::error::{EqlError, Result};
-use pest_derive::Parser;
 use pest::Parser;
+use pest_derive::Parser;
 
 #[derive(Parser)]
 #[grammar = "eql.pest"]
@@ -15,9 +15,9 @@ pub fn parse(input: &str) -> Result<Query> {
         .map_err(|e| EqlError::syntax("input", &format!("{}", e)))?;
 
     let mut pairs_iter = pairs;
-    let pair = pairs_iter.next().ok_or_else(|| {
-        EqlError::syntax("root", "Expected query")
-    })?;
+    let pair = pairs_iter
+        .next()
+        .ok_or_else(|| EqlError::syntax("root", "Expected query"))?;
 
     match pair.as_rule() {
         Rule::query => {
@@ -31,10 +31,7 @@ pub fn parse(input: &str) -> Result<Query> {
                 )),
             }
         }
-        _ => Err(EqlError::syntax(
-            pair.as_span().as_str(),
-            "Expected query",
-        )),
+        _ => Err(EqlError::syntax(pair.as_span().as_str(), "Expected query")),
     }
 }
 
@@ -61,9 +58,9 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
 
     // Pest doesn't include literals like "sequence" and "by" in inner pairs
     // The first element is the field_ref for "by"
-    let by_field = inner.next().ok_or_else(|| {
-        EqlError::syntax("sequence_query", "Expected 'by' field reference")
-    })?;
+    let by_field = inner
+        .next()
+        .ok_or_else(|| EqlError::syntax("sequence_query", "Expected 'by' field reference"))?;
     let by = Some(by_field.as_str().to_string());
 
     // Parse sequence steps and optional clauses
@@ -110,9 +107,11 @@ fn build_sequence_step(pair: pest::iterators::Pair<Rule>) -> Result<SequenceStep
 
     // In Pest, literals like "[" and "]" are not included in inner pairs
     // The first element is the identifier (event type)
-    let event_type = inner.next().ok_or_else(|| {
-        EqlError::syntax("sequence_step", "Expected event type identifier")
-    })?.as_str().to_string();
+    let event_type = inner
+        .next()
+        .ok_or_else(|| EqlError::syntax("sequence_step", "Expected event type identifier"))?
+        .as_str()
+        .to_string();
 
     // Check for where clause (optional)
     let condition = if let Some(where_pair) = inner.next() {
@@ -132,7 +131,8 @@ fn build_expr_from_where(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let mut inner = pair.into_inner();
 
     // Find the expr child (skip the "where" keyword)
-    let expr_pair = inner.find(|p| p.as_rule() != Rule::where_clause)
+    let expr_pair = inner
+        .find(|p| p.as_rule() != Rule::where_clause)
         .ok_or_else(|| EqlError::syntax("where clause", "Expected expression after 'where'"))?;
 
     build_expr(expr_pair)
@@ -140,17 +140,20 @@ fn build_expr_from_where(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 
 fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let span = pair.as_span().as_str();
-    let mut inner = pair.into_inner().next().ok_or_else(|| {
-        EqlError::syntax(span, "Expected expression")
-    })?;
+    let mut inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| EqlError::syntax(span, "Expected expression"))?;
 
     match inner.as_rule() {
         Rule::or_expr => build_binary_op(inner),
         Rule::and_expr => build_binary_op(inner),
         Rule::not_expr => build_unary_op(inner),
         Rule::comparison_expr => build_binary_op(inner),
+        Rule::arithmetic_expr => build_binary_op(inner), // Handle arithmetic expressions
         Rule::primary => build_primary_expr(inner),
         Rule::atom => build_primary_expr(inner),
+        Rule::field_ref => Ok(Expr::FieldRef(inner.as_span().as_str().to_string())),
         Rule::function_call => build_function_call(inner),
         Rule::in_expr_atom => build_in_expr(inner),
         _ => Err(EqlError::syntax(
@@ -162,9 +165,10 @@ fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 
 fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let outer_span = pair.as_span().as_str();
-    let mut inner = pair.into_inner().next().ok_or_else(|| {
-        EqlError::syntax(outer_span, "Expected primary expression")
-    })?;
+    let mut inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| EqlError::syntax(outer_span, "Expected primary expression"))?;
 
     let span = inner.as_span().as_str();
 
@@ -179,22 +183,14 @@ fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         }
         Rule::string_literal => {
             // Remove quotes
-            let unescaped = &span[1..span.len()-1];
+            let unescaped = &span[1..span.len() - 1];
             Ok(Expr::StringLiteral(unescaped.to_string()))
         }
-        Rule::field_ref => {
-            Ok(Expr::FieldRef(span.to_string()))
-        }
-        Rule::function_call => {
-            build_function_call(inner)
-        }
-        Rule::in_expr_atom => {
-            build_in_expr(inner)
-        }
+        Rule::field_ref => Ok(Expr::FieldRef(span.to_string())),
+        Rule::function_call => build_function_call(inner),
+        Rule::in_expr_atom => build_in_expr(inner),
         Rule::atom => build_primary_expr(inner),
-        Rule::expr => {
-            build_expr(inner)
-        }
+        Rule::expr => build_expr(inner),
         Rule::comparison_expr => build_binary_op(inner),
         Rule::not_expr => build_unary_op(inner),
         Rule::and_expr => build_binary_op(inner),
@@ -266,7 +262,8 @@ fn build_binary_op(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 }
 
 fn parse_operator_from_str(s: &str) -> Result<BinaryOperator> {
-    match s {
+    let trimmed = s.trim();
+    match trimmed {
         "and" | "&&" => Ok(BinaryOperator::And),
         "or" | "||" => Ok(BinaryOperator::Or),
         "==" => Ok(BinaryOperator::Eq),
@@ -308,24 +305,21 @@ fn build_unary_op(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 fn build_duration(pair: pest::iterators::Pair<Rule>) -> Result<Duration> {
     let text = pair.as_str();
 
-    // Extract numeric value
-    let mut char_iter = text.chars();
-    let mut value_str = String::new();
+    // Find the first non-digit position
+    let first_non_digit = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
 
-    for c in char_iter.by_ref() {
-        if c.is_ascii_digit() {
-            value_str.push(c);
-        } else {
-            break;
-        }
-    }
+    let value_str = &text[..first_non_digit];
+    let remaining = &text[first_non_digit..];
 
-    let value: u64 = value_str.parse().map_err(|_| {
-        EqlError::syntax(text, "Invalid duration value")
-    })?;
+    let value: u64 = value_str
+        .parse()
+        .map_err(|_| EqlError::syntax(text, "Invalid duration value"))?;
 
-    let remaining: String = char_iter.collect();
-    let unit = match remaining.as_str() {
+    let remaining = &text[first_non_digit..];
+
+    let unit = match remaining {
         "ms" => DurationUnit::Milliseconds,
         "s" => DurationUnit::Seconds,
         "m" => DurationUnit::Minutes,
