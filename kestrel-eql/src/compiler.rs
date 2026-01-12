@@ -3,7 +3,7 @@
 //! Compiles EQL queries to Wasm predicates.
 
 use crate::codegen_wasm::WasmCodeGenerator;
-use crate::error::{EqlError, Result};
+use crate::error::Result;
 use crate::ir::*;
 use crate::parser;
 use crate::semantic::SemanticAnalyzer;
@@ -63,6 +63,7 @@ impl EqlCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::EqlError;
 
     #[test]
     fn test_compile_simple_event() {

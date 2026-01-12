@@ -219,7 +219,7 @@ impl<'de> serde::Deserialize<'de> for TypedValue {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{VariantAccess, Visitor};
+        use serde::de::VariantAccess;
 
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]

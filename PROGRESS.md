@@ -1643,7 +1643,102 @@ The implementation correctly follows EQL maxspan semantics where the time window
 
 ---
 
+## NFA Engine Bug Fixes (2026-01-12)
+
+### Problem
+6 detection scenario tests were failing:
+- `test_c2_beaconing_pattern`
+- `test_process_injection_sequence`
+- `test_file_exfiltration_sequence`
+- `test_entity_isolation`
+- `test_multiple_sequences_different_entities`
+- `test_maxspan_enforcement`
+
+### Root Causes Identified
+
+#### 1. Duplicate Sequence IDs in Event Type Index
+When loading sequences with multiple steps of the same event type, the sequence ID was added multiple times to `event_type_index[event_type]`. This caused the NFA engine to process the same sequence 4-5 times for each event.
+
+**Fix**: Added HashSet deduplication in `load_sequence()`:
+```rust
+let mut event_types: std::collections::HashSet<u16> = std::collections::HashSet::new();
+for step in &compiled.sequence.steps {
+    if event_types.insert(step.event_type_id) {
+        self.event_type_index
+            .entry(step.event_type_id)
+            .or_insert_with(Vec::new)
+            .push(compiled.id.clone());
+    }
+}
+```
+
+#### 2. `get_expected_state()` Logic Error
+The function returned `max_state + 1` even when no partial match existed, causing the first event to look for state 1 instead of state 0.
+
+**Fix**: Track whether a partial match was found:
+```rust
+let mut found = false;
+for step in &sequence.steps {
+    if let Some(pm) = self.state_store.get(&sequence.id, entity_key, step.state_id) {
+        if !pm.terminated && pm.current_state >= max_state {
+            max_state = pm.current_state;
+            found = true;
+        }
+    }
+}
+if found {
+    Ok(max_state.saturating_add(1))
+} else {
+    Ok(0)
+}
+```
+
+#### 3. Test Data Error in `test_maxspan_enforcement`
+The test used 10 second gap (1_010_000_000 - 1_000_000_000 = 10_000_000) but maxspan was 5 seconds. The timestamps were wrong.
+
+**Fix**: Corrected timestamps to actually be 10 seconds apart:
+```rust
+let e2 = Event::builder()
+    .event_type(4002)
+    .ts_mono(11_000_000_000)  // 11 seconds (10 second gap > 5s maxspan)
+    .ts_wall(11_000_000_000)
+    .entity_key(entity)
+    ...
+```
+
+#### 4. Missing `ts_wall_ns` in E2E Tests
+Integration E2E tests were missing the required `ts_wall_ns` field in event construction.
+
+**Fix**: Added `.ts_wall()` to all events in:
+- `test_e2e_ransomware_detection`
+- `test_e2e_entity_isolation`
+
+### Test Results
+
+| Test Suite | Before | After |
+|------------|--------|-------|
+| detection_scenarios | 4/6 pass | 6/6 pass |
+| integration_e2e | 1/3 pass | 3/3 pass |
+| **Total workspace** | ~126/132 | **132/132** |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `kestrel-nfa/src/engine.rs` | Fixed `load_sequence()` deduplication, `get_expected_state()` logic |
+| `kestrel-engine/tests/detection_scenarios.rs` | Fixed `test_maxspan_enforcement` timestamps |
+| `kestrel-engine/tests/integration_e2e.rs` | Added `ts_wall_ns` to all events |
+
+### Code Quality
+
+- ✅ All 132 tests passing
+- ✅ `cargo clippy` clean (warnings are informational)
+- ✅ `cargo fmt` formatted
+
+---
+
 *Last Updated: 2026-01-12*
 *Repository: https://github.com/colorful-lollipop/kestrel*
-*All unit tests passing (130+)*
+*All unit tests passing (132/132)*
 *P0 Tasks: 100% Complete (8/8)*
+*NFA Engine Bug Fixes: 100% Complete (4/4)*

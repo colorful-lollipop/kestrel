@@ -4,21 +4,35 @@
 
 pub mod action;
 pub mod alert;
+pub mod deterministic;
 pub mod eventbus;
 pub mod replay;
+pub mod runtime_comparison;
 pub mod time;
 
 use std::time::Duration;
 
 pub use action::{
-    ActionCapabilities, ActionDecision, ActionError, ActionEvidence, ActionExecutor, ActionResult,
-    ActionTarget, ActionType, NoOpExecutor,
+    ActionAudit, ActionAuditLog, ActionCapabilities, ActionDecision, ActionError, ActionEvidence,
+    ActionExecutor, ActionPolicy, ActionResult, ActionTarget, ActionType, AlertActionExecutor,
+    BlockActionExecutor, CompositeActionExecutor, KillActionExecutor, NoOpExecutor,
+    QuarantineExecutor,
 };
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle};
 pub use replay::{BinaryLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
 pub use time::{MockTimeProvider, RealTimeProvider, TimeManager, TimeProvider};
+
+pub use deterministic::{
+    DeterministicResult, DeterministicTestRunner, DeterministicVerifier, ReplayVerificationReport,
+    ReplayVerificationResult, VerificationMismatch,
+};
+
+pub use runtime_comparison::{
+    ConsistencyBenchmarkResult, ConsistencyMismatch, ConsistencyResult, RuntimeBenchmark,
+    RuntimeComparisonError, RuntimeConsistencyChecker,
+};
 
 /// Configuration for backpressure handling
 #[derive(Debug, Clone)]

@@ -653,38 +653,25 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
         // Get the predicate
         let predicates = self.predicates.read().unwrap();
-        let predicate = predicates
-            .get(predicate_id)
-            .ok_or_else(|| {
-                kestrel_nfa::NfaError::PredicateError(format!(
-                    "Predicate not found: {}",
-                    predicate_id
-                ))
-            })?;
+        let predicate = predicates.get(predicate_id).ok_or_else(|| {
+            kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
+        })?;
 
         // Get the Lua state
         let lua = &self.lua;
 
         // Get the pred_eval function
-        let pred_eval: mlua::Function = lua
-            .globals()
-            .get("pred_eval")
-            .map_err(|e| {
-                kestrel_nfa::NfaError::PredicateError(format!(
-                    "Failed to get pred_eval function: {}",
-                    e
-                ))
-            })?;
+        let pred_eval: mlua::Function = lua.globals().get("pred_eval").map_err(|e| {
+            kestrel_nfa::NfaError::PredicateError(format!(
+                "Failed to get pred_eval function: {}",
+                e
+            ))
+        })?;
 
         // Call the predicate with event_handle=0 (we only support one event at a time)
-        let result: mlua::Value = pred_eval
-            .call(0u32)
-            .map_err(|e| {
-                kestrel_nfa::NfaError::PredicateError(format!(
-                    "Failed to call pred_eval: {}",
-                    e
-                ))
-            })?;
+        let result: mlua::Value = pred_eval.call(0u32).map_err(|e| {
+            kestrel_nfa::NfaError::PredicateError(format!("Failed to call pred_eval: {}", e))
+        })?;
 
         // Convert result to boolean
         let matched = match result {

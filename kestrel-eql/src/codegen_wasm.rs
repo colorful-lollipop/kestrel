@@ -231,7 +231,7 @@ impl WasmCodeGenerator {
                     idx
                 )?;
             }
-            writeln!(output, "")?;
+            writeln!(output)?;
             writeln!(output, "      (then")?;
             writeln!(
                 output,
@@ -903,7 +903,7 @@ impl WasmCodeGenerator {
             value: IrLiteral::String(s),
         } = &args[1]
         {
-            if let Some((offset, length)) = self.get_string_literal_info(s) {
+            if let Some((offset, _length)) = self.get_string_literal_info(s) {
                 writeln!(output, "    ;; Needle: \"{}\"", s)?;
                 writeln!(output, "    (i32.const {})  ;; needle offset", offset)?;
             } else {

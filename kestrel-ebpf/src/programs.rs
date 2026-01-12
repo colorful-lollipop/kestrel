@@ -143,8 +143,6 @@ impl ProgramManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_program_manager_placeholder() {}
 }

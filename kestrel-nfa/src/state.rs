@@ -83,8 +83,8 @@ pub struct PartialMatch {
     /// Using SmallVec for inline optimization - most sequences are short
     pub matched_events: SmallVec<[MatchedEvent; 4]>,
 
-    /// Timestamp when this partial match was created
-    pub created_ns: u64,
+    /// Timestamp when this partial match was created (first event)
+    pub started_at: u64,
 
     /// Timestamp of the last matched event
     pub last_match_ns: u64,
@@ -126,7 +126,7 @@ impl PartialMatch {
             current_state: initial_state_id,
             entity_key,
             matched_events: smallvec![matched_event],
-            created_ns: timestamp_ns,
+            started_at: timestamp_ns,
             last_match_ns: timestamp_ns,
             terminated: false,
         }
@@ -147,10 +147,11 @@ impl PartialMatch {
     }
 
     /// Check if this partial match has exceeded the maxspan time window
+    /// Uses the first event's timestamp (started_at) for accurate maxspan calculation
     pub fn is_expired(&self, now_ns: u64, maxspan_ms: Option<u64>) -> bool {
         if let Some(maxspan) = maxspan_ms {
             let maxspan_ns = maxspan * 1_000_000; // Convert ms to ns
-            let elapsed = now_ns.saturating_sub(self.created_ns);
+            let elapsed = now_ns.saturating_sub(self.started_at);
             elapsed > maxspan_ns
         } else {
             false
@@ -170,7 +171,7 @@ impl PartialMatch {
 
     /// Get the age of this partial match in nanoseconds
     pub fn age_ns(&self, now_ns: u64) -> u64 {
-        now_ns.saturating_sub(self.created_ns)
+        now_ns.saturating_sub(self.started_at)
     }
 
     /// Get the time since the last match in nanoseconds
@@ -267,7 +268,7 @@ mod tests {
         assert_eq!(pm.entity_key, 12345);
         assert_eq!(pm.current_state, 0);
         assert_eq!(pm.matched_events.len(), 1);
-        assert_eq!(pm.created_ns, 1000);
+        assert_eq!(pm.started_at, 1000);
         assert!(!pm.terminated);
     }
 

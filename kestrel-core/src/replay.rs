@@ -316,6 +316,21 @@ pub struct ReplayConfig {
 
     /// Channel size for events
     pub channel_size: usize,
+
+    /// Enable determinism verification (runs replay multiple times)
+    pub verify_determinism: bool,
+
+    /// Path to expected results for verification
+    pub expected_results_path: Option<PathBuf>,
+
+    /// Record results for verification
+    pub record_for_verification: bool,
+
+    /// Seed for reproducible event generation
+    pub seed: Option<u64>,
+
+    /// Number of verification runs
+    pub verification_runs: usize,
 }
 
 impl Default for ReplayConfig {
@@ -325,6 +340,11 @@ impl Default for ReplayConfig {
             speed_multiplier: 1.0,
             stop_on_error: false,
             channel_size: 4096,
+            verify_determinism: false,
+            expected_results_path: None,
+            record_for_verification: false,
+            seed: None,
+            verification_runs: 3,
         }
     }
 }
@@ -443,6 +463,138 @@ impl ReplaySource {
             current_ts_wall_ns: self.time_manager.wall_ns(),
         }
     }
+
+    /// Run replay with determinism verification
+    pub async fn replay_with_verification<F, T>(
+        &mut self,
+        run_evaluation: F,
+    ) -> Result<VerificationRunResult, ReplayError>
+    where
+        F: Fn(&Event) -> T,
+        T: PartialEq + std::fmt::Debug + Clone + serde::Serialize,
+    {
+        let binary_log = BinaryLog::new(self.schema.clone());
+        let events = binary_log.read_events(self.config.log_path.clone())?;
+
+        if events.is_empty() {
+            return Ok(VerificationRunResult {
+                total_events: 0,
+                total_runs: self.config.verification_runs,
+                consistent: true,
+                results_per_run: Vec::new(),
+                mismatches: Vec::new(),
+            });
+        }
+
+        let mut all_results: Vec<Vec<T>> = Vec::with_capacity(self.config.verification_runs);
+        let mut mismatches = Vec::new();
+
+        for run in 0..self.config.verification_runs {
+            self.next_event_id = 1;
+            let mut run_results = Vec::new();
+
+            for event in &events {
+                let result = run_evaluation(event);
+                run_results.push(result.clone());
+            }
+
+            all_results.push(run_results.clone());
+
+            if run > 0 {
+                if run_results != all_results[0] {
+                    mismatches.push(VerificationMismatch {
+                        run_number: run + 1,
+                        first_run_result: format!("{:?}", all_results[0]),
+                        current_run_result: format!("{:?}", run_results),
+                    });
+                }
+            }
+
+            info!(
+                run = run + 1,
+                events = events.len(),
+                "Verification run completed"
+            );
+        }
+
+        Ok(VerificationRunResult::from_results(
+            events.len(),
+            self.config.verification_runs,
+            all_results,
+            mismatches,
+        ))
+    }
+
+    /// Replay events and collect results for comparison
+    pub async fn replay_and_collect<F, T>(
+        &mut self,
+        run_evaluation: F,
+    ) -> Result<Vec<T>, ReplayError>
+    where
+        F: Fn(&Event) -> T,
+    {
+        let binary_log = BinaryLog::new(self.schema.clone());
+        let events = binary_log.read_events(self.config.log_path.clone())?;
+
+        let mut results = Vec::new();
+        self.next_event_id = 1;
+
+        for event in &events {
+            let result = run_evaluation(event);
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+
+    /// Reset the replay source for another run
+    pub fn reset(&mut self) {
+        self.next_event_id = 1;
+    }
+}
+
+/// Result of a verification run
+#[derive(Debug, Clone)]
+pub struct VerificationRunResult {
+    pub total_events: usize,
+    pub total_runs: usize,
+    pub consistent: bool,
+    pub results_per_run: Vec<Vec<serde_json::Value>>,
+    pub mismatches: Vec<VerificationMismatch>,
+}
+
+impl VerificationRunResult {
+    pub fn from_results<T: serde::Serialize>(
+        total_events: usize,
+        total_runs: usize,
+        all_results: Vec<Vec<T>>,
+        mismatches: Vec<VerificationMismatch>,
+    ) -> Self {
+        let results_per_run: Vec<Vec<serde_json::Value>> = all_results
+            .iter()
+            .map(|run| {
+                run.iter()
+                    .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+                    .collect()
+            })
+            .collect();
+
+        Self {
+            total_events,
+            total_runs,
+            consistent: mismatches.is_empty(),
+            results_per_run,
+            mismatches,
+        }
+    }
+}
+
+/// Mismatch found during verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationMismatch {
+    pub run_number: usize,
+    pub first_run_result: String,
+    pub current_run_result: String,
 }
 
 /// Replay statistics
@@ -797,5 +949,196 @@ mod tests {
         // The speed multiplier affects internal timing, not wall-clock time
         assert!(duration_fast > 0);
         assert!(duration_slow > 0);
+    }
+
+    #[tokio::test]
+    async fn test_replay_config_with_verification() {
+        let config = ReplayConfig {
+            verify_determinism: true,
+            expected_results_path: Some(PathBuf::from("/tmp/expected.json")),
+            record_for_verification: true,
+            seed: Some(12345),
+            verification_runs: 5,
+            ..Default::default()
+        };
+
+        assert!(config.verify_determinism);
+        assert!(config.record_for_verification);
+        assert_eq!(config.verification_runs, 5);
+        assert_eq!(config.seed, Some(12345));
+    }
+
+    #[tokio::test]
+    async fn test_replay_with_verification_run() {
+        let schema = create_test_schema();
+        let log = BinaryLog::new(schema.clone());
+
+        let events: Vec<Event> = (0..10)
+            .map(|i| {
+                Event::builder()
+                    .event_type(1)
+                    .ts_mono((i as u64 + 1) * 1000000)
+                    .ts_wall((i as u64 + 1) * 1000000)
+                    .entity_key(i as u128 % 3)
+                    .field(1, TypedValue::I64(i as i64))
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("test_verification_{}.log", std::process::id()));
+
+        log.write_events(log_path.clone(), &events).unwrap();
+
+        let time_manager = TimeManager::mock();
+
+        let config = ReplayConfig {
+            log_path,
+            speed_multiplier: 1000.0,
+            verify_determinism: true,
+            verification_runs: 3,
+            ..Default::default()
+        };
+
+        let mut replay = ReplaySource::new(config, schema, time_manager);
+
+        let evaluation_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let eval_count_clone = evaluation_count.clone();
+
+        let result = replay
+            .replay_with_verification(move |_event| {
+                eval_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                true
+            })
+            .await
+            .unwrap();
+
+        assert!(result.consistent, "Replay should be deterministic");
+        assert_eq!(result.total_events, 10);
+        assert_eq!(result.total_runs, 3);
+        assert!(result.mismatches.is_empty());
+
+        let total_evals = evaluation_count.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(total_evals, 30);
+    }
+
+    #[tokio::test]
+    async fn test_replay_and_collect() {
+        let schema = create_test_schema();
+        let log = BinaryLog::new(schema.clone());
+
+        let events: Vec<Event> = (0..5)
+            .map(|i| {
+                Event::builder()
+                    .event_type(1)
+                    .ts_mono((i as u64 + 1) * 1000000)
+                    .ts_wall((i as u64 + 1) * 1000000)
+                    .entity_key(i as u128)
+                    .field(1, TypedValue::I64(i as i64))
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("test_collect_{}.log", std::process::id()));
+
+        log.write_events(log_path.clone(), &events).unwrap();
+
+        let time_manager = TimeManager::mock();
+        let config = ReplayConfig {
+            log_path,
+            speed_multiplier: 1000.0,
+            ..Default::default()
+        };
+
+        let mut replay = ReplaySource::new(config, schema, time_manager);
+
+        let results: Vec<bool> = replay
+            .replay_and_collect(|event| {
+                if let Some(TypedValue::I64(n)) = event.get_field(1) {
+                    *n > 2
+                } else {
+                    false
+                }
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 5);
+        assert_eq!(results, vec![false, false, false, true, true]);
+    }
+
+    #[tokio::test]
+    async fn test_replay_reset() {
+        let schema = create_test_schema();
+        let log = BinaryLog::new(schema.clone());
+
+        let events: Vec<Event> = (0..5)
+            .map(|i| {
+                Event::builder()
+                    .event_type(1)
+                    .ts_mono((i as u64 + 1) * 1000000)
+                    .ts_wall((i as u64 + 1) * 1000000)
+                    .entity_key(i as u128)
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("test_reset_{}.log", std::process::id()));
+
+        log.write_events(log_path.clone(), &events).unwrap();
+
+        let time_manager = TimeManager::mock();
+        let config = ReplayConfig {
+            log_path,
+            speed_multiplier: 1000.0,
+            ..Default::default()
+        };
+
+        let mut replay = ReplaySource::new(config, schema, time_manager);
+
+        let first_run_results: Vec<u64> = replay
+            .replay_and_collect(|event| event.event_id)
+            .await
+            .unwrap();
+
+        replay.reset();
+
+        let second_run_results: Vec<u64> = replay
+            .replay_and_collect(|event| event.event_id)
+            .await
+            .unwrap();
+
+        assert_eq!(first_run_results, second_run_results);
+    }
+
+    #[tokio::test]
+    async fn test_verification_run_result() {
+        let result = VerificationRunResult {
+            total_events: 100,
+            total_runs: 5,
+            consistent: true,
+            results_per_run: vec![vec![serde_json::json!("test")]],
+            mismatches: Vec::new(),
+        };
+
+        assert!(result.consistent);
+        assert_eq!(result.total_events, 100);
+    }
+
+    #[tokio::test]
+    async fn test_verification_mismatch() {
+        let mismatch = VerificationMismatch {
+            run_number: 2,
+            first_run_result: "[true, false, true]".to_string(),
+            current_run_result: "[false, false, true]".to_string(),
+        };
+
+        assert_eq!(mismatch.run_number, 2);
+        assert_ne!(mismatch.first_run_result, mismatch.current_run_result);
     }
 }

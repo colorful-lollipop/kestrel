@@ -1,0 +1,163 @@
+name: Performance Benchmark
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Stress test duration (seconds)'
+        required: false
+        default: '30'
+      concurrency:
+        description: 'Number of concurrent threads'
+        required: false
+        default: '4'
+
+jobs:
+  benchmark:
+    runs-on: self-hosted
+    if: runner.os == 'Linux'
+    env:
+      RUSTFLAGS: '-C opt-level=3 -C lto=true -C codegen-units=1'
+      RELEASE_PROFILE: '--release'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Rust
+        run: |
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-benchmark-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-
+
+      - name: Build Benchmark Suite
+        run: |
+          cargo build ${{ env.RELEASE_PROFILE }} -p kestrel-benchmark
+
+      - name: Run Throughput Benchmark
+        run: |
+          echo "=== Throughput Benchmark ==="
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --throughput
+
+      - name: Run Latency Benchmark
+        run: |
+          echo "=== Latency Benchmark ==="
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --latency
+
+      - name: Run NFA Benchmark
+        run: |
+          echo "=== NFA Engine Benchmark ==="
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --nfa
+
+      - name: Run Wasm Runtime Benchmark
+        run: |
+          echo "=== Wasm Runtime Benchmark ==="
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --wasm
+
+      - name: Run Memory Benchmark
+        run: |
+          echo "=== Memory Usage Benchmark ==="
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --memory
+
+      - name: Run Stress Test
+        id: stress-test
+        run: |
+          echo "=== Stress Test ==="
+          duration=${DURATION:-30}
+          echo "Running stress test for ${duration} seconds..."
+          cargo run ${{ env.RELEASE_PROFILE }} --bin kestrel-benchmark -- --stress 2>&1 | tee stress_output.txt
+          echo "stress_output=$(cat stress_output.txt | base64 -w0)" >> $GITHUB_OUTPUT
+
+      - name: Collect Performance Metrics
+        id: metrics
+        run: |
+          echo "=== Performance Metrics Summary ==="
+          cat << 'EOF' > metrics.json
+          {
+            "timestamp": "$(date -Iseconds)",
+            "rust_version": "$(rustc --version)",
+            "benchmark_suite": "kestrel-benchmark v0.1.0",
+            "targets": {
+              "throughput_eps": 10000,
+              "latency_p99_us": 1,
+              "nfa_latency_p99_us": 10,
+              "wasm_eval_latency_ns": 500,
+              "idle_memory_mb": 50
+            }
+          }
+          EOF
+          cat metrics.json
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: |
+            stress_output.txt
+            metrics.json
+          retention-days: 30
+
+      - name: Performance Regression Check
+        if: github.event_name == 'schedule' || github.event_name == 'push'
+        run: |
+          echo "=== Regression Check ==="
+          # Compare with previous results if available
+          echo "Checking for performance regressions..."
+          # This would integrate with a historical benchmark database
+          echo "No previous baseline for comparison"
+
+  benchmark-report:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: results
+
+      - name: Generate Report
+        run: |
+          echo "# Kestrel Performance Benchmark Report" > benchmark_report.md
+          echo "" >> benchmark_report.md
+          echo "Generated: $(date)" >> benchmark_report.md
+          echo "" >> benchmark_report.md
+          echo "## Summary" >> benchmark_report.md
+          echo "" >> benchmark_report.md
+          echo "| Metric | Target | Status |" >> benchmark_report.md
+          echo "|--------|--------|--------|" >> benchmark_report.md
+          echo "| Throughput | 10k EPS | TODO |" >> benchmark_report.md
+          echo "| P99 Latency | <1µs | TODO |" >> benchmark_report.md
+          echo "| NFA P99 Latency | <10µs | TODO |" >> benchmark_report.md
+          echo "| Wasm Eval | <500ns | TODO |" >> benchmark_report.md
+          echo "| Idle Memory | <50MB | TODO |" >> benchmark_report.md
+          echo "" >> benchmark_report.md
+          echo "## Details" >> benchmark_report.md
+          echo "See attached artifacts for full results." >> benchmark_report.md
+          cat benchmark_report.md
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark_report.md

@@ -3,9 +3,16 @@
 //! This module provides the main eBPF collector implementation for collecting
 //! security events from the Linux kernel using eBPF programs.
 
+mod executor;
+mod lsm;
 mod normalize;
 mod programs;
 
+pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
+pub use lsm::{
+    BlockingAction, BlockingRule, EnforcementEvent, FanotifyFallback, LsmConfig, LsmError,
+    LsmExecutor, LsmFallback, LsmHookType, LsmHooks,
+};
 pub use normalize::EventNormalizer;
 pub use programs::{AttachedPrograms, ProgramManager};
 
@@ -217,13 +224,14 @@ impl EbpfCollector {
                             EbpfError::MapError("Ring buffer map 'rb' not found".to_string())
                         })
                         .and_then(|m| {
-                            m.try_into().map_err(|e| EbpfError::MapError(format!("{:?}", e)))
+                            m.try_into()
+                                .map_err(|e| EbpfError::MapError(format!("{:?}", e)))
                         });
 
                     match ringbuf_result {
                         Ok(mut ringbuf) => {
                             ringbuf_error_logged = false; // Reset on success
-                            // Try to read next event
+                                                          // Try to read next event
                             ringbuf.next().map(|item| {
                                 let bytes: &[u8] = &item;
                                 bytes.to_vec() // Copy data to release lock
@@ -255,9 +263,8 @@ impl EbpfCollector {
                     }
 
                     // Parse ExecveEvent from bytes
-                    let exec_event: ExecveEvent = unsafe {
-                        std::ptr::read(bytes.as_ptr() as *const ExecveEvent)
-                    };
+                    let exec_event: ExecveEvent =
+                        unsafe { std::ptr::read(bytes.as_ptr() as *const ExecveEvent) };
 
                     debug!(
                         pid = exec_event.pid,

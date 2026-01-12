@@ -41,7 +41,7 @@ pub struct Alert {
 }
 
 /// Alert severity
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Severity {
     Informational,
     Low,

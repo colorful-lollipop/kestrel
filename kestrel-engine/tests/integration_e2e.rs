@@ -3,8 +3,10 @@
 //! Tests the complete detection pipeline with real event streams
 
 use kestrel_event::Event;
-use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, PredicateEvaluator, SeqStep};
-use kestrel_schema::{FieldDef, FieldDataType, SchemaRegistry};
+use kestrel_nfa::{
+    CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, PredicateEvaluator, SeqStep,
+};
+use kestrel_schema::{FieldDataType, FieldDef, SchemaRegistry};
 use std::sync::Arc;
 
 // Simple predicate evaluator that matches everything
@@ -33,23 +35,29 @@ async fn test_e2e_linux_privilege_escalation() {
     // Setup schema with real fields
     let mut schema = SchemaRegistry::new();
 
-    let pid_field = schema.register_field(FieldDef {
-        path: "process.pid".to_string(),
-        data_type: FieldDataType::U64,
-        description: Some("Process ID".to_string()),
-    }).unwrap();
+    let pid_field = schema
+        .register_field(FieldDef {
+            path: "process.pid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Process ID".to_string()),
+        })
+        .unwrap();
 
-    let name_field = schema.register_field(FieldDef {
-        path: "process.name".to_string(),
-        data_type: FieldDataType::String,
-        description: Some("Process name".to_string()),
-    }).unwrap();
+    let name_field = schema
+        .register_field(FieldDef {
+            path: "process.name".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Process name".to_string()),
+        })
+        .unwrap();
 
-    let path_field = schema.register_field(FieldDef {
-        path: "file.path".to_string(),
-        data_type: FieldDataType::String,
-        description: Some("File path".to_string()),
-    }).unwrap();
+    let path_field = schema
+        .register_field(FieldDef {
+            path: "file.path".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File path".to_string()),
+        })
+        .unwrap();
 
     let schema = Arc::new(schema);
 
@@ -65,8 +73,8 @@ async fn test_e2e_linux_privilege_escalation() {
             "linux-priv-esc".to_string(),
             pid_field, // Group by PID
             vec![
-                SeqStep::new(0, "sudo".to_string(), 1),      // Event type 1: process
-                SeqStep::new(1, "chmod".to_string(), 1),      // Event type 1: process
+                SeqStep::new(0, "sudo".to_string(), 1), // Event type 1: process
+                SeqStep::new(1, "chmod".to_string(), 1), // Event type 1: process
                 SeqStep::new(2, "shadow_access".to_string(), 3), // Event type 3: file
             ],
             Some(5000), // 5 second maxspan
@@ -76,7 +84,8 @@ async fn test_e2e_linux_privilege_escalation() {
         rule_name: "Linux Privilege Escalation Detection".to_string(),
     };
 
-    nfa.load_sequence(sequence).expect("Failed to load sequence");
+    nfa.load_sequence(sequence)
+        .expect("Failed to load sequence");
 
     // Simulate real attack timeline
     let attacker_pid: u128 = 54321;
@@ -94,7 +103,10 @@ async fn test_e2e_linux_privilege_escalation() {
         .ts_wall(base_time_ns)
         .entity_key(attacker_pid)
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
-        .field(name_field, kestrel_schema::TypedValue::String("sudo".to_string()))
+        .field(
+            name_field,
+            kestrel_schema::TypedValue::String("sudo".to_string()),
+        )
         .build()
         .unwrap();
 
@@ -114,7 +126,10 @@ async fn test_e2e_linux_privilege_escalation() {
         .ts_wall(base_time_ns + 1_000_000_000)
         .entity_key(attacker_pid)
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
-        .field(name_field, kestrel_schema::TypedValue::String("chmod".to_string()))
+        .field(
+            name_field,
+            kestrel_schema::TypedValue::String("chmod".to_string()),
+        )
         .build()
         .unwrap();
 
@@ -134,7 +149,10 @@ async fn test_e2e_linux_privilege_escalation() {
         .ts_wall(base_time_ns + 4_000_000_000)
         .entity_key(attacker_pid)
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
-        .field(path_field, kestrel_schema::TypedValue::String("/etc/shadow".to_string()))
+        .field(
+            path_field,
+            kestrel_schema::TypedValue::String("/etc/shadow".to_string()),
+        )
         .build()
         .unwrap();
 
@@ -163,8 +181,13 @@ async fn test_e2e_linux_privilege_escalation() {
                 None
             }
         });
-        println!("     {}. Event ID: {}, Type: {}, PID: {:?}",
-                 i + 1, event.event_id, event.event_type_id, pid);
+        println!(
+            "     {}. Event ID: {}, Type: {}, PID: {:?}",
+            i + 1,
+            event.event_id,
+            event.event_type_id,
+            pid
+        );
     }
 
     // Verify alert content
@@ -185,23 +208,29 @@ async fn test_e2e_linux_privilege_escalation() {
 async fn test_e2e_ransomware_detection() {
     let mut schema = SchemaRegistry::new();
 
-    let pid_field = schema.register_field(FieldDef {
-        path: "process.pid".to_string(),
-        data_type: FieldDataType::U64,
-        description: Some("Process ID".to_string()),
-    }).unwrap();
+    let pid_field = schema
+        .register_field(FieldDef {
+            path: "process.pid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Process ID".to_string()),
+        })
+        .unwrap();
 
-    let name_field = schema.register_field(FieldDef {
-        path: "process.name".to_string(),
-        data_type: FieldDataType::String,
-        description: Some("Process name".to_string()),
-    }).unwrap();
+    let name_field = schema
+        .register_field(FieldDef {
+            path: "process.name".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Process name".to_string()),
+        })
+        .unwrap();
 
-    let path_field = schema.register_field(FieldDef {
-        path: "file.path".to_string(),
-        data_type: FieldDataType::String,
-        description: Some("File path".to_string()),
-    }).unwrap();
+    let path_field = schema
+        .register_field(FieldDef {
+            path: "file.path".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File path".to_string()),
+        })
+        .unwrap();
 
     let schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
@@ -214,10 +243,10 @@ async fn test_e2e_ransomware_detection() {
             "ransomware-1".to_string(),
             pid_field,
             vec![
-                SeqStep::new(0, "doc_access".to_string(), 3),     // file access
-                SeqStep::new(1, "powershell".to_string(), 1),    // powershell
-                SeqStep::new(2, "vssadmin".to_string(), 1),      // vssadmin (delete backups)
-                SeqStep::new(3, "encrypted".to_string(), 3),    // encrypted file
+                SeqStep::new(0, "doc_access".to_string(), 3), // file access
+                SeqStep::new(1, "powershell".to_string(), 1), // powershell
+                SeqStep::new(2, "vssadmin".to_string(), 1),   // vssadmin (delete backups)
+                SeqStep::new(3, "encrypted".to_string(), 3),  // encrypted file
             ],
             Some(30000), // 30 second maxspan
             None,
@@ -226,7 +255,8 @@ async fn test_e2e_ransomware_detection() {
         rule_name: "Ransomware Behavior Detection".to_string(),
     };
 
-    nfa.load_sequence(sequence).expect("Failed to load sequence");
+    nfa.load_sequence(sequence)
+        .expect("Failed to load sequence");
 
     let victim_pid: u128 = 99999;
     let base_time_ns = 1_700_000_000_000_000_000u64;
@@ -241,36 +271,54 @@ async fn test_e2e_ransomware_detection() {
             .event_id(1)
             .event_type(3)
             .ts_mono(base_time_ns)
+            .ts_wall(base_time_ns)
             .entity_key(victim_pid)
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
-            .field(path_field, kestrel_schema::TypedValue::String("C:\\Documents\\important.docx".to_string()))
+            .field(
+                path_field,
+                kestrel_schema::TypedValue::String("C:\\Documents\\important.docx".to_string()),
+            )
             .build()
             .unwrap(),
         Event::builder()
             .event_id(2)
             .event_type(1)
             .ts_mono(base_time_ns + 5_000_000_000) // +5s
+            .ts_wall(base_time_ns + 5_000_000_000)
             .entity_key(victim_pid)
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
-            .field(name_field, kestrel_schema::TypedValue::String("powershell.exe".to_string()))
+            .field(
+                name_field,
+                kestrel_schema::TypedValue::String("powershell.exe".to_string()),
+            )
             .build()
             .unwrap(),
         Event::builder()
             .event_id(3)
             .event_type(1)
             .ts_mono(base_time_ns + 10_000_000_000) // +10s
+            .ts_wall(base_time_ns + 10_000_000_000)
             .entity_key(victim_pid)
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
-            .field(name_field, kestrel_schema::TypedValue::String("vssadmin.exe".to_string()))
+            .field(
+                name_field,
+                kestrel_schema::TypedValue::String("vssadmin.exe".to_string()),
+            )
             .build()
             .unwrap(),
         Event::builder()
             .event_id(4)
             .event_type(3)
             .ts_mono(base_time_ns + 25_000_000_000) // +25s
+            .ts_wall(base_time_ns + 25_000_000_000)
             .entity_key(victim_pid)
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
-            .field(path_field, kestrel_schema::TypedValue::String("C:\\Documents\\important.docx.encrypted".to_string()))
+            .field(
+                path_field,
+                kestrel_schema::TypedValue::String(
+                    "C:\\Documents\\important.docx.encrypted".to_string(),
+                ),
+            )
             .build()
             .unwrap(),
     ];
@@ -279,7 +327,12 @@ async fn test_e2e_ransomware_detection() {
     let mut final_alerts = Vec::new();
     for (i, event) in events.iter().enumerate() {
         let alerts = nfa.process_event(event).unwrap();
-        println!("Event {}: type={}, alerts={}", i + 1, event.event_type_id, alerts.len());
+        println!(
+            "Event {}: type={}, alerts={}",
+            i + 1,
+            event.event_type_id,
+            alerts.len()
+        );
 
         if !alerts.is_empty() {
             final_alerts = alerts;
@@ -291,7 +344,10 @@ async fn test_e2e_ransomware_detection() {
 
     println!("\n  🚨 RANSOMWARE DETECTED!");
     println!("     Events in sequence: {}", alert.events.len());
-    println!("     Time window: {} ns", alert.events.last().unwrap().ts_mono_ns - alert.events.first().unwrap().ts_mono_ns);
+    println!(
+        "     Time window: {} ns",
+        alert.events.last().unwrap().ts_mono_ns - alert.events.first().unwrap().ts_mono_ns
+    );
 
     assert_eq!(alert.events.len(), 4);
 
@@ -308,17 +364,21 @@ async fn test_e2e_ransomware_detection() {
 async fn test_e2e_entity_isolation() {
     let mut schema = SchemaRegistry::new();
 
-    let pid_field = schema.register_field(FieldDef {
-        path: "process.pid".to_string(),
-        data_type: FieldDataType::U64,
-        description: Some("Process ID".to_string()),
-    }).unwrap();
+    let pid_field = schema
+        .register_field(FieldDef {
+            path: "process.pid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Process ID".to_string()),
+        })
+        .unwrap();
 
-    let name_field = schema.register_field(FieldDef {
-        path: "process.name".to_string(),
-        data_type: FieldDataType::String,
-        description: Some("Process name".to_string()),
-    }).unwrap();
+    let name_field = schema
+        .register_field(FieldDef {
+            path: "process.name".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Process name".to_string()),
+        })
+        .unwrap();
 
     let schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
@@ -342,7 +402,8 @@ async fn test_e2e_entity_isolation() {
         rule_name: "Linux Privilege Escalation Detection".to_string(),
     };
 
-    nfa.load_sequence(sequence).expect("Failed to load sequence");
+    nfa.load_sequence(sequence)
+        .expect("Failed to load sequence");
 
     let base_time_ns = 1_700_000_000_000_000_000u64;
 
@@ -355,9 +416,13 @@ async fn test_e2e_entity_isolation() {
         .event_id(1)
         .event_type(1)
         .ts_mono(base_time_ns)
+        .ts_wall(base_time_ns)
         .entity_key(11111)
         .field(pid_field, kestrel_schema::TypedValue::U64(11111))
-        .field(name_field, kestrel_schema::TypedValue::String("sudo".to_string()))
+        .field(
+            name_field,
+            kestrel_schema::TypedValue::String("sudo".to_string()),
+        )
         .build()
         .unwrap();
 
@@ -369,9 +434,13 @@ async fn test_e2e_entity_isolation() {
         .event_id(2)
         .event_type(1)
         .ts_mono(base_time_ns + 1_000_000_000)
+        .ts_wall(base_time_ns + 1_000_000_000)
         .entity_key(22222)
         .field(pid_field, kestrel_schema::TypedValue::U64(22222))
-        .field(name_field, kestrel_schema::TypedValue::String("chmod".to_string()))
+        .field(
+            name_field,
+            kestrel_schema::TypedValue::String("chmod".to_string()),
+        )
         .build()
         .unwrap();
 
@@ -393,7 +462,11 @@ async fn test_e2e_entity_isolation() {
     println!("✓ Event 3: /etc/shadow (PID 22222)");
 
     // Should NOT alert because events are from different entities
-    assert_eq!(alerts.len(), 0, "Should NOT alert - events from different PIDs");
+    assert_eq!(
+        alerts.len(),
+        0,
+        "Should NOT alert - events from different PIDs"
+    );
 
     println!("\n  ✅ No false positive - correctly isolated by entity");
     println!("\n{}", "=".repeat(60));

@@ -100,12 +100,16 @@ impl NfaEngine {
         self.sequences
             .insert(compiled.id.clone(), compiled.sequence.clone());
 
-        // Update event type index
+        // Update event type index - use a Set to avoid duplicates for steps with same event_type_id
+        let mut event_types: std::collections::HashSet<u16> = std::collections::HashSet::new();
         for step in &compiled.sequence.steps {
-            self.event_type_index
-                .entry(step.event_type_id)
-                .or_insert_with(Vec::new)
-                .push(compiled.id.clone());
+            if event_types.insert(step.event_type_id) {
+                // Only add if this event_type wasn't already indexed
+                self.event_type_index
+                    .entry(step.event_type_id)
+                    .or_insert_with(Vec::new)
+                    .push(compiled.id.clone());
+            }
         }
 
         // Also index the until step if present
@@ -285,6 +289,7 @@ impl NfaEngine {
         // Find the maximum current_state among partial matches for this entity
         // and return the next state to advance to
         let mut max_state: NfaStateId = 0;
+        let mut found = false;
         for step in &sequence.steps {
             if let Some(pm) = self
                 .state_store
@@ -292,11 +297,16 @@ impl NfaEngine {
             {
                 if !pm.terminated && pm.current_state >= max_state {
                     max_state = pm.current_state;
+                    found = true;
                 }
             }
         }
-        // Return the next state to advance to (current max + 1)
-        Ok(max_state.saturating_add(1))
+        // Return the next state to advance to (current max + 1), or 0 if no partial match exists
+        if found {
+            Ok(max_state.saturating_add(1))
+        } else {
+            Ok(0)
+        }
     }
 
     /// Get the expected next state for an entity in a sequence

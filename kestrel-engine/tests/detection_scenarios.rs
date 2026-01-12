@@ -211,8 +211,8 @@ async fn test_maxspan_enforcement() {
 
     let e2 = Event::builder()
         .event_type(4002)
-        .ts_mono(1_010_000_000)
-        .ts_wall(1_010_000_000)
+        .ts_mono(11_000_000_000) // 11 seconds (10 second gap > 5s maxspan)
+        .ts_wall(11_000_000_000)
         .entity_key(entity)
         .build()
         .unwrap();

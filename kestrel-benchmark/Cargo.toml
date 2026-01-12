@@ -1,0 +1,30 @@
+[package]
+name = "kestrel-benchmark"
+version = "0.1.0"
+edition = "2021"
+description = "Kestrel Performance Benchmark Suite"
+authors = ["Kestrel Team"]
+
+[dependencies]
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-nfa = { path = "../kestrel-nfa" }
+kestrel-engine = { path = "../kestrel-engine", features = ["wasm", "lua"] }
+kestrel-core = { path = "../kestrel-core" }
+kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm" }
+
+criterion = "0.5"
+tokio = { version = "1.42", features = ["full"] }
+futures = "0.3"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+wat = "1.0"
+
+[dev-dependencies]
+test-log = "0.2"
+
+[[bin]]
+name = "kestrel-benchmark"
+path = "src/main.rs"

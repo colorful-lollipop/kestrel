@@ -4,9 +4,9 @@
 // //! rule evaluation, alert generation, and enforcement actions.
 
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionTarget, ActionType,
-    Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, NoOpExecutor,
-    Severity,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionPolicy, ActionTarget,
+    ActionType, Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence,
+    NoOpExecutor, Severity,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
@@ -546,15 +546,14 @@ impl DetectionEngine {
                     // In Inline mode, execute action if rule is blockable
                     if self.mode == EngineMode::Inline && single_rule.blockable {
                         if let Some(action_type) = single_rule.action_type {
-                            let decision = ActionDecision {
-                                id: alert_id,
-                                rule_id: single_rule.rule_id.clone(),
-                                action: action_type,
-                                target: determine_action_target(event),
-                                timestamp_ns: event.ts_mono_ns,
-                                reason: format!("Rule matched: {}", single_rule.rule_name),
-                                evidence: vec![],
-                            };
+                            let decision = ActionDecision::new(
+                                single_rule.rule_id.clone(),
+                                action_type,
+                                ActionPolicy::Inline,
+                                determine_action_target(event),
+                                format!("Rule matched: {}", single_rule.rule_name),
+                                vec![],
+                            );
 
                             match self.action_executor.execute(&decision) {
                                 Ok(result) if result.success => {

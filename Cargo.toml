@@ -11,6 +11,7 @@ members = [
     "kestrel-nfa",
     "kestrel-ebpf",
     "kestrel-cli",
+    "kestrel-benchmark",
 ]
 resolver = "2"
 
@@ -45,6 +46,11 @@ smallvec = "1.13"
 ahash = "0.8"
 regex = "1.11"
 glob = "0.3"
+
+# Benchmarking
+criterion = "0.5"
+rand = "0.8"
+wat = "1.0"
 
 # Wasm runtime
 wasmtime = "26.0"

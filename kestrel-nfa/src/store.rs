@@ -296,7 +296,7 @@ impl StateStore {
                 .iter()
                 .filter(|(_, pm)| {
                     pm.terminated || {
-                        let elapsed = now_ns.saturating_sub(pm.created_ns);
+                        let elapsed = now_ns.saturating_sub(pm.started_at);
                         elapsed > maxspan_ns
                     }
                 })

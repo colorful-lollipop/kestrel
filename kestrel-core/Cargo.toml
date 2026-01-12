@@ -15,5 +15,17 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+sha2 = { version = "0.10", features = ["asm"] }
+futures = { version = "0.3", features = ["executor"] }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
+kestrel-eql = { path = "../kestrel-eql", optional = true }
+kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm", optional = true }
+kestrel-runtime-lua = { path = "../kestrel-runtime-lua", optional = true }
+
+[features]
+default = []
+eql = ["kestrel-eql"]
+wasm = ["kestrel-runtime-wasm"]
+lua = ["kestrel-runtime-lua"]
