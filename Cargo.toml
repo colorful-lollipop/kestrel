@@ -50,7 +50,7 @@ glob = "0.3"
 wasmtime = "26.0"
 
 # Lua runtime (use vendored LuaJIT to avoid system dependencies)
-mlua = { version = "0.10", features = ["luajit", "vendored"] }
+mlua = { version = "0.10", features = ["luajit", "vendored", "send"] }
 
 # eBPF (for later phases)
 aya = { version = "0.13", default-features = false }

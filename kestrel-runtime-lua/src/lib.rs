@@ -624,3 +624,98 @@ mod tests {
         assert_eq!(result.unwrap(), 1);
     }
 }
+
+/// Implement PredicateEvaluator trait for NFA engine integration
+///
+/// This allows the Lua runtime to be used as a predicate evaluator
+/// for the NFA sequence engine, enabling dual runtime support (Wasm + Lua).
+impl kestrel_nfa::PredicateEvaluator for LuaEngine {
+    /// Evaluate a predicate against an event
+    ///
+    /// The predicate_id should be in the format "rule_id" where:
+    /// - rule_id is the Lua predicate identifier
+    fn evaluate(
+        &self,
+        predicate_id: &str,
+        event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
+        // Set the current event context
+        {
+            let mut current_event = self.current_event.write().unwrap();
+            *current_event = Some(event.clone());
+        }
+
+        // Clear previous alerts
+        {
+            let mut alerts = self.current_alerts.write().unwrap();
+            alerts.clear();
+        }
+
+        // Get the predicate
+        let predicates = self.predicates.read().unwrap();
+        let predicate = predicates
+            .get(predicate_id)
+            .ok_or_else(|| {
+                kestrel_nfa::NfaError::PredicateError(format!(
+                    "Predicate not found: {}",
+                    predicate_id
+                ))
+            })?;
+
+        // Get the Lua state
+        let lua = &self.lua;
+
+        // Get the pred_eval function
+        let pred_eval: mlua::Function = lua
+            .globals()
+            .get("pred_eval")
+            .map_err(|e| {
+                kestrel_nfa::NfaError::PredicateError(format!(
+                    "Failed to get pred_eval function: {}",
+                    e
+                ))
+            })?;
+
+        // Call the predicate with event_handle=0 (we only support one event at a time)
+        let result: mlua::Value = pred_eval
+            .call(0u32)
+            .map_err(|e| {
+                kestrel_nfa::NfaError::PredicateError(format!(
+                    "Failed to call pred_eval: {}",
+                    e
+                ))
+            })?;
+
+        // Convert result to boolean
+        let matched = match result {
+            mlua::Value::Boolean(b) => Ok(b),
+            mlua::Value::Integer(i) => Ok(i != 0),
+            mlua::Value::Number(n) => Ok(n != 0.0),
+            _ => Ok(false),
+        };
+
+        // Clear the event context after evaluation
+        {
+            let mut current_event = self.current_event.write().unwrap();
+            *current_event = None;
+        }
+
+        matched
+    }
+
+    /// Get the field IDs required by a predicate
+    ///
+    /// For Lua predicates, we return an empty vec since we don't track
+    /// field dependencies statically (Lua is dynamic).
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+        // Lua is dynamically typed, so we can't determine required fields statically
+        // Returning empty vec means "potentially all fields"
+        Ok(Vec::new())
+    }
+
+    /// Check if a predicate exists
+    fn has_predicate(&self, predicate_id: &str) -> bool {
+        let predicates = self.predicates.read().unwrap();
+        predicates.contains_key(predicate_id)
+    }
+}
