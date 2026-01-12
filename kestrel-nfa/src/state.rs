@@ -7,7 +7,6 @@
 
 use kestrel_event::Event;
 use smallvec::{smallvec, SmallVec};
-use std::time::Duration;
 
 /// Unique identifier for an NFA state (position in sequence)
 pub type NfaStateId = u16;
@@ -29,6 +28,9 @@ pub struct NfaSequence {
 
     /// Optional termination condition
     pub until_step: Option<Box<SeqStep>>,
+
+    /// Field captures for alert output
+    pub captures: Vec<kestrel_eql::ir::IrCapture>,
 }
 
 /// A single step in a sequence
@@ -192,6 +194,26 @@ impl NfaSequence {
             steps,
             maxspan_ms,
             until_step: until_step.map(Box::new),
+            captures: Vec::new(),
+        }
+    }
+
+    /// Create a new NFA sequence with captures
+    pub fn with_captures(
+        id: String,
+        by_field_id: u32,
+        steps: Vec<SeqStep>,
+        maxspan_ms: Option<u64>,
+        until_step: Option<SeqStep>,
+        captures: Vec<kestrel_eql::ir::IrCapture>,
+    ) -> Self {
+        Self {
+            id,
+            by_field_id,
+            steps,
+            maxspan_ms,
+            until_step: until_step.map(Box::new),
+            captures,
         }
     }
 

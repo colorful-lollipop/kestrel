@@ -4,10 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::sync::Arc;
+
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 /// Alert record
 #[derive(Debug, Clone, Serialize, Deserialize)]

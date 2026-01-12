@@ -2,20 +2,17 @@
 //!
 //! Core functionality including EventBus and control plane components.
 
-use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
-use tokio::time::{timeout, Duration};
-use tracing::{debug, error, warn};
-
 pub mod action;
 pub mod alert;
 pub mod eventbus;
 pub mod replay;
 pub mod time;
 
+use std::time::Duration;
+
 pub use action::{
-    ActionCapabilities, ActionDecision, ActionError, ActionEvidence, ActionExecutor,
-    ActionResult, ActionType, ActionTarget, NoOpExecutor,
+    ActionCapabilities, ActionDecision, ActionError, ActionEvidence, ActionExecutor, ActionResult,
+    ActionTarget, ActionType, NoOpExecutor,
 };
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types

@@ -1462,6 +1462,76 @@ EventBusConfig {
 
 ---
 
-*Last Updated: 2026-01-11*
+## P0 Fixes Completed (2026-01-12)
+
+### 1. eBPF RingBuf Polling Implementation ✅
+
+**Date**: 2026-01-12
+
+**Problem**: eBPF ring buffer polling was not implemented - events from kernel were not being collected
+
+**Solution Implemented**:
+- Implemented `start_ringbuf_polling()` in `kestrel-ebpf/src/lib.rs`
+- Async tokio task for continuous ring buffer polling
+- Proper Aya RingBuf API usage (`RingBuf::next()`)
+- Event flow: RingBuf → byte copy → ExecveEvent parsing → normalization → EventBus
+- Graceful shutdown with 5-second timeout
+- Interest-based filtering (only collect ProcessExec events if interested)
+- Backpressure handling (log metrics, don't block eBPF)
+- Error logging with spam prevention
+
+**Key Design Decisions**:
+1. **Lock scope minimization**: Acquire eBPF lock briefly per poll, release before async/await
+2. **Event data copying**: Copy bytes from ring buffer to release lock before processing
+3. **Send-safe design**: Ensure lock released before any `.await` point
+4. **Non-blocking**: Use `try_send` to avoid blocking eBPF kernel collection
+5. **Event ID assignment**: Atomic counter for stable event ordering
+
+**Files Modified**:
+- `kestrel-ebpf/src/lib.rs` (major rewrite, ~200 lines added)
+  - Added `normalize` module import
+  - Added `next_event_id: Arc<AtomicU64>` field
+  - Added `normalizer: EventNormalizer` field
+  - Added `_polling_handle: Option<JoinHandle<()>>` field
+  - Implemented `start_ringbuf_polling()` async method
+  - Updated `stop()` to wait for polling task completion
+
+**Test Results**:
+- All 10 kestrel-ebpf tests passing
+- Entire workspace compiles successfully
+- Ready for integration testing with real eBPF programs
+
+**Limitations**:
+- Requires root/CAP_BPF to attach tracepoints
+- eBPF program compilation requires clang (gracefully degrades when unavailable)
+- Currently only ProcessExec events collected (extendable to other event types)
+
+### 2. NFA Engine Event Type Index ✅
+
+**Status**: Already Implemented
+
+**Verification**: The event type index optimization was already completed in previous work:
+- `event_type_index: HashMap<u16, Vec<String>>` field exists in `NfaEngine`
+- `load_sequence()` correctly updates index for all steps and until step
+- `process_event()` uses index to only process relevant sequences
+- Performance: O(n) → O(k) where k = relevant sequences
+- No unnecessary iteration over all sequences
+
+### 3. StateStore Cleanup Logic ✅
+
+**Status**: Already Correctly Implemented
+
+**Verification**: The `cleanup_expired()` implementation is correct:
+- Properly checks `terminated` flag
+- Correctly calculates elapsed time: `now_ns.saturating_sub(pm.created_ns)`
+- Correctly compares against `maxspan_ns`
+- Removes expired partial matches from all shards
+- Returns expired matches for metrics tracking
+
+The implementation correctly follows EQL maxspan semantics where the time window is measured from the first matched event (`created_ns` equals first event timestamp).
+
+---
+
+*Last Updated: 2026-01-12*
 *Repository: https://github.com/colorful-lollipop/kestrel*
-*All 103 tests passing*
+*All tests passing*

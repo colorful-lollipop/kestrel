@@ -40,8 +40,14 @@ impl SemanticAnalyzer {
         // Extract event types
         self.event_types = query.event_types();
 
-        // TODO: Validate event types exist in schema
-        // For now, just accept all event types
+        // Validate event types exist in schema
+        for event_type in &self.event_types {
+            if self.schema.get_event_type_id(event_type).is_none() {
+                return Err(EqlError::UnknownEventType {
+                    event_type: event_type.clone(),
+                });
+            }
+        }
 
         match query {
             Query::Event(eq) => self.analyze_event_query(eq),
@@ -249,13 +255,141 @@ impl SemanticAnalyzer {
         }
     }
 
+    /// Get the type of an IR node for type checking
+    fn get_node_type(&self, node: &IrNode) -> Result<Type> {
+        match node {
+            IrNode::Literal { value } => match value {
+                IrLiteral::Bool(_) => Ok(Type::Bool),
+                IrLiteral::Int(_) => Ok(Type::Int),
+                IrLiteral::String(_) => Ok(Type::String),
+                IrLiteral::Null => Ok(Type::Null),
+            },
+            IrNode::LoadField { field_id } => {
+                if let Some(field_def) = self.schema.get_field(*field_id) {
+                    match field_def.data_type {
+                        kestrel_schema::FieldDataType::Bool => Ok(Type::Bool),
+                        kestrel_schema::FieldDataType::I64 | kestrel_schema::FieldDataType::U64 => {
+                            Ok(Type::Int)
+                        }
+                        kestrel_schema::FieldDataType::String => Ok(Type::String),
+                        _ => Ok(Type::Unknown),
+                    }
+                } else {
+                    Ok(Type::Unknown)
+                }
+            }
+            _ => Ok(Type::Unknown),
+        }
+    }
+
+    /// Check types for binary operations
+    fn check_binary_op_types(
+        &self,
+        op: BinaryOperator,
+        left: &IrNode,
+        right: &IrNode,
+        left_expr: &Expr,
+        right_expr: &Expr,
+    ) -> Result<()> {
+        let left_type = self.get_node_type(left)?;
+        let right_type = self.get_node_type(right)?;
+
+        match op {
+            // Logical operators: both operands must be boolean
+            BinaryOperator::And | BinaryOperator::Or => {
+                if left_type != Type::Bool {
+                    return Err(EqlError::TypeMismatch {
+                        expected: "bool".to_string(),
+                        found: format!("{:?}", left_type),
+                        location: format!("{:?}", left_expr),
+                    });
+                }
+                if right_type != Type::Bool {
+                    return Err(EqlError::TypeMismatch {
+                        expected: "bool".to_string(),
+                        found: format!("{:?}", right_type),
+                        location: format!("{:?}", right_expr),
+                    });
+                }
+            }
+
+            // Comparison operators: operands must have compatible types
+            BinaryOperator::Eq
+            | BinaryOperator::NotEq
+            | BinaryOperator::Less
+            | BinaryOperator::LessEq
+            | BinaryOperator::Greater
+            | BinaryOperator::GreaterEq => {
+                if !self.are_types_compatible(&left_type, &right_type) {
+                    return Err(EqlError::TypeMismatch {
+                        expected: format!("{:?}", left_type),
+                        found: format!("{:?}", right_type),
+                        location: format!("{:?}", right_expr),
+                    });
+                }
+            }
+
+            // Arithmetic operators: operands should be numeric
+            BinaryOperator::Add
+            | BinaryOperator::Sub
+            | BinaryOperator::Mul
+            | BinaryOperator::Div
+            | BinaryOperator::Mod => {
+                if !self.is_numeric_type(&left_type) {
+                    return Err(EqlError::TypeMismatch {
+                        expected: "numeric type".to_string(),
+                        found: format!("{:?}", left_type),
+                        location: format!("{:?}", left_expr),
+                    });
+                }
+                if !self.is_numeric_type(&right_type) {
+                    return Err(EqlError::TypeMismatch {
+                        expected: "numeric type".to_string(),
+                        found: format!("{:?}", right_type),
+                        location: format!("{:?}", right_expr),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check if two types are compatible for comparison
+    fn are_types_compatible(&self, left: &Type, right: &Type) -> bool {
+        match (left, right) {
+            // Exact matches are always compatible
+            (l, r) if l == r => true,
+
+            // Both numeric types are compatible (int and u64)
+            (Type::Int, Type::Int) => true,
+
+            // String comparisons
+            (Type::String, Type::String) => true,
+
+            // Boolean comparisons
+            (Type::Bool, Type::Bool) => true,
+
+            // Null comparisons (null can be compared with any type)
+            (Type::Null, _) | (_, Type::Null) => true,
+
+            // All other combinations are incompatible
+            _ => false,
+        }
+    }
+
+    /// Check if a type is numeric
+    fn is_numeric_type(&self, type_: &Type) -> bool {
+        matches!(type_, Type::Int)
+    }
+
     /// Analyze a binary operation
     fn analyze_binary_op(&mut self, op: &BinaryOp) -> Result<IrNode> {
         let left = self.analyze_expr(&op.left)?;
         let right = self.analyze_expr(&op.right)?;
 
-        // TODO: Type checking
-        // For now, just convert the operator
+        // Perform type checking
+        self.check_binary_op_types(op.operator, &left, &right, &op.left, &op.right)?;
 
         let ir_op = self.convert_binary_op(op.operator)?;
 
@@ -416,5 +550,198 @@ mod tests {
         // This test would require schema setup
         // For now, we just test the structure
         assert!(true);
+    }
+
+    #[test]
+    fn test_type_checking() {
+        let mut analyzer = SemanticAnalyzer::new(Arc::new(SchemaRegistry::new()));
+
+        // Test compatible types for comparison
+        let left = IrNode::Literal {
+            value: IrLiteral::Int(5),
+        };
+        let right = IrNode::Literal {
+            value: IrLiteral::Int(10),
+        };
+        let left_expr = Expr::IntLiteral(5);
+        let right_expr = Expr::IntLiteral(10);
+
+        // Should not error - int comparison is valid
+        let result = analyzer.check_binary_op_types(
+            BinaryOperator::Eq,
+            &left,
+            &right,
+            &left_expr,
+            &right_expr,
+        );
+        assert!(result.is_ok());
+
+        // Test incompatible types for comparison
+        let left_bool = IrNode::Literal {
+            value: IrLiteral::Bool(true),
+        };
+        let right_int = IrNode::Literal {
+            value: IrLiteral::Int(10),
+        };
+        let left_expr_bool = Expr::BoolLiteral(true);
+
+        // Should error - bool vs int comparison is invalid
+        let result = analyzer.check_binary_op_types(
+            BinaryOperator::Eq,
+            &left_bool,
+            &right_int,
+            &left_expr_bool,
+            &right_expr,
+        );
+        assert!(result.is_err());
+
+        // Test logical operators with bool operands
+        let left_bool2 = IrNode::Literal {
+            value: IrLiteral::Bool(true),
+        };
+        let right_bool2 = IrNode::Literal {
+            value: IrLiteral::Bool(false),
+        };
+        let left_expr_bool2 = Expr::BoolLiteral(true);
+        let right_expr_bool2 = Expr::BoolLiteral(false);
+
+        // Should not error - bool and/or is valid
+        let result = analyzer.check_binary_op_types(
+            BinaryOperator::And,
+            &left_bool2,
+            &right_bool2,
+            &left_expr_bool2,
+            &right_expr_bool2,
+        );
+        assert!(result.is_ok());
+
+        // Test arithmetic operators with numeric operands
+        let result = analyzer.check_binary_op_types(
+            BinaryOperator::Add,
+            &left,
+            &right,
+            &left_expr,
+            &right_expr,
+        );
+        assert!(result.is_ok());
+
+        // Test arithmetic operators with non-numeric operands
+        let result = analyzer.check_binary_op_types(
+            BinaryOperator::Add,
+            &left_bool,
+            &right_bool2,
+            &left_expr_bool,
+            &right_expr_bool2,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_event_type_validation() {
+        use crate::ast::{EventQuery, Query, SequenceQuery, SequenceStep};
+        use kestrel_schema::EventTypeDef;
+
+        let mut schema = SchemaRegistry::new();
+        // Register "process" and "file" event types
+        schema
+            .register_event_type(EventTypeDef {
+                name: "process".to_string(),
+                description: Some("Process event".to_string()),
+                parent: None,
+            })
+            .unwrap();
+        schema
+            .register_event_type(EventTypeDef {
+                name: "file".to_string(),
+                description: Some("File event".to_string()),
+                parent: None,
+            })
+            .unwrap();
+        let schema = Arc::new(schema);
+        let mut analyzer = SemanticAnalyzer::new(schema);
+
+        // Create a query with valid event type
+        let query = Query::Event(Box::new(EventQuery {
+            event_type: "process".to_string(),
+            condition: None,
+            captures: vec![],
+        }));
+
+        let result = analyzer.analyze(&query);
+        assert!(result.is_ok(), "Valid event type should pass validation");
+
+        // Create a query with invalid event type
+        let query = Query::Event(Box::new(EventQuery {
+            event_type: "invalid_event".to_string(),
+            condition: None,
+            captures: vec![],
+        }));
+
+        let result = analyzer.analyze(&query);
+        assert!(result.is_err(), "Invalid event type should fail validation");
+        match result.unwrap_err() {
+            EqlError::UnknownEventType { event_type } => {
+                assert_eq!(event_type, "invalid_event");
+            }
+            _ => panic!("Expected UnknownEventType error"),
+        }
+
+        // Test sequence query with valid event types
+        let query = Query::Sequence(Box::new(SequenceQuery {
+            steps: vec![
+                SequenceStep {
+                    event_type: "process".to_string(),
+                    condition: None,
+                    id: None,
+                },
+                SequenceStep {
+                    event_type: "file".to_string(),
+                    condition: None,
+                    id: None,
+                },
+            ],
+            by: Some("process.entity_id".to_string()),
+            maxspan: None,
+            until: None,
+            captures: vec![],
+        }));
+
+        let result = analyzer.analyze(&query);
+        assert!(
+            result.is_ok(),
+            "Valid sequence event types should pass validation"
+        );
+
+        // Test sequence query with invalid event type
+        let query = Query::Sequence(Box::new(SequenceQuery {
+            steps: vec![
+                SequenceStep {
+                    event_type: "process".to_string(),
+                    condition: None,
+                    id: None,
+                },
+                SequenceStep {
+                    event_type: "invalid_event".to_string(),
+                    condition: None,
+                    id: None,
+                },
+            ],
+            by: Some("process.entity_id".to_string()),
+            maxspan: None,
+            until: None,
+            captures: vec![],
+        }));
+
+        let result = analyzer.analyze(&query);
+        assert!(
+            result.is_err(),
+            "Invalid sequence event type should fail validation"
+        );
+        match result.unwrap_err() {
+            EqlError::UnknownEventType { event_type } => {
+                assert_eq!(event_type, "invalid_event");
+            }
+            _ => panic!("Expected UnknownEventType error"),
+        }
     }
 }

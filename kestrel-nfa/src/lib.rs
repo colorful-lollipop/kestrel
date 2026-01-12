@@ -18,9 +18,8 @@ pub use metrics::{EvictionReason, NfaMetrics, SequenceMetrics};
 pub use state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 pub use store::{QuotaConfig, StateStore, StateStoreConfig};
 
-use kestrel_eql::ir::{IrRule, IrSeqStep, IrSequence};
 use kestrel_event::Event;
-use kestrel_schema::SchemaRegistry;
+
 use thiserror::Error;
 
 /// Errors that can occur in the NFA engine
@@ -93,8 +92,8 @@ pub struct SequenceAlert {
     /// Events that participated in the sequence
     pub events: Vec<Event>,
 
-    /// Captured data from predicates
-    pub captures: Vec<String>,
+    /// Captured data from predicates (alias -> value)
+    pub captures: Vec<(String, kestrel_schema::TypedValue)>,
 }
 
 #[cfg(test)]

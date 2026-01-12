@@ -5,6 +5,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use tokio::time::{interval, Duration};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -87,13 +88,23 @@ async fn run_engine(rules_dir: PathBuf) -> Result<()> {
         ..Default::default()
     };
 
-    let engine = kestrel_engine::DetectionEngine::new(config).await?;
+    let mut engine = kestrel_engine::DetectionEngine::new(config).await?;
 
     let stats = engine.stats().await;
     info!(rule_count = stats.rule_count, "Engine started");
 
-    // TODO: Implement event processing loop
+    info!("Starting event processing loop...");
+    engine.start().await?;
     info!("Engine running. Press Ctrl+C to stop.");
+
+    let mut stats_interval = interval(Duration::from_secs(10));
+
+    tokio::spawn(async move {
+        loop {
+            stats_interval.tick().await;
+            tracing::info!("Engine running - waiting for events");
+        }
+    });
 
     tokio::signal::ctrl_c().await?;
     info!("Shutting down engine");

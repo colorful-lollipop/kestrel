@@ -5,7 +5,30 @@ use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 
 fn create_test_compiler() -> EqlCompiler {
-    let schema = Arc::new(SchemaRegistry::new());
+    let mut schema = SchemaRegistry::new();
+    // Register common event types for testing
+    schema
+        .register_event_type(kestrel_schema::EventTypeDef {
+            name: "process".to_string(),
+            description: Some("Process event".to_string()),
+            parent: None,
+        })
+        .unwrap();
+    schema
+        .register_event_type(kestrel_schema::EventTypeDef {
+            name: "file".to_string(),
+            description: Some("File event".to_string()),
+            parent: None,
+        })
+        .unwrap();
+    schema
+        .register_event_type(kestrel_schema::EventTypeDef {
+            name: "network".to_string(),
+            description: Some("Network event".to_string()),
+            parent: None,
+        })
+        .unwrap();
+    let schema = Arc::new(schema);
     EqlCompiler::new(schema)
 }
 
@@ -305,7 +328,7 @@ fn test_maxspan_durations() {
 #[test]
 fn debug_duration() {
     use kestrel_eql::EqlCompiler;
-    use kestrel_schema::SchemaRegistry;
+    use kestrel_schema::{EventTypeDef, SchemaRegistry};
     use std::sync::Arc;
 
     let schema = Arc::new(SchemaRegistry::new());

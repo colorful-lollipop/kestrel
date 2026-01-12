@@ -405,8 +405,85 @@ impl WasmCodeGenerator {
         if rule.captures.is_empty() {
             writeln!(output, "    (i32.const 0)  ;; No captures defined")?;
         } else {
-            writeln!(output, "    ;; TODO: Implement field captures")?;
-            writeln!(output, "    (i32.const 0)")?;
+            writeln!(output, "    ;; Capture {} fields", rule.captures.len())?;
+
+            // Generate field extraction for each capture
+            let mut _first = true;
+            for (idx, capture) in rule.captures.iter().enumerate() {
+                let field_id = capture.field_id;
+                let alias_offset_info = self.get_string_literal_info(&capture.alias);
+                let alias_offset = alias_offset_info.map(|(o, _)| o).unwrap_or(0);
+
+                writeln!(
+                    output,
+                    "    ;; Capture {}: field_id={}",
+                    capture.alias, field_id
+                )?;
+
+                // Get field value based on type
+                let field_type = self
+                    .field_types
+                    .get(&field_id)
+                    .copied()
+                    .unwrap_or(WasmFieldType::I64);
+
+                match field_type {
+                    WasmFieldType::I64 | WasmFieldType::U64 => {
+                        writeln!(output, "    (local.get $event_handle)")?;
+                        writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
+                        writeln!(output, "    (call $event_get_i64)")?;
+                    }
+                    WasmFieldType::String => {
+                        writeln!(output, "    (local.get $event_handle)")?;
+                        writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
+                        writeln!(output, "    (i32.const 0)  ;; buffer ptr")?;
+                        writeln!(output, "    (i32.const 256)  ;; buffer size")?;
+                        writeln!(output, "    (call $event_get_str)")?;
+                    }
+                    WasmFieldType::Bool => {
+                        writeln!(output, "    (local.get $event_handle)")?;
+                        writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
+                        writeln!(output, "    (call $event_get_bool)")?;
+                        writeln!(output, "    (i64.extend_i32_u)")?;
+                    }
+                }
+
+                // Store in capture buffer: write field_id, alias_offset, value
+                // Format: [field_id (4 bytes)][alias_offset (4 bytes)][value (8 bytes)]
+                let offset = 16 * idx as u32;
+                writeln!(
+                    output,
+                    "    (i32.const {})  ;; capture struct offset",
+                    offset
+                )?;
+                writeln!(output, "    (i32.add)")?;
+                writeln!(
+                    output,
+                    "    (i32.const {})  ;; field_id for {}",
+                    field_id, capture.alias
+                )?;
+                writeln!(output, "    (i32.store)")?;
+
+                writeln!(
+                    output,
+                    "    (i32.const {})  ;; capture struct offset",
+                    offset
+                )?;
+                writeln!(output, "    (i32.add)")?;
+                writeln!(output, "    (i32.const 4)  ;; alias_offset offset")?;
+                writeln!(output, "    (i32.add)")?;
+                writeln!(output, "    (i32.const {})  ;; alias_offset", alias_offset)?;
+                writeln!(output, "    (i32.store)")?;
+
+                _first = false;
+            }
+
+            // Return number of captures
+            writeln!(
+                output,
+                "    (i32.const {})  ;; return count",
+                rule.captures.len()
+            )?;
         }
 
         writeln!(output, "  )")?;

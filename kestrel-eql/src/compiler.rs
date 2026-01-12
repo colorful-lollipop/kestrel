@@ -66,7 +66,16 @@ mod tests {
 
     #[test]
     fn test_compile_simple_event() {
-        let schema = Arc::new(SchemaRegistry::new());
+        let mut schema = SchemaRegistry::new();
+        // Register the process event type for the test
+        schema
+            .register_event_type(kestrel_schema::EventTypeDef {
+                name: "process".to_string(),
+                description: Some("Process event".to_string()),
+                parent: None,
+            })
+            .unwrap();
+        let schema = Arc::new(schema);
         let mut compiler = EqlCompiler::new(schema);
 
         let result = compiler.compile_to_wasm("process where process.pid == 1000");
@@ -80,7 +89,7 @@ mod tests {
                 assert!(wat.contains("pred_eval"));
             }
             Err(EqlError::UnknownField { .. }) => {
-                // Expected - schema not set up
+                // Expected - schema not set up for fields
                 assert!(true);
             }
             Err(e) => {

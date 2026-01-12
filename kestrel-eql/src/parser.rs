@@ -311,7 +311,6 @@ fn build_duration(pair: pest::iterators::Pair<Rule>) -> Result<Duration> {
         .unwrap_or(text.len());
 
     let value_str = &text[..first_non_digit];
-    let remaining = &text[first_non_digit..];
 
     let value: u64 = value_str
         .parse()

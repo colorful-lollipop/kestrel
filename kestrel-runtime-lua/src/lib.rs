@@ -426,11 +426,7 @@ impl LuaEngine {
     }
 
     /// Evaluate an event with a predicate
-    pub async fn eval(
-        &self,
-        rule_id: &str,
-        event: &Event,
-    ) -> Result<EvalResult, LuaRuntimeError> {
+    pub async fn eval(&self, rule_id: &str, event: &Event) -> Result<EvalResult, LuaRuntimeError> {
         let predicates = self.predicates.read().unwrap();
         let predicate = predicates
             .get(rule_id)

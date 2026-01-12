@@ -3,10 +3,10 @@
 //! This module provides an ActionExecutor implementation that sends enforcement
 //! decisions to the kernel via eBPF maps for real-time blocking.
 
-use crate::{EbpfCollector, EbpfError};
+use crate::EbpfCollector;
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionType, ActionTarget,
-    ActionResult,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionResult, ActionTarget,
+    ActionType,
 };
 use std::sync::Arc;
 use tracing::{debug, warn};

@@ -1,173 +1,102 @@
-//! Kestrel eBPF Event Collector and Enforcement
+//! eBPF Collector
 //!
-//! This module provides eBPF-based event collection and enforcement for Linux systems.
-//! Uses clang for eBPF compilation and libbpf via Aya for loading.
-//!
-//! Features:
-//! - Event collection via tracepoints
-//! - Real-time blocking via LSM hooks
-//! - Enforcement map for userspace -> kernel communication
+//! This module provides the main eBPF collector implementation for collecting
+//! security events from the Linux kernel using eBPF programs.
 
 mod normalize;
-mod pushdown;
+mod programs;
 
 pub use normalize::EventNormalizer;
-pub use pushdown::InterestPushdown;
+pub use programs::{AttachedPrograms, ProgramManager};
 
-// Optional: ebpf executor module (always compiled for tests)
-mod executor;
-
-use anyhow::Result;
-use aya::{maps::RingBuf, programs::Program, Ebpf, EbpfLoader};
-use kestrel_core::EventBus;
+use aya::maps::HashMap;
+use aya::Ebpf;
+use aya::Pod;
 use kestrel_event::Event;
-use kestrel_schema::SchemaRegistry;
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-/// Configuration for eBPF collector
-#[derive(Debug, Clone)]
-pub struct EbpfConfig {
-    /// Enable process event collection
-    pub enable_process: bool,
-
-    /// Enable file event collection
-    pub enable_file: bool,
-
-    /// Enable network event collection
-    pub enable_network: bool,
-
-    /// Channel size for events
-    pub event_channel_size: usize,
-}
-
-impl Default for EbpfConfig {
-    fn default() -> Self {
-        Self {
-            enable_process: true,
-            enable_file: false,    // Not implemented yet
-            enable_network: false, // Not implemented yet
-            event_channel_size: 4096,
-        }
-    }
-}
-
-/// eBPF event types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EbpfEventType {
-    /// Process exec (execve/execveat)
     ProcessExec,
-
-    /// Process exit
     ProcessExit,
-
-    /// File open
     FileOpen,
-
-    /// File rename
     FileRename,
-
-    /// File unlink (delete)
     FileUnlink,
-
-    /// Network connect
     NetworkConnect,
-
-    /// Network send data
     NetworkSend,
 }
 
-/// Enforcement action type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u32)]
-pub enum EnforcementAction {
-    /// Allow the operation
-    Allow = 0,
+#[derive(Debug, thiserror::Error)]
+pub enum EbpfError {
+    #[error("Program not found: {0}")]
+    ProgramNotFound(String),
 
-    /// Block/deny the operation
-    Block = 1,
+    #[error("Program error: {0}")]
+    ProgramError(String),
 
-    /// Kill the process
-    Kill = 2,
+    #[error("Map error: {0}")]
+    MapError(String),
+
+    #[error("Attachment error: {0}")]
+    AttachmentError(String),
+
+    #[error("Normalization error: {0}")]
+    NormalizationError(String),
+
+    #[error("Collection error: {0}")]
+    CollectionError(String),
 }
 
-/// Enforcement decision from userspace to kernel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnforcementAction {
+    Allow,
+    Block,
+    Kill,
+}
+
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
 pub struct EnforcementDecision {
-    /// Target PID
     pub pid: u32,
-
-    /// Action to take (0=allow, 1=block, 2=kill)
-    pub action: u32,
-
-    /// Time-to-live for this decision (nanoseconds)
+    pub action: EnforcementAction,
     pub ttl_ns: u64,
-
-    /// When this decision was made (nanoseconds)
     pub timestamp_ns: u64,
 }
 
-// Safety: EnforcementDecision is POD (Plain Old Data) - all fields are Copy
-unsafe impl aya::Pod for EnforcementDecision {}
+unsafe impl Pod for EnforcementDecision {}
 
 impl EnforcementDecision {
-    /// Create a new enforcement decision
     pub fn new(pid: u32, action: EnforcementAction, ttl_ns: u64) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-
         Self {
             pid,
-            action: action as u32,
+            action,
             ttl_ns,
-            timestamp_ns: now,
+            timestamp_ns: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64,
         }
-    }
-
-    /// Create a block decision
-    pub fn block(pid: u32, ttl_ns: u64) -> Self {
-        Self::new(pid, EnforcementAction::Block, ttl_ns)
-    }
-
-    /// Create an allow decision
-    pub fn allow(pid: u32) -> Self {
-        Self::new(pid, EnforcementAction::Allow, 0)
-    }
-
-    /// Create a kill decision
-    pub fn kill(pid: u32) -> Self {
-        Self::new(pid, EnforcementAction::Kill, 0)
     }
 }
 
-/// Raw eBPF event from kernel (legacy format for compatibility)
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[derive(Debug, Clone)]
 pub struct RawEbpfEvent {
     pub event_type: u32,
     pub ts_mono_ns: u64,
+    pub entity_key: u64,
     pub pid: u32,
     pub ppid: u32,
     pub uid: u32,
     pub gid: u32,
-    pub exit_code: i32,
     pub path_len: u32,
     pub cmdline_len: u32,
-    pub addr_len: u32,
-    pub entity_key: u64,
+    pub exit_code: i32,
 }
 
-/// Raw eBPF exec event from kernel (matches C struct)
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[derive(Debug, Clone)]
 pub struct ExecveEvent {
     pub ts_mono_ns: u64,
     pub pid: u32,
@@ -180,533 +109,296 @@ pub struct ExecveEvent {
     pub args: [u8; 512],
 }
 
-/// eBPF collector error
-#[derive(Debug, Error)]
-pub enum EbpfError {
-    #[error("Failed to load eBPF program: {0}")]
-    LoadError(String),
-
-    #[error("Failed to attach eBPF program: {0}")]
-    AttachError(String),
-
-    #[error("Failed to read eBPF event: {0}")]
-    EventReadError(String),
-
-    #[error("Normalization error: {0}")]
-    NormalizationError(String),
-
-    #[error("Permission denied (requires root/CAP_BPF)")]
-    PermissionDenied,
-
-    #[error("Unsupported kernel version: {0}")]
-    UnsupportedKernel(String),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("eBPF object file not found: {0}")]
-    ObjectNotFound(String),
-
-    #[error("Aya error: {0}")]
-    Aya(String),
-}
-
-impl From<aya::EbpfError> for EbpfError {
-    fn from(err: aya::EbpfError) -> Self {
-        EbpfError::Aya(format!("{}", err))
-    }
-}
-
-/// eBPF event collector
-///
-/// Manages eBPF programs and collects events from the kernel via ring buffer.
 pub struct EbpfCollector {
-    /// eBPF object (wrapped in Arc<Mutex> for safe sharing with async tasks)
     ebpf: Arc<Mutex<Ebpf>>,
-
-    /// Configuration
-    config: EbpfConfig,
-
-    /// Schema registry
-    schema: Arc<SchemaRegistry>,
-
-    /// Event normalizer
-    normalizer: EventNormalizer,
-
-    /// Event channel sender
+    attached: AttachedPrograms,
     event_tx: mpsc::Sender<Event>,
-
-    /// Running flag
-    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-
-    /// Event ID counter (atomic for thread safety)
-    event_id_counter: Arc<std::sync::atomic::AtomicU64>,
-
-    /// Polling task handle (for graceful shutdown)
-    polling_task: Option<tokio::task::JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
+    interests: Arc<std::sync::RwLock<HashSet<EbpfEventType>>>,
+    normalizer: normalize::EventNormalizer,
+    next_event_id: Arc<AtomicU64>,
+    _polling_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl EbpfCollector {
-    /// Create a new eBPF collector
-    pub async fn new(
-        config: EbpfConfig,
-        schema: Arc<SchemaRegistry>,
-        event_bus: &EventBus,
-    ) -> Result<Self, EbpfError> {
-        info!("Initializing eBPF collector");
+    pub fn new(event_tx: mpsc::Sender<Event>, ebpf: Ebpf) -> Self {
+        use kestrel_schema::SchemaRegistry;
 
-        // Check if running as root
-        if !nix::unistd::Uid::effective().is_root() {
-            return Err(EbpfError::PermissionDenied);
-        }
+        // Create schema registry for normalizer
+        let schema = Arc::new(SchemaRegistry::new());
 
-        // Load eBPF program
-        let ebpf = Self::load_ebpf()?;
-
-        // Create event channel
-        let (event_tx, mut event_rx) = mpsc::channel(config.event_channel_size);
-
-        // Create normalizer
-        let normalizer = EventNormalizer::new(schema.clone());
-
-        // Spawn event processing task
-        let event_bus_handle = event_bus.handle();
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                if let Err(e) = event_bus_handle.publish(event).await {
-                    error!(error = %e, "Failed to publish event to EventBus");
-                }
-            }
-        });
-
-        let collector = Self {
+        Self {
             ebpf: Arc::new(Mutex::new(ebpf)),
-            config,
-            schema,
-            normalizer,
+            attached: AttachedPrograms::new(),
             event_tx,
-            running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            event_id_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            polling_task: None,
-        };
-
-        info!("eBPF collector initialized successfully");
-        Ok(collector)
-    }
-
-    /// Load eBPF program into kernel
-    fn load_ebpf() -> Result<Ebpf, EbpfError> {
-        // Try to load the compiled eBPF object file
-        // The build script compiles to OUT_DIR/main.bpf.o
-        let out_dir = PathBuf::from(
-            std::env::var("OUT_DIR")
-                .map_err(|e| EbpfError::LoadError(format!("OUT_DIR not set: {}", e)))?,
-        );
-
-        let obj_path = out_dir.join("main.bpf.o");
-
-        if !obj_path.exists() {
-            // Try pre-built location (for when build.rs was skipped in tests)
-            let alt_path = PathBuf::from("target/bpf/main.bpf.o");
-            if alt_path.exists() {
-                info!("Using pre-built eBPF object from target/bpf/main.bpf.o");
-                return Self::load_ebpf_from_path(&alt_path);
-            }
-
-            return Err(EbpfError::ObjectNotFound(obj_path.display().to_string()));
+            shutdown: Arc::new(AtomicBool::new(false)),
+            interests: Arc::new(std::sync::RwLock::new(HashSet::new())),
+            normalizer: normalize::EventNormalizer::new(schema),
+            next_event_id: Arc::new(AtomicU64::new(1)),
+            _polling_handle: None,
         }
-
-        Self::load_ebpf_from_path(&obj_path)
     }
 
-    fn load_ebpf_from_path(path: &PathBuf) -> Result<Ebpf, EbpfError> {
-        info!(path = %path.display(), "Loading eBPF program");
+    pub async fn load(&mut self) -> Result<(), EbpfError> {
+        info!("Loading eBPF programs");
 
-        // Read the object file
-        let mut file = File::open(path)
-            .map_err(|e| EbpfError::LoadError(format!("Failed to open eBPF object: {}", e)))?;
+        let mut programs = ProgramManager::new(self.ebpf.clone());
+        programs.attach_process_programs()?;
+        programs.attach_file_programs()?;
+        programs.attach_network_programs()?;
 
-        let mut data = Vec::new();
-        file.read_to_end(&mut data)
-            .map_err(|e| EbpfError::LoadError(format!("Failed to read eBPF object: {}", e)))?;
-
-        // Load eBPF object
-        let ebpf = EbpfLoader::new()
-            .load(&data)
-            .map_err(|e| EbpfError::LoadError(format!("Failed to load eBPF: {}", e)))?;
-
-        info!("eBPF program loaded successfully");
-        Ok(ebpf)
+        info!("eBPF programs loaded successfully");
+        Ok(())
     }
 
-    /// Start collecting events
     pub async fn start(&mut self) -> Result<(), EbpfError> {
-        info!("Starting eBPF event collection");
+        info!("Starting eBPF collector");
 
-        // Attach tracepoint for execve
-        if self.config.enable_process {
-            self.attach_execve_tracepoint()?;
-        }
+        let mut programs = ProgramManager::new(self.ebpf.clone());
+        programs.attach_process_programs()?;
+        programs.attach_file_programs()?;
+        programs.attach_network_programs()?;
 
         // Start ring buffer polling
-        self.start_ringbuf_polling().await?;
+        let polling_handle = self.start_ringbuf_polling().await?;
+        self._polling_handle = Some(polling_handle);
 
-        info!("eBPF event collection started");
+        info!("eBPF collector started");
         Ok(())
     }
 
-    /// Attach execve tracepoint
-    fn attach_execve_tracepoint(&mut self) -> Result<(), EbpfError> {
-        info!("Attaching execve tracepoint");
+    /// Start the ring buffer polling task
+    ///
+    /// This spawns an async task that continuously polls the ring buffer
+    /// for events from eBPF programs, normalizes them, and sends them to EventBus.
+    async fn start_ringbuf_polling(&self) -> Result<tokio::task::JoinHandle<()>, EbpfError> {
+        use aya::maps::RingBuf;
+        use std::mem::size_of;
 
-        let mut ebpf = self
-            .ebpf
-            .lock()
-            .map_err(|e| EbpfError::Aya(format!("Mutex lock error: {}", e)))?;
-
-        // Load the tracepoint program
-        let program: &mut Program = ebpf
-            .program_mut("handle_execve")
-            .ok_or_else(|| EbpfError::AttachError("handle_execve program not found".to_string()))?;
-
-        // Try to downcast to TracePoint using TryInto trait
-        use std::convert::TryInto;
-        let tracepoint_program: &mut aya::programs::TracePoint =
-            program.try_into().map_err(|_| {
-                EbpfError::AttachError("handle_execve is not a TracePoint program".to_string())
-            })?;
-
-        // Attach to sys_enter_execve tracepoint
-        tracepoint_program
-            .load()
-            .map_err(|e| EbpfError::AttachError(format!("Failed to load tracepoint: {}", e)))?;
-
-        tracepoint_program
-            .attach("syscalls", "sys_enter_execve")
-            .map_err(|e| EbpfError::AttachError(format!("Failed to attach tracepoint: {}", e)))?;
-
-        info!("execve tracepoint attached successfully");
-        Ok(())
-    }
-
-    /// Start polling the ring buffer for events
-    async fn start_ringbuf_polling(&mut self) -> Result<(), EbpfError> {
-        info!("Starting ring buffer polling");
-
-        // Set running flag
-        self.running
-            .store(true, std::sync::atomic::Ordering::Release);
-
-        // Clone data for the polling task
-        let running = self.running.clone();
+        let ebpf_clone = self.ebpf.clone();
         let event_tx = self.event_tx.clone();
-        let event_id_counter = self.event_id_counter.clone();
         let normalizer = self.normalizer.clone();
-        let ebpf = self.ebpf.clone();
+        let next_event_id = self.next_event_id.clone();
+        let shutdown = self.shutdown.clone();
+        let interests = self.interests.clone();
 
-        // Spawn the polling task
-        let polling_task = tokio::spawn(async move {
-            Self::ringbuf_poll_loop(ebpf, event_tx, event_id_counter, normalizer, running).await;
+        let handle = tokio::task::spawn(async move {
+            info!("Ring buffer polling task started");
+
+            // Track if we've logged ring buffer error (avoid spam)
+            let mut ringbuf_error_logged = false;
+
+            // Polling loop
+            loop {
+                // Check shutdown flag
+                if shutdown.load(Ordering::Relaxed) {
+                    info!("Ring buffer polling received shutdown signal");
+                    break;
+                }
+
+                // Check if process events are interesting
+                let should_collect = interests
+                    .read()
+                    .unwrap()
+                    .contains(&EbpfEventType::ProcessExec);
+
+                if !should_collect {
+                    // Sleep briefly if not interested
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+
+                // Read from ring buffer (with lock held briefly)
+                let event_data = {
+                    let ebpf = ebpf_clone.lock().unwrap();
+                    let ringbuf_result: Result<RingBuf<_>, _> = ebpf
+                        .map("rb")
+                        .ok_or_else(|| {
+                            EbpfError::MapError("Ring buffer map 'rb' not found".to_string())
+                        })
+                        .and_then(|m| {
+                            m.try_into().map_err(|e| EbpfError::MapError(format!("{:?}", e)))
+                        });
+
+                    match ringbuf_result {
+                        Ok(mut ringbuf) => {
+                            ringbuf_error_logged = false; // Reset on success
+                            // Try to read next event
+                            ringbuf.next().map(|item| {
+                                let bytes: &[u8] = &item;
+                                bytes.to_vec() // Copy data to release lock
+                            })
+                        }
+                        Err(e) => {
+                            // Log error only once
+                            if !ringbuf_error_logged {
+                                error!("Failed to access ring buffer: {}", e);
+                                error!("Event collection will not work");
+                                ringbuf_error_logged = true;
+                            }
+                            None
+                        }
+                    }
+                }; // Lock released here
+
+                // Process event (without lock)
+                if let Some(bytes) = event_data {
+                    let expected_size = size_of::<ExecveEvent>();
+
+                    if bytes.len() != expected_size {
+                        warn!(
+                            expected = expected_size,
+                            actual = bytes.len(),
+                            "Ring buffer item size mismatch, skipping"
+                        );
+                        continue;
+                    }
+
+                    // Parse ExecveEvent from bytes
+                    let exec_event: ExecveEvent = unsafe {
+                        std::ptr::read(bytes.as_ptr() as *const ExecveEvent)
+                    };
+
+                    debug!(
+                        pid = exec_event.pid,
+                        comm = ?std::str::from_utf8(&exec_event.comm),
+                        "Received execve event from ring buffer"
+                    );
+
+                    // Assign event ID
+                    let event_id = next_event_id.fetch_add(1, Ordering::Relaxed);
+
+                    // Normalize event
+                    match normalizer.normalize_execve_event(&exec_event, event_id) {
+                        Ok(kestrel_event) => {
+                            // Send to EventBus
+                            if let Err(e) = event_tx.try_send(kestrel_event) {
+                                // Channel full or closed
+                                use tokio::sync::mpsc::error::TrySendError;
+                                match e {
+                                    TrySendError::Closed(_) => {
+                                        error!("EventBus channel closed, stopping polling");
+                                        break;
+                                    }
+                                    TrySendError::Full(_) => {
+                                        // Channel full - log metric but don't block eBPF
+                                        warn!(
+                                            "EventBus channel full, dropping event (backpressure)"
+                                        );
+                                    }
+                                }
+                            } else {
+                                debug!(
+                                    event_id = event_id,
+                                    pid = exec_event.pid,
+                                    "Event sent to EventBus successfully"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                pid = exec_event.pid,
+                                "Failed to normalize execve event"
+                            );
+                        }
+                    }
+                } else {
+                    // No events available, sleep briefly to avoid busy-wait
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+            }
+
+            info!("Ring buffer polling task stopped");
         });
 
-        self.polling_task = Some(polling_task);
-
-        info!("Ring buffer polling started successfully");
-        Ok(())
+        Ok(handle)
     }
 
-    /// Ring buffer polling loop
-    async fn ringbuf_poll_loop(
-        ebpf: Arc<Mutex<Ebpf>>,
-        event_tx: mpsc::Sender<Event>,
-        event_id_counter: Arc<std::sync::atomic::AtomicU64>,
-        normalizer: EventNormalizer,
-        running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) {
-        debug!("Ring buffer polling loop started");
+    pub async fn stop(&mut self) {
+        info!("Stopping eBPF collector");
 
-        // Poll interval for backoff when no events available
-        let poll_interval = std::time::Duration::from_millis(10);
-
-        'outer: loop {
-            // Check running flag at the start of each iteration
-            if !running.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
-
-            // Scope the lock to ensure it's dropped before any await
-            // Collect events into a vector, then send them after dropping the lock
-            let events_to_send = {
-                let ebpf_guard = ebpf.lock();
-                if let Err(e) = ebpf_guard {
-                    error!(error = %e, "Failed to lock eBPF mutex");
-                    break 'outer;
-                }
-                let ebpf_ref = ebpf_guard.unwrap();
-
-                // Get the ring buffer map
-                let map = match ebpf_ref.map("events") {
-                    Some(m) => m,
-                    None => {
-                        warn!("Ring buffer map 'events' not found, will retry...");
-                        continue 'outer;
-                    }
-                };
-
-                // Create the RingBuf - this borrows from the map/ebpf_ref
-                let mut ring_buf = match RingBuf::try_from(map) {
-                    Ok(rb) => rb,
-                    Err(e) => {
-                        error!(error = %e, "Failed to create RingBuf from map");
-                        continue 'outer;
-                    }
-                };
-
-                // Collect events from the ring buffer
-                let mut events = Vec::new();
-
-                while let Some(data) = ring_buf.next() {
-                    // Parse the raw event
-                    let exec_event: &ExecveEvent =
-                        unsafe { &*(data.as_ptr() as *const ExecveEvent) };
-
-                    // Generate event ID
-                    let event_id =
-                        event_id_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                    // Normalize the execve event
-                    match normalizer.normalize_execve_event(exec_event, event_id) {
-                        Ok(normalized) => events.push(normalized),
-                        Err(e) => warn!(error = %e, "Failed to normalize execve event"),
-                    }
-                }
-
-                events
-            };
-
-            // Lock is dropped here, now we can safely await
-
-            // Check if we have events to process
-            let has_events = !events_to_send.is_empty();
-
-            // Send all collected events
-            for event in events_to_send {
-                if let Err(e) = event_tx.send(event).await {
-                    error!(error = %e, "Failed to send event to channel");
-                }
-            }
-
-            // If no events were processed, sleep briefly to avoid busy-waiting
-            if !has_events {
-                tokio::time::sleep(poll_interval).await;
-            }
-
-            // Small yield to be fair to other tasks
-            tokio::task::yield_now().await;
-        }
-
-        debug!("Ring buffer polling loop exiting");
-    }
-
-    /// Create a Kestrel Event from a raw execve event
-    /// (Deprecated - normalization is now handled by EventNormalizer)
-    #[deprecated(note = "Use EventNormalizer::normalize instead")]
-    fn create_event_from_execve(raw: &ExecveEvent, _event_id: u64) -> Option<Event> {
-        // Extract command line from args
-        let cmdline = Self::extract_cstring::<512>(&raw.args)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-
-        // Extract comm (process name)
-        let comm = Self::extract_cstring::<16>(&raw.comm)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Build entity key from PID and timestamp
-        let entity_key = ((raw.pid as u128) << 32) | (raw.ts_mono_ns as u128);
-
-        // Build the event
-        Event::builder()
-            .event_type(1) // exec event type
-            .ts_mono(raw.ts_mono_ns)
-            .ts_wall(raw.ts_mono_ns)
-            .entity_key(entity_key)
-            .field(1000, kestrel_schema::TypedValue::String(comm))
-            .field(1001, kestrel_schema::TypedValue::String(cmdline))
-            .field(1002, kestrel_schema::TypedValue::I64(raw.pid as i64))
-            .field(1003, kestrel_schema::TypedValue::I64(raw.ppid as i64))
-            .field(1004, kestrel_schema::TypedValue::I64(raw.uid as i64))
-            .field(1005, kestrel_schema::TypedValue::I64(raw.gid as i64))
-            .build()
-            .ok()
-    }
-
-    /// Extract null-terminated C string from byte array
-    fn extract_cstring<const N: usize>(arr: &[u8; N]) -> Option<String> {
-        let mut end = 0;
-        for (i, &byte) in arr.iter().enumerate() {
-            if byte == 0 {
-                end = i;
-                break;
-            }
-            end = i + 1;
-        }
-
-        if end == 0 {
-            return None;
-        }
-
-        String::from_utf8(arr[..end].to_vec()).ok()
-    }
-
-    /// Stop collecting events
-    pub async fn stop(&mut self) -> Result<(), EbpfError> {
-        info!("Stopping eBPF event collection");
-
-        // Set running flag to false
-        self.running
-            .store(false, std::sync::atomic::Ordering::Release);
+        // Set shutdown flag first
+        self.shutdown.store(true, Ordering::Relaxed);
 
         // Wait for polling task to finish
-        if let Some(task) = self.polling_task.take() {
-            task.await
-                .map_err(|e| EbpfError::Aya(format!("Failed to stop polling task: {}", e)))?;
+        if let Some(handle) = self._polling_handle.take() {
+            info!("Waiting for ring buffer polling task to finish...");
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await {
+                Ok(Ok(())) => {
+                    info!("Ring buffer polling task stopped gracefully");
+                }
+                Ok(Err(e)) => {
+                    warn!("Ring buffer polling task stopped with error: {:?}", e);
+                }
+                Err(_) => {
+                    warn!("Ring buffer polling task did not stop within timeout, continuing");
+                }
+            }
         }
 
-        // TODO: Detach eBPF programs
+        // Detach eBPF programs
+        self.attached.detach_all();
 
-        info!("eBPF event collection stopped");
-        Ok(())
+        let mut programs = ProgramManager::new(self.ebpf.clone());
+        programs.detach_all().ok();
+
+        info!("eBPF collector stopped");
     }
 
-    /// Set an enforcement decision for a specific PID
-    ///
-    /// This updates the enforcement map in the kernel, which LSM hooks
-    /// will check before allowing operations.
-    ///
-    /// # Note
-    /// This method requires the eBPF program to be loaded with the enforcement_map.
-    /// The enforcement map is used by LSM hooks to make blocking decisions.
-    #[allow(dead_code)]
-    pub fn set_enforcement(&self, _decision: &EnforcementDecision) -> Result<(), EbpfError> {
-        // TODO: Implement map access
-        // The HashMap API in Aya requires complex lifetime handling
-        // For now, this is a placeholder for the enforcement interface
-        debug!("set_enforcement called (placeholder implementation)");
-        Ok(())
-    }
-
-    /// Clear an enforcement decision for a specific PID
-    ///
-    /// # Note
-    /// This method requires the eBPF program to be loaded with the enforcement_map.
-    #[allow(dead_code)]
-    pub fn clear_enforcement(&self, _pid: u32) -> Result<(), EbpfError> {
-        debug!("clear_enforcement called (placeholder implementation)");
-        Ok(())
-    }
-
-    /// Attach LSM hooks for enforcement
-    ///
-    /// This must be called after loading the eBPF program to enable blocking.
-    /// Requires CAP_BPF and appropriate LSM permissions.
-    ///
-    /// # Note
-    /// LSM hooks require BTF (BPF Type Format) to be available on the system.
-    /// This is typically available on modern kernels (5.8+) with CONFIG_DEBUG_INFO_BTF enabled.
-    #[allow(dead_code)]
-    fn attach_lsm_hooks(&mut self) -> Result<(), EbpfError> {
-        info!("Attaching LSM hooks for enforcement");
+    pub fn set_enforcement(&self, decision: &EnforcementDecision) -> Result<(), EbpfError> {
+        debug!(pid = decision.pid, action = ?decision.action, "Setting enforcement");
 
         let mut ebpf = self
             .ebpf
             .lock()
-            .map_err(|e| EbpfError::Aya(format!("Mutex lock error: {}", e)))?;
+            .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+        let map = ebpf
+            .map_mut("enforcement_map")
+            .ok_or_else(|| EbpfError::MapError("enforcement_map not found".to_string()))?;
 
-        // Load BTF (BPF Type Format) - required for LSM programs
-        let btf = aya::Btf::from_sys_fs()
-            .map_err(|e| EbpfError::AttachError(format!("Failed to load BTF: {}", e)))?;
+        let mut hash_map: HashMap<_, u32, EnforcementDecision> = map
+            .try_into()
+            .map_err(|e| EbpfError::MapError(format!("{:?}", e)))?;
 
-        // Attach bprm_check_security (process execution)
-        if let Some(program) = ebpf.program_mut("lsm_bprm_check_security") {
-            use aya::programs::Lsm;
-            let lsm_program: &mut Lsm = program
-                .try_into()
-                .map_err(|_| EbpfError::AttachError("Not an LSM program".to_string()))?;
+        hash_map.insert(&decision.pid, decision, 0).map_err(|e| {
+            EbpfError::MapError(format!("Failed to insert into enforcement_map: {}", e))
+        })?;
 
-            lsm_program
-                .load("bprm_check_security", &btf)
-                .map_err(|e| EbpfError::AttachError(format!("Failed to load LSM program: {}", e)))?;
-
-            lsm_program
-                .attach()
-                .map_err(|e| EbpfError::AttachError(format!("Failed to attach LSM hook: {}", e)))?;
-
-            info!("LSM hook bprm_check_security attached");
-        }
-
-        // Attach file_open (file operations)
-        if let Some(program) = ebpf.program_mut("lsm_file_open") {
-            use aya::programs::Lsm;
-            let lsm_program: &mut Lsm = program
-                .try_into()
-                .map_err(|_| EbpfError::AttachError("Not an LSM program".to_string()))?;
-
-            lsm_program
-                .load("file_open", &btf)
-                .map_err(|e| EbpfError::AttachError(format!("Failed to load LSM program: {}", e)))?;
-
-            lsm_program
-                .attach()
-                .map_err(|e| EbpfError::AttachError(format!("Failed to attach LSM hook: {}", e)))?;
-
-            info!("LSM hook file_open attached");
-        }
-
-        // Attach socket_connect (network operations)
-        if let Some(program) = ebpf.program_mut("lsm_socket_connect") {
-            use aya::programs::Lsm;
-            let lsm_program: &mut Lsm = program
-                .try_into()
-                .map_err(|_| EbpfError::AttachError("Not an LSM program".to_string()))?;
-
-            lsm_program
-                .load("socket_connect", &btf)
-                .map_err(|e| EbpfError::AttachError(format!("Failed to load LSM program: {}", e)))?;
-
-            lsm_program
-                .attach()
-                .map_err(|e| EbpfError::AttachError(format!("Failed to attach LSM hook: {}", e)))?;
-
-            info!("LSM hook socket_connect attached");
-        }
-
-        // Attach inode_permission (file access control)
-        if let Some(program) = ebpf.program_mut("lsm_inode_permission") {
-            use aya::programs::Lsm;
-            let lsm_program: &mut Lsm = program
-                .try_into()
-                .map_err(|_| EbpfError::AttachError("Not an LSM program".to_string()))?;
-
-            lsm_program
-                .load("inode_permission", &btf)
-                .map_err(|e| EbpfError::AttachError(format!("Failed to load LSM program: {}", e)))?;
-
-            lsm_program
-                .attach()
-                .map_err(|e| EbpfError::AttachError(format!("Failed to attach LSM hook: {}", e)))?;
-
-            info!("LSM hook inode_permission attached");
-        }
-
-        info!("All LSM hooks attached successfully");
+        debug!(pid = decision.pid, "Enforcement decision written to kernel");
         Ok(())
     }
 
-    /// Update interest pushdown based on loaded rules
-    pub fn update_interests(&mut self, event_types: Vec<EbpfEventType>) {
-        // TODO: Implement interest pushdown
-        debug!(count = event_types.len(), "Updated interest pushdown");
+    pub fn update_interests(&self, event_types: &[EbpfEventType]) {
+        let mut interests = self.interests.write().unwrap();
+        interests.clear();
+
+        for event_type in event_types {
+            debug!(?event_type, "Adding event type interest");
+            interests.insert(*event_type);
+        }
+
+        debug!(count = interests.len(), "Updated event interests");
+    }
+
+    pub fn get_interests(&self) -> HashSet<EbpfEventType> {
+        self.interests.read().unwrap().clone()
+    }
+
+    pub fn is_interesting(&self, event_type: EbpfEventType) -> bool {
+        self.interests.read().unwrap().contains(&event_type)
+    }
+
+    pub fn ebpf(&self) -> &Arc<Mutex<Ebpf>> {
+        &self.ebpf
+    }
+}
+
+impl Drop for EbpfCollector {
+    fn drop(&mut self) {
+        if !self.shutdown.load(Ordering::Relaxed) {
+            warn!("EbpfCollector dropped without calling stop()");
+        }
     }
 }
 
@@ -715,61 +407,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ebpf_config_default() {
-        let config = EbpfConfig::default();
-        assert!(config.enable_process);
-        assert!(!config.enable_file);
-        assert!(!config.enable_network);
+    fn test_attached_programs_new() {
+        let attached = AttachedPrograms::new();
+        assert!(attached.execve_tracepoint.is_none());
+        assert!(attached.lsm_bprm_check_security.is_none());
     }
 
     #[test]
-    fn test_execve_event_size() {
-        // Ensure the struct size matches what we expect
-        // Actual size: 8 (ts) + 4*4 (pid/ppid/uid/gid/entity_key) + 16 + 256 + 512 = 816
-        assert_eq!(std::mem::size_of::<ExecveEvent>(), 816);
-    }
-
-    #[test]
-    fn test_enforcement_action_values() {
-        assert_eq!(EnforcementAction::Allow as u32, 0);
-        assert_eq!(EnforcementAction::Block as u32, 1);
-        assert_eq!(EnforcementAction::Kill as u32, 2);
-    }
-
-    #[test]
-    fn test_enforcement_decision_block() {
-        let decision = EnforcementDecision::block(1234, 1_000_000_000);
-        assert_eq!(decision.pid, 1234);
-        assert_eq!(decision.action, EnforcementAction::Block as u32);
-        assert_eq!(decision.ttl_ns, 1_000_000_000);
-        assert!(decision.timestamp_ns > 0);
-    }
-
-    #[test]
-    fn test_enforcement_decision_allow() {
-        let decision = EnforcementDecision::allow(5678);
-        assert_eq!(decision.pid, 5678);
-        assert_eq!(decision.action, EnforcementAction::Allow as u32);
-        assert_eq!(decision.ttl_ns, 0);
-    }
-
-    #[test]
-    fn test_enforcement_decision_kill() {
-        let decision = EnforcementDecision::kill(9999);
-        assert_eq!(decision.pid, 9999);
-        assert_eq!(decision.action, EnforcementAction::Kill as u32);
-        assert_eq!(decision.ttl_ns, 0);
-    }
-
-    #[test]
-    fn test_enforcement_decision_custom() {
-        let decision = EnforcementDecision::new(
-            1111,
-            EnforcementAction::Block,
-            5_000_000_000,
-        );
-        assert_eq!(decision.pid, 1111);
-        assert_eq!(decision.action, EnforcementAction::Block as u32);
-        assert_eq!(decision.ttl_ns, 5_000_000_000);
+    fn test_attached_programs_detach_all() {
+        let mut attached = AttachedPrograms::new();
+        attached.detach_all();
+        assert!(attached.execve_tracepoint.is_none());
     }
 }

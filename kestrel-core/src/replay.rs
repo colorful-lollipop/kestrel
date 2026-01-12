@@ -7,7 +7,7 @@
 //! - Validating engine behavior with known inputs
 //! - Time travel debugging
 
-use crate::{EventBus, EventBusHandle, TimeManager};
+use crate::{EventBus, TimeManager};
 use kestrel_event::Event;
 use kestrel_schema::SchemaRegistry;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::mpsc;
+
 use tracing::{debug, error, info, warn};
 
 /// Replay error types

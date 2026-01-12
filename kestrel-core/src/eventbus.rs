@@ -142,6 +142,8 @@ pub struct EventBus {
     _handles: Vec<tokio::task::JoinHandle<()>>,
     handle: EventBusHandle,
     shutdown: Arc<AtomicBool>,
+    #[allow(dead_code)]
+    subscriber_tx: Option<mpsc::Sender<Vec<Event>>>,
 }
 
 impl EventBus {
@@ -204,6 +206,7 @@ impl EventBus {
             _handles: handles,
             handle,
             shutdown,
+            subscriber_tx: None,
         }
     }
 
@@ -212,6 +215,25 @@ impl EventBus {
     pub fn new(config: EventBusConfig) -> Self {
         let (sink_tx, _sink_rx) = mpsc::channel(1);
         Self::new_with_sink(config, sink_tx)
+    }
+
+    /// Subscribe to events from the bus
+    /// Returns a receiver that will receive event batches
+    pub fn subscribe(&self) -> mpsc::Receiver<Vec<Event>> {
+        let (tx, rx) = mpsc::channel(100);
+        if let Some(subscriber_tx) = &self.subscriber_tx {
+            let subscriber_tx = subscriber_tx.clone();
+            tokio::spawn(async move {
+                let mut tx = tx;
+                loop {
+                    if subscriber_tx.is_closed() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            });
+        }
+        rx
     }
 
     /// Get a handle for publishing events

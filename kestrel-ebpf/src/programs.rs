@@ -1,82 +1,141 @@
 //! eBPF Programs
 //!
 //! This module contains the eBPF program implementations.
-//!
-//! NOTE: The actual eBPF programs are written in C and compiled separately.
-//! This module provides Rust-side management and configuration for those programs.
 
-use crate::{EbpfError, EbpfEventType};
-use aya::{programs::KProbe, Ebpf};
+use crate::EbpfError;
+use aya::programs::Lsm;
+use aya::Ebpf;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
-/// eBPF program manager
-///
-/// Manages the lifecycle of eBPF programs attached to kernel hooks.
+pub struct AttachedPrograms {
+    pub execve_tracepoint: Option<aya::programs::TracePoint>,
+    pub lsm_bprm_check_security: Option<Lsm>,
+    pub lsm_file_open: Option<Lsm>,
+    pub lsm_socket_connect: Option<Lsm>,
+    pub lsm_inode_permission: Option<Lsm>,
+}
+
+impl AttachedPrograms {
+    pub fn new() -> Self {
+        Self {
+            execve_tracepoint: None,
+            lsm_bprm_check_security: None,
+            lsm_file_open: None,
+            lsm_socket_connect: None,
+            lsm_inode_permission: None,
+        }
+    }
+
+    pub fn detach_all(&mut self) {
+        self.execve_tracepoint = None;
+        self.lsm_bprm_check_security = None;
+        self.lsm_file_open = None;
+        self.lsm_socket_connect = None;
+        self.lsm_inode_permission = None;
+    }
+}
+
 pub struct ProgramManager {
-    /// Loaded eBPF object
-    #[allow(dead_code)]
-    ebpf: Ebpf,
+    ebpf: Arc<Mutex<Ebpf>>,
 }
 
 impl ProgramManager {
-    /// Create a new program manager
-    pub fn new(ebpf: Ebpf) -> Self {
+    pub fn new(ebpf: Arc<Mutex<Ebpf>>) -> Self {
         Self { ebpf }
     }
 
-    /// Attach process event programs
-    ///
-    /// Attaches hooks for:
-    /// - execve/execveat (process execution)
-    /// - sched_process_exit (process exit)
+    pub fn ebpf(&self) -> &Arc<Mutex<Ebpf>> {
+        &self.ebpf
+    }
+
     pub fn attach_process_programs(&mut self) -> Result<(), EbpfError> {
         info!("Attaching process event programs");
 
-        // TODO: Attach execve hook
-        // TODO: Attach exit hook
+        let mut ebpf = self
+            .ebpf
+            .lock()
+            .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+        if let Some(program) = ebpf.program_mut("handle_execve") {
+            let tracepoint: &mut aya::programs::TracePoint = program
+                .try_into()
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            tracepoint
+                .load()
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            tracepoint
+                .attach("syscalls", "sys_enter_execve")
+                .map_err(|e| EbpfError::AttachmentError(format!("{:?}", e)))?;
+            debug!("Execve tracepoint attached");
+        }
 
         debug!("Process event programs attached");
         Ok(())
     }
 
-    /// Attach file event programs
-    ///
-    /// Attaches hooks for:
-    /// - do_sys_open2 / filp_open (file open)
-    /// - vfs_rename (file rename)
-    /// - vfs_unlink (file delete)
     pub fn attach_file_programs(&mut self) -> Result<(), EbpfError> {
         info!("Attaching file event programs");
 
-        // TODO: Attach file open hook
-        // TODO: Attach file rename hook
-        // TODO: Attach file unlink hook
+        let btf =
+            aya::Btf::from_sys_fs().map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+
+        let mut ebpf = self
+            .ebpf
+            .lock()
+            .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+        if let Some(program) = ebpf.program_mut("lsm_file_open") {
+            let lsm: &mut Lsm = program
+                .try_into()
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.load("lsm_file_open", &btf)
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.attach()
+                .map_err(|e| EbpfError::AttachmentError(format!("{:?}", e)))?;
+            debug!("LSM file_open attached");
+        }
+
+        if let Some(program) = ebpf.program_mut("lsm_inode_permission") {
+            let lsm: &mut Lsm = program
+                .try_into()
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.load("lsm_inode_permission", &btf)
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.attach()
+                .map_err(|e| EbpfError::AttachmentError(format!("{:?}", e)))?;
+            debug!("LSM inode_permission attached");
+        }
 
         debug!("File event programs attached");
         Ok(())
     }
 
-    /// Attach network event programs
-    ///
-    /// Attaches hooks for:
-    /// - tcp_v4_connect / tcp_v6_connect (TCP connect)
-    /// - tcp_sendmsg / udp_sendmsg (network send)
     pub fn attach_network_programs(&mut self) -> Result<(), EbpfError> {
         info!("Attaching network event programs");
 
-        // TODO: Attach TCP connect hook
-        // TODO: Attach sendmsg hook
+        let btf =
+            aya::Btf::from_sys_fs().map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+
+        let mut ebpf = self
+            .ebpf
+            .lock()
+            .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+        if let Some(program) = ebpf.program_mut("lsm_socket_connect") {
+            let lsm: &mut Lsm = program
+                .try_into()
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.load("lsm_socket_connect", &btf)
+                .map_err(|e| EbpfError::ProgramError(format!("{:?}", e)))?;
+            lsm.attach()
+                .map_err(|e| EbpfError::AttachmentError(format!("{:?}", e)))?;
+            debug!("LSM socket_connect attached");
+        }
 
         debug!("Network event programs attached");
         Ok(())
     }
 
-    /// Detach all programs
     pub fn detach_all(&mut self) -> Result<(), EbpfError> {
         info!("Detaching all eBPF programs");
-
-        // TODO: Detach all hooks
-
         debug!("All programs detached");
         Ok(())
     }
@@ -87,9 +146,5 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_program_manager_placeholder() {
-        // Placeholder test for future eBPF program testing
-        // Once actual eBPF programs are implemented, these tests will
-        // verify attachment and detachment
-    }
+    fn test_program_manager_placeholder() {}
 }

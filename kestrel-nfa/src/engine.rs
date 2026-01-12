@@ -225,20 +225,41 @@ impl NfaEngine {
             }
         }
 
-        // Check each relevant step
+        // Sort relevant steps and find expected next state
+        let mut relevant_steps: Vec<_> = sequence
+            .steps
+            .iter()
+            .filter(|step| step.event_type_id == event_type_id)
+            .collect();
+        relevant_steps.sort_by_key(|step| step.state_id);
+
+        // Determine expected state based on existing partial matches
+        let expected_state = self.get_expected_state(sequence, entity_key)?;
+        trace!(
+            sequence_id = %sequence.id,
+            entity_key = entity_key,
+            event_type_id = event_type_id,
+            expected_state = expected_state,
+            "Processing sequence event"
+        );
+
+        // Find step at expected state that passes predicate
+        let mut step_to_process = None;
         for step in &relevant_steps {
-            if !self.step_matches(event, step, sequence_id(sequence))? {
-                continue;
+            if step.state_id == expected_state
+                && self.step_matches(event, step, sequence_id(sequence))?
+            {
+                step_to_process = Some(step);
+                break;
             }
+        }
 
-            // Step matched - check if we can advance any partial matches
+        // Process the found step
+        if let Some(step) = step_to_process {
             let state_id = step.state_id;
-
-            // If this is the first step (state 0), start a new partial match
             if state_id == 0 {
                 self.start_partial_match(sequence, event.clone(), entity_key)?;
             } else {
-                // Try to advance existing partial matches
                 if let Some(alert) =
                     self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
                 {
@@ -252,6 +273,56 @@ impl NfaEngine {
         } else {
             Some(alerts)
         })
+    }
+
+    /// Get the expected next state for an entity in a sequence
+    /// Returns 0 if no partial match exists, otherwise returns state_id to advance to
+    fn get_expected_state(
+        &self,
+        sequence: &NfaSequence,
+        entity_key: u128,
+    ) -> NfaResult<NfaStateId> {
+        // Find the maximum current_state among partial matches for this entity
+        // and return the next state to advance to
+        let mut max_state: NfaStateId = 0;
+        for step in &sequence.steps {
+            if let Some(pm) = self
+                .state_store
+                .get(&sequence.id, entity_key, step.state_id)
+            {
+                if !pm.terminated && pm.current_state >= max_state {
+                    max_state = pm.current_state;
+                }
+            }
+        }
+        // Return the next state to advance to (current max + 1)
+        Ok(max_state.saturating_add(1))
+    }
+
+    /// Get the expected next state for an entity in a sequence
+    /// Returns the state_id that the next matching event should be at
+    fn get_expected_next_state(
+        &self,
+        sequence: &NfaSequence,
+        entity_key: u128,
+    ) -> NfaResult<NfaStateId> {
+        // Find partial matches for this entity and sequence
+        let mut max_matched_state: NfaStateId = 0;
+
+        // Check all states in the sequence for partial matches
+        for step in &sequence.steps {
+            if let Some(pm) = self
+                .state_store
+                .get(&sequence.id, entity_key, step.state_id)
+            {
+                if !pm.terminated && pm.current_state >= max_matched_state {
+                    max_matched_state = pm.current_state;
+                }
+            }
+        }
+
+        // Next expected state is current max + 1
+        Ok(max_matched_state.saturating_add(1))
     }
 
     /// Check if a step matches an event
@@ -326,6 +397,14 @@ impl NfaEngine {
             self.state_store
                 .get(sequence_id(sequence), entity_key, prev_state)
         {
+            trace!(
+                sequence_id = %sequence.id,
+                entity_key = entity_key,
+                prev_state = prev_state,
+                step_state_id = step_state_id,
+                current_state = partial_match.current_state,
+                "Found partial match to advance"
+            );
             // Check if the partial match is expired
             let now_ns = event.ts_mono_ns;
             if partial_match.is_expired(now_ns, sequence.maxspan_ms) {
@@ -428,7 +507,7 @@ impl NfaEngine {
             .map(|me| me.event)
             .collect();
 
-        let captures = Vec::new(); // TODO: Extract captures from predicates
+        let captures = self.extract_captures(sequence, &events)?;
 
         Ok(SequenceAlert {
             rule_id: sequence.id.clone(),
@@ -439,6 +518,36 @@ impl NfaEngine {
             events,
             captures,
         })
+    }
+
+    /// Extract field captures from matched events based on sequence configuration
+    pub fn extract_captures(
+        &self,
+        sequence: &NfaSequence,
+        events: &[kestrel_event::Event],
+    ) -> NfaResult<Vec<(String, kestrel_schema::TypedValue)>> {
+        let mut captures = Vec::new();
+
+        for capture in &sequence.captures {
+            let target_event = if let Some(source_step) = &capture.source_step {
+                let step_index: usize = source_step.parse().unwrap_or(0);
+                if step_index < events.len() {
+                    &events[step_index]
+                } else {
+                    continue;
+                }
+            } else {
+                events.last().unwrap_or(&events[0])
+            };
+
+            if let Some(value) = target_event.get_field(capture.field_id) {
+                captures.push((capture.alias.clone(), value.clone()));
+            } else {
+                captures.push((capture.alias.clone(), kestrel_schema::TypedValue::Null));
+            }
+        }
+
+        Ok(captures)
     }
 
     /// Cleanup all partial matches for a sequence
@@ -551,12 +660,13 @@ impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
             }
         });
 
-        let nfa_sequence = NfaSequence::new(
+        let nfa_sequence = NfaSequence::with_captures(
             ir_rule.rule_id.clone(),
             sequence.by_field_id,
             steps,
             sequence.maxspan_ms,
             until_step,
+            ir_rule.captures.clone(),
         );
 
         Self {
@@ -575,14 +685,14 @@ mod tests {
     use std::sync::Arc;
 
     // Mock predicate evaluator for testing
-    struct MockPredicateEvaluator {
-        predicates: AHashMap<String, bool>,
+    struct TestPredicateEvaluator {
+        predicates: ahash::AHashMap<String, bool>,
     }
 
-    impl MockPredicateEvaluator {
+    impl TestPredicateEvaluator {
         fn new() -> Self {
             Self {
-                predicates: AHashMap::default(),
+                predicates: ahash::AHashMap::default(),
             }
         }
 
@@ -591,7 +701,7 @@ mod tests {
         }
     }
 
-    impl PredicateEvaluator for MockPredicateEvaluator {
+    impl PredicateEvaluator for TestPredicateEvaluator {
         fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> NfaResult<bool> {
             Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
         }
@@ -608,7 +718,7 @@ mod tests {
     #[test]
     fn test_nfa_engine_creation() {
         let config = NfaEngineConfig::default();
-        let evaluator = Arc::new(MockPredicateEvaluator::new());
+        let evaluator = Arc::new(TestPredicateEvaluator::new());
         let schema = Arc::new(SchemaRegistry::new());
         let engine = NfaEngine::new(config, evaluator, schema);
 
@@ -618,7 +728,7 @@ mod tests {
     #[test]
     fn test_load_sequence() {
         let config = NfaEngineConfig::default();
-        let mut evaluator = MockPredicateEvaluator::new();
+        let mut evaluator = TestPredicateEvaluator::new();
         evaluator.set_result("pred1".to_string(), true);
 
         let schema = Arc::new(SchemaRegistry::new());
@@ -645,7 +755,7 @@ mod tests {
 
     #[test]
     fn test_event_type_index() {
-        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(MockPredicateEvaluator::new());
+        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator::new());
         let schema = Arc::new(SchemaRegistry::new());
         let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
 

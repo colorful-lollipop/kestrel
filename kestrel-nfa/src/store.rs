@@ -6,13 +6,12 @@
 // - Per-sequence and per-entity quotas
 // - Sharded storage for parallelism
 
-use crate::metrics::EvictionReason;
 use crate::state::{NfaStateId, PartialMatch};
 use crate::{NfaError, NfaResult};
 use ahash::AHashMap;
 use parking_lot::RwLock;
 use priority_queue::PriorityQueue;
-use std::sync::Arc;
+
 use std::time::Duration;
 
 /// Configuration for the state store

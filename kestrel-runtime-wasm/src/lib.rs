@@ -170,6 +170,7 @@ pub struct WasmContext {
     pub alerts: Arc<std::sync::Mutex<Vec<AlertRecord>>>,
     pub regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
     pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+    pub rule_metadata: RuleMetadata,
 }
 
 /// Wasm predicate
@@ -527,10 +528,10 @@ impl WasmEngine {
 
                     // Create alert record with event details
                     let alert_record = AlertRecord {
-                        rule_id: "wasm_rule".to_string(), // TODO: Get from rule metadata
-                        severity: "medium".to_string(),    // TODO: Get from rule metadata
-                        title: "Wasm Alert".to_string(),   // TODO: Get from rule metadata
-                        description: None,
+                        rule_id: ctx.rule_metadata.rule_id.clone(),
+                        severity: ctx.rule_metadata.severity.clone(),
+                        title: ctx.rule_metadata.rule_name.clone(),
+                        description: ctx.rule_metadata.description.clone(),
                         event_handles: vec![event_handle],
                         fields,
                     };
@@ -589,7 +590,9 @@ impl WasmEngine {
 
                     // Add the captured field
                     let mut updated_record = capture_record;
-                    updated_record.fields.insert(format!("field_{}", field_id), value);
+                    updated_record
+                        .fields
+                        .insert(format!("field_{}", field_id), value);
 
                     alerts.push(updated_record);
 
@@ -598,6 +601,41 @@ impl WasmEngine {
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
+        Ok(())
+    }
+
+    /// Compile a Wasm rule and extract metadata
+    pub async fn compile_rule(
+        &self,
+        rule_id: &str,
+        wasm_bytes: Vec<u8>,
+    ) -> Result<(), WasmRuntimeError> {
+        // For now, create default metadata
+        // In a full implementation, this would extract metadata from the Wasm module
+        let metadata = RuleMetadata {
+            rule_id: rule_id.to_string(),
+            rule_name: format!("Rule {}", rule_id),
+            rule_version: "1.0.0".to_string(),
+            author: None,
+            description: None,
+            tags: Vec::new(),
+            severity: "medium".to_string(),
+            schema_version: "1.0".to_string(),
+        };
+
+        let manifest = RuleManifest {
+            format_version: "1.0".to_string(),
+            metadata,
+            capabilities: RuleCapabilities {
+                supports_inline: true,
+                requires_alert: true,
+                requires_block: false,
+                max_span_ms: None,
+            },
+        };
+
+        // Load the module with the generated manifest
+        self.load_module(manifest, wasm_bytes).await?;
         Ok(())
     }
 
@@ -645,6 +683,7 @@ impl WasmEngine {
                     alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
                     regex_cache: self.regex_cache.clone(),
                     glob_cache: self.glob_cache.clone(),
+                    rule_metadata: compiled.metadata.clone(),
                 },
             );
 
@@ -699,6 +738,16 @@ impl WasmEngine {
                 alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
                 regex_cache: self.regex_cache.clone(),
                 glob_cache: self.glob_cache.clone(),
+                rule_metadata: RuleMetadata {
+                    rule_id: "adhoc".to_string(),
+                    rule_name: "Ad-hoc Predicate".to_string(),
+                    rule_version: "1.0.0".to_string(),
+                    author: None,
+                    description: None,
+                    tags: Vec::new(),
+                    severity: "medium".to_string(),
+                    schema_version: "1.0".to_string(),
+                },
             },
         );
 
@@ -811,18 +860,29 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
                 // Get the instance pool for this rule (write access from the start)
                 let mut pools = self.instance_pool.write().await;
                 let pool = pools.get_mut(rule_id).ok_or_else(|| {
-                    kestrel_nfa::NfaError::PredicateError(format!("Instance pool not found for rule: {}", rule_id))
+                    kestrel_nfa::NfaError::PredicateError(format!(
+                        "Instance pool not found for rule: {}",
+                        rule_id
+                    ))
                 })?;
 
                 // Acquire a permit from the semaphore (limits concurrent access)
                 let _permit = pool.semaphore.acquire().await.map_err(|e| {
-                    kestrel_nfa::NfaError::PredicateError(format!("Failed to acquire semaphore: {}", e))
+                    kestrel_nfa::NfaError::PredicateError(format!(
+                        "Failed to acquire semaphore: {}",
+                        e
+                    ))
                 })?;
 
                 // Find an available instance
-                let instance_idx = pool.instances.iter().position(|inst| !inst.in_use)
+                let instance_idx = pool
+                    .instances
+                    .iter()
+                    .position(|inst| !inst.in_use)
                     .ok_or_else(|| {
-                        kestrel_nfa::NfaError::PredicateError("No available instances in pool".to_string())
+                        kestrel_nfa::NfaError::PredicateError(
+                            "No available instances in pool".to_string(),
+                        )
                     })?;
 
                 // Mark as in-use and set event
@@ -914,6 +974,7 @@ impl WasmPredicate {
                 alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
                 regex_cache: self.engine.regex_cache.clone(),
                 glob_cache: self.engine.glob_cache.clone(),
+                rule_metadata: compiled.metadata.clone(),
             },
         );
 

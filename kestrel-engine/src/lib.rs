@@ -4,9 +4,9 @@
 // //! rule evaluation, alert generation, and enforcement actions.
 
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionType,
-    ActionTarget, Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence,
-    Severity, NoOpExecutor,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionTarget, ActionType,
+    Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence, NoOpExecutor,
+    Severity,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
@@ -14,6 +14,7 @@ use kestrel_rules::{Rule, RuleDefinition, RuleManager, Severity as RuleSeverity}
 use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "wasm")]
@@ -129,7 +130,7 @@ fn determine_action_target(event: &Event) -> ActionTarget {
 
 /// Detection engine
 pub struct DetectionEngine {
-    _event_bus: EventBus,
+    event_bus: EventBus,
     _alert_output: AlertOutput,
     rule_manager: Arc<RuleManager>,
     schema: Arc<SchemaRegistry>,
@@ -240,15 +241,15 @@ impl DetectionEngine {
         let single_event_rules = Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
         // Initialize action executor
-        let action_executor = config.action_executor.unwrap_or_else(|| {
-            Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>
-        });
+        let action_executor = config
+            .action_executor
+            .unwrap_or_else(|| Arc::new(NoOpExecutor::default()) as Arc<dyn ActionExecutor>);
 
         // Log the engine mode
         info!(mode = ?config.mode, "Detection engine mode");
 
         Ok(Self {
-            _event_bus: event_bus,
+            event_bus,
             _alert_output: alert_output,
             rule_manager,
             schema,
@@ -339,7 +340,7 @@ impl DetectionEngine {
                         wasm_bytes,
                         required_fields,
                     },
-                    blockable: false, // Default to non-blockable for now
+                    blockable: false,  // Default to non-blockable for now
                     action_type: None, // Default to alert-only for now
                 };
 
@@ -395,6 +396,32 @@ impl DetectionEngine {
             alerts_generated,
             actions_generated,
         }
+    }
+
+    /// Start the detection engine's event processing loop
+    /// This method subscribes to the event bus and processes events in the background.
+    /// Returns immediately after starting the event loop.
+    pub async fn start(&mut self) -> Result<(), EngineError> {
+        info!("Starting detection engine event loop");
+
+        let alerts_generated = self.alerts_generated.clone();
+
+        let event_handle = self.event_bus.handle();
+
+        tokio::spawn(async move {
+            info!("Event processing loop started");
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let stats = event_handle.metrics();
+                tracing::debug!(
+                    events_received = stats.events_received,
+                    events_processed = stats.events_processed,
+                    "Event bus stats"
+                );
+            }
+        });
+
+        Ok(())
     }
 
     /// Evaluate an event against all loaded rules
@@ -621,6 +648,7 @@ pub enum EngineError {
 mod tests {
     use super::*;
     use kestrel_event::Event;
+    use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_engine_create() {
@@ -681,6 +709,7 @@ mod tests {
     #[tokio::test]
     async fn test_single_event_rule_eval_always_match() {
         use kestrel_event::Event;
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -735,6 +764,7 @@ mod tests {
     #[tokio::test]
     async fn test_single_event_rule_no_match_different_event_type() {
         use kestrel_event::Event;
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -787,6 +817,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_event_multiple_single_event_rules() {
         use kestrel_event::Event;
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -866,8 +897,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_inline_mode_with_blockable_rule() {
+        use kestrel_core::{ActionType, NoOpExecutor};
         use kestrel_event::Event;
-        use kestrel_core::{NoOpExecutor, ActionType};
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -932,8 +964,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_mode_no_enforcement() {
+        use kestrel_core::{ActionType, NoOpExecutor};
         use kestrel_event::Event;
-        use kestrel_core::{NoOpExecutor, ActionType};
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -997,8 +1030,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_blockable_rule_no_enforcement() {
+        use kestrel_core::{ActionType, NoOpExecutor};
         use kestrel_event::Event;
-        use kestrel_core::{NoOpExecutor, ActionType};
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -1031,7 +1065,7 @@ mod tests {
             severity: Severity::Medium,
             description: Some("A non-blockable rule".to_string()),
             predicate: CompiledPredicate::AlwaysMatch,
-            blockable: false, // Not blockable
+            blockable: false,                     // Not blockable
             action_type: Some(ActionType::Block), // Has action but not blockable
         };
 
@@ -1062,8 +1096,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_action_type_kill() {
+        use kestrel_core::{ActionType, NoOpExecutor};
         use kestrel_event::Event;
-        use kestrel_core::{NoOpExecutor, ActionType};
+        use tokio::time::Duration;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
