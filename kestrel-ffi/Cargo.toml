@@ -1,0 +1,22 @@
+[package]
+name = "kestrel-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kestrel-core = { path = "../kestrel-core" }
+kestrel-engine = { path = "../kestrel-engine" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-schema = { path = "../kestrel-schema" }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+
+

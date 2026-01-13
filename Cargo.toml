@@ -12,6 +12,7 @@ members = [
     "kestrel-ebpf",
     "kestrel-cli",
     "kestrel-benchmark",
+    "kestrel-ffi",
 ]
 resolver = "2"
 
