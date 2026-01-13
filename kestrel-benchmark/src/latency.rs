@@ -85,29 +85,26 @@ pub fn run_nfa_latency_benchmarks() {
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
-    let config = NfaEngineConfig {
-        state_store: kestrel_nfa::StateStoreConfig::default(),
-        max_sequences: 1000,
-    };
+    let config = NfaEngineConfig::default();
 
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(NoOpPredicateEvaluator);
-    let mut nfa_engine = NfaEngine::new(config, evaluator, schema);
+    let mut nfa_engine = NfaEngine::new(config, evaluator);
 
     let sequence = CompiledSequence {
         id: "test_sequence".to_string(),
-        sequence: kestrel_nfa::NfaSequence {
-            id: "test_sequence".to_string(),
-            by_field_id: 0,
-            steps: vec![
+        sequence: kestrel_nfa::NfaSequence::with_captures(
+            "test_sequence".to_string(),
+            0,
+            vec![
                 SeqStep::new(0, "step1".to_string(), 1),
                 SeqStep::new(1, "step2".to_string(), 2),
                 SeqStep::new(2, "step3".to_string(), 3),
             ],
-            maxspan_ms: Some(10000),
-            until_step: None,
-            captures: Vec::new(),
-        },
+            Some(10000),
+            None,
+            Vec::new(),
+        ),
         rule_id: "test_rule".to_string(),
         rule_name: "Test Rule".to_string(),
     };

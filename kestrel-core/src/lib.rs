@@ -6,6 +6,7 @@ pub mod action;
 pub mod alert;
 pub mod deterministic;
 pub mod eventbus;
+pub mod metrics;
 pub mod replay;
 pub mod runtime_comparison;
 pub mod time;
@@ -20,7 +21,7 @@ pub use action::{
 };
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types
-pub use eventbus::{EventBus, EventBusConfig, EventBusHandle};
+pub use eventbus::{EventBus, EventBusConfig, EventBusHandle, EventBusMetricsSnapshot};
 pub use replay::{BinaryLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
 pub use time::{MockTimeProvider, RealTimeProvider, TimeManager, TimeProvider};
 
@@ -28,6 +29,8 @@ pub use deterministic::{
     DeterministicResult, DeterministicTestRunner, DeterministicVerifier, ReplayVerificationReport,
     ReplayVerificationResult, VerificationMismatch,
 };
+
+pub use metrics::{EngineMetrics, MetricsSnapshot, RuleMetrics, UnifiedMetrics, UnifiedMetricsSnapshot};
 
 pub use runtime_comparison::{
     ConsistencyBenchmarkResult, ConsistencyMismatch, ConsistencyResult, RuntimeBenchmark,

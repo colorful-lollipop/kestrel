@@ -13,7 +13,7 @@ mod metrics;
 mod state;
 mod store;
 
-pub use engine::{NfaEngine, NfaEngineConfig};
+pub use engine::{BudgetAction, NfaEngine, NfaEngineConfig};
 pub use metrics::{EvictionReason, NfaMetrics, SequenceMetrics};
 pub use state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 pub use store::{QuotaConfig, StateStore, StateStoreConfig};

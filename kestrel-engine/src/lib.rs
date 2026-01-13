@@ -227,7 +227,7 @@ impl DetectionEngine {
             let predicate_evaluator = None;
 
             if let Some(evaluator) = predicate_evaluator {
-                let engine = NfaEngine::new(nfa_config, evaluator, schema.clone());
+                let engine = NfaEngine::new(nfa_config, evaluator);
                 info!("NFA engine initialized");
                 Some(engine)
             } else {
@@ -425,6 +425,7 @@ impl DetectionEngine {
     }
 
     /// Evaluate an event against all loaded rules
+    #[tracing::instrument(skip(self, event), fields(event_id = %event.ts_mono_ns, event_type_id = event.event_type_id))]
     pub async fn eval_event(&mut self, event: &Event) -> Result<Vec<Alert>, EngineError> {
         debug!(
             event_type_id = event.event_type_id,

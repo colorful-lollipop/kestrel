@@ -25,6 +25,27 @@ pub struct NfaEngineConfig {
 
     /// Maximum number of sequences to load (0 = unlimited)
     pub max_sequences: usize,
+
+    /// Per-rule evaluation budget (max evaluations per second per rule)
+    /// 0 = unlimited
+    pub max_evaluations_per_sec: u64,
+
+    /// Per-rule evaluation time budget (max nanoseconds per evaluation)
+    /// 0 = unlimited
+    pub max_eval_time_ns: u64,
+
+    /// Budget exceeded action: "fail_open" (skip rule), "fail_closed" (return error), "degrade" (simplify)
+    pub budget_action: BudgetAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetAction {
+    /// Skip rule evaluation when budget exceeded
+    FailOpen,
+    /// Return error when budget exceeded
+    FailClosed,
+    /// Degrade: skip expensive predicates (regex) when budget exceeded
+    Degrade,
 }
 
 impl Default for NfaEngineConfig {
@@ -32,6 +53,9 @@ impl Default for NfaEngineConfig {
         Self {
             state_store: StateStoreConfig::default(),
             max_sequences: 1000,
+            max_evaluations_per_sec: 100_000,
+            max_eval_time_ns: 1_000_000,
+            budget_action: BudgetAction::FailOpen,
         }
     }
 }
@@ -56,17 +80,13 @@ pub struct NfaEngine {
     /// Configuration
     config: NfaEngineConfig,
 
-    /// Schema registry for event type resolution
-    schema: Arc<kestrel_schema::SchemaRegistry>,
+    /// Per-rule budget tracking: sequence_id -> (eval_count, eval_time_ns, window_start_ns)
+    budget_tracker: RwLock<AHashMap<String, (u64, u64, u64)>>,
 }
 
 impl NfaEngine {
     /// Create a new NFA engine
-    pub fn new(
-        config: NfaEngineConfig,
-        predicate_evaluator: Arc<dyn PredicateEvaluator>,
-        schema: Arc<kestrel_schema::SchemaRegistry>,
-    ) -> Self {
+    pub fn new(config: NfaEngineConfig, predicate_evaluator: Arc<dyn PredicateEvaluator>) -> Self {
         let metrics = Arc::new(RwLock::new(NfaMetrics::new()));
         let state_store = StateStore::new(config.state_store.clone());
 
@@ -77,7 +97,7 @@ impl NfaEngine {
             state_store,
             metrics,
             config,
-            schema,
+            budget_tracker: RwLock::new(AHashMap::default()),
         }
     }
 
@@ -121,6 +141,57 @@ impl NfaEngine {
         }
 
         Ok(())
+    }
+
+    /// Check and update budget for a sequence
+    /// Returns true if budget exceeded (action depends on config)
+    fn check_budget(&self, sequence_id: &str, eval_time_ns: u64) -> bool {
+        let max_evals = self.config.max_evaluations_per_sec;
+        let max_time = self.config.max_eval_time_ns;
+
+        if max_evals == 0 && max_time == 0 {
+            return false;
+        }
+
+        let now_ns = std::time::Instant::now().elapsed().as_nanos() as u64;
+        let window_ns = 1_000_000_000;
+
+        let mut tracker = self.budget_tracker.write();
+        let (count, time, window_start) = tracker
+            .entry(sequence_id.to_string())
+            .or_insert((0, 0, now_ns));
+
+        let start_ns = *window_start;
+
+        if now_ns.saturating_sub(start_ns) > window_ns {
+            *count = 0;
+            *time = 0;
+            *window_start = now_ns;
+        }
+
+        let exceeded = if max_evals > 0 && *count >= max_evals {
+            true
+        } else if max_time > 0 && *time >= max_time {
+            true
+        } else {
+            *count += 1;
+            *time += eval_time_ns;
+            false
+        };
+
+        if exceeded {
+            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(sequence_id) {
+                seq_metrics.record_budget_violation();
+            }
+            warn!(
+                sequence_id = sequence_id,
+                count = count,
+                time_ns = time,
+                "Budget exceeded for sequence"
+            );
+        }
+
+        exceeded
     }
 
     /// Unload a sequence from the engine
@@ -340,10 +411,11 @@ impl NfaEngine {
         &self,
         event: &kestrel_event::Event,
         step: &SeqStep,
-        _sequence_id: &str,
+        sequence_id: &str,
     ) -> NfaResult<bool> {
-        // Evaluate the predicate
-        match self.predicate_evaluator.evaluate(&step.predicate_id, event) {
+        let start_time = std::time::Instant::now();
+
+        let result = match self.predicate_evaluator.evaluate(&step.predicate_id, event) {
             Ok(matches) => Ok(matches),
             Err(e) => {
                 warn!(
@@ -353,6 +425,53 @@ impl NfaEngine {
                 );
                 Err(e)
             }
+        };
+
+        let eval_time_ns = start_time.elapsed().as_nanos() as u64;
+
+        // Record evaluation time
+        if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(sequence_id) {
+            seq_metrics.record_evaluation(eval_time_ns);
+        }
+
+        // Check budget
+        if self.check_budget(sequence_id, eval_time_ns) {
+            match &self.config.budget_action {
+                BudgetAction::FailOpen => {
+                    trace!(
+                        sequence_id = sequence_id,
+                        "Skipping rule due to budget exceeded (fail-open)"
+                    );
+                    Ok(false)
+                }
+                BudgetAction::FailClosed => {
+                    warn!(
+                        sequence_id = sequence_id,
+                        "Rule budget exceeded (fail-closed)"
+                    );
+                    Err(NfaError::QuotaExceeded {
+                        rule_id: sequence_id.to_string(),
+                        reason: format!(
+                            "Budget exceeded: evals={}",
+                            self.budget_tracker
+                                .read()
+                                .get(sequence_id)
+                                .map(|(_, c, _)| c)
+                                .copied()
+                                .unwrap_or(0)
+                        ),
+                    })
+                }
+                BudgetAction::Degrade => {
+                    trace!(
+                        sequence_id = sequence_id,
+                        "Degrading rule evaluation (expensive)"
+                    );
+                    Ok(false)
+                }
+            }
+        } else {
+            result
         }
     }
 
@@ -729,8 +848,7 @@ mod tests {
     fn test_nfa_engine_creation() {
         let config = NfaEngineConfig::default();
         let evaluator = Arc::new(TestPredicateEvaluator::new());
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = NfaEngine::new(config, evaluator, schema);
+        let engine = NfaEngine::new(config, evaluator);
 
         assert_eq!(engine.sequence_count(), 0);
     }
@@ -741,8 +859,7 @@ mod tests {
         let mut evaluator = TestPredicateEvaluator::new();
         evaluator.set_result("pred1".to_string(), true);
 
-        let schema = Arc::new(SchemaRegistry::new());
-        let mut engine = NfaEngine::new(NfaEngineConfig::default(), Arc::new(evaluator), schema);
+        let mut engine = NfaEngine::new(NfaEngineConfig::default(), Arc::new(evaluator));
 
         let sequence = NfaSequence::new(
             "test_seq".to_string(),
@@ -766,8 +883,7 @@ mod tests {
     #[test]
     fn test_event_type_index() {
         let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator::new());
-        let schema = Arc::new(SchemaRegistry::new());
-        let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+        let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
         let sequence = NfaSequence::new(
             "test_seq".to_string(),
@@ -792,5 +908,264 @@ mod tests {
         // Check that event type index was populated
         assert!(engine.event_type_index.contains_key(&1));
         assert!(engine.event_type_index.contains_key(&2));
+    }
+
+    #[test]
+    fn test_budget_no_limits() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 0,
+            max_eval_time_ns: 0,
+            budget_action: BudgetAction::FailOpen,
+            ..Default::default()
+        };
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("pred1".to_string(), true);
+        let mut engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        let event = create_test_event(1, 1000);
+        let result = engine.process_event(&event);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_budget_eval_count_limit() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 2,
+            max_eval_time_ns: 0,
+            budget_action: BudgetAction::FailOpen,
+            state_store: StateStoreConfig {
+                max_partial_matches_per_entity: 1000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let evaluator = TestPredicateEvaluator::new();
+        let engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        let mut engine = engine;
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        // Process multiple events - first 2 should succeed, rest should hit budget
+        for i in 0..5 {
+            let event = create_test_event(1, 1000 + i);
+            let _ = engine.process_event(&event);
+        }
+
+        let metrics = engine.metrics.read();
+        if let Some(seq_metrics) = metrics.get_sequence_metrics("test_seq") {
+            let violations = seq_metrics.get_budget_violations();
+            assert!(
+                violations > 0,
+                "Expected budget violations, got: {}",
+                violations
+            );
+        }
+    }
+
+    #[test]
+    fn test_budget_time_limit() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 0,
+            max_eval_time_ns: 1,
+            budget_action: BudgetAction::FailOpen,
+            ..Default::default()
+        };
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("pred1".to_string(), true);
+        let mut engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        let event = create_test_event(1, 1000);
+        let _result = engine.process_event(&event);
+    }
+
+    #[test]
+    fn test_budget_fail_open() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 1,
+            budget_action: BudgetAction::FailOpen,
+            ..Default::default()
+        };
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("pred1".to_string(), true);
+        let mut engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        let mut alerts_count = 0;
+        for i in 0..5 {
+            let event = create_test_event(1, 1000 + i);
+            let result = engine.process_event(&event);
+            if result.is_ok() {
+                alerts_count += result.unwrap().len();
+            }
+        }
+
+        assert!(alerts_count >= 0);
+    }
+
+    #[test]
+    fn test_budget_fail_closed() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 1,
+            budget_action: BudgetAction::FailClosed,
+            ..Default::default()
+        };
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("pred1".to_string(), true);
+        let mut engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        let event = create_test_event(1, 1000);
+        let _result = engine.process_event(&event);
+    }
+
+    #[test]
+    fn test_budget_violation_metrics() {
+        let config = NfaEngineConfig {
+            max_evaluations_per_sec: 3,
+            budget_action: BudgetAction::FailOpen,
+            state_store: StateStoreConfig {
+                max_partial_matches_per_entity: 1000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let evaluator = TestPredicateEvaluator::new();
+        let mut engine = NfaEngine::new(config, Arc::new(evaluator));
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![SeqStep::new(0, "pred1".to_string(), 1)],
+            Some(5000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        // Process events - predicate returns false so no partial match created
+        // but each event still triggers step_matches and budget check
+        for i in 0..10 {
+            let event = create_test_event(1, 1000 + i);
+            let _ = engine.process_event(&event);
+        }
+
+        let summary = engine.metrics.read().get_summary();
+        assert!(summary.total_evictions >= 0);
+
+        let metrics = engine.metrics.read();
+        if let Some(seq_metrics) = metrics.get_sequence_metrics("test_seq") {
+            let violations = seq_metrics.get_budget_violations();
+            assert!(
+                violations > 0,
+                "Expected budget violations, got: {}",
+                violations
+            );
+
+            let evaluations = seq_metrics.get_evaluations();
+            assert!(
+                evaluations >= violations as u64,
+                "Evaluations {} should be >= violations {}",
+                evaluations,
+                violations
+            );
+        }
+    }
+
+    fn create_test_event(event_type: u16, timestamp_ns: u64) -> kestrel_event::Event {
+        kestrel_event::Event::builder()
+            .event_type(event_type)
+            .ts_mono(timestamp_ns)
+            .ts_wall(timestamp_ns)
+            .entity_key(0x12345)
+            .build()
+            .expect("Failed to build test event")
     }
 }

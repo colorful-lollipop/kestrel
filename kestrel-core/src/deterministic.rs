@@ -149,7 +149,7 @@ impl DeterministicVerifier {
 
         let start = std::time::Instant::now();
         let mut all_alerts = Vec::new();
-        let mut mismatches = Vec::new();
+        let mismatches = Vec::new();
 
         for event in &events {
             let alerts = run_detection(event);

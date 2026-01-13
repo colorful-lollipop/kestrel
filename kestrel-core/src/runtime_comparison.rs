@@ -7,7 +7,6 @@ use kestrel_event::Event;
 use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{error, info};
 
 #[cfg(feature = "lua")]
 use kestrel_runtime_lua::{LuaConfig, LuaEngine};
@@ -173,7 +172,7 @@ impl RuntimeConsistencyChecker {
 
     pub async fn verify_predicate_consistency(
         &self,
-        predicate_id: &str,
+        _predicate_id: &str,
         events: &[Event],
     ) -> Result<ConsistencyResult, RuntimeComparisonError> {
         let start = std::time::Instant::now();
@@ -239,7 +238,7 @@ impl RuntimeConsistencyChecker {
         eql_rule: &str,
         events: &[Event],
     ) -> Result<ConsistencyBenchmarkResult, RuntimeComparisonError> {
-        let mut results = Vec::new();
+        let results = Vec::new();
 
         #[cfg(feature = "wasm")]
         if let Some(ref wasm_engine) = self.wasm_engine {

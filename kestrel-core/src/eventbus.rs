@@ -62,6 +62,7 @@ impl EventBusHandle {
     }
 
     /// Publish a single event
+    #[tracing::instrument(skip(self), fields(event_id = %event.ts_mono_ns, partition_id))]
     pub async fn publish(&self, event: Event) -> Result<(), PublishError> {
         let partition = self.get_partition(&event);
         let sender = &self.senders[partition];
@@ -224,7 +225,7 @@ impl EventBus {
         if let Some(subscriber_tx) = &self.subscriber_tx {
             let subscriber_tx = subscriber_tx.clone();
             tokio::spawn(async move {
-                let mut tx = tx;
+                let _tx = tx;
                 loop {
                     if subscriber_tx.is_closed() {
                         break;
@@ -242,6 +243,7 @@ impl EventBus {
     }
 
     /// Worker partition that batches and delivers events
+    #[tracing::instrument(skip(receiver, sink_tx, metrics, shutdown), fields(partition_id))]
     async fn worker_partition(
         partition_id: usize,
         mut receiver: mpsc::Receiver<Event>,

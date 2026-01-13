@@ -63,7 +63,7 @@ async fn test_e2e_linux_privilege_escalation() {
 
     // Create NFA engine with test evaluator
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema.clone());
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     // Create privilege escalation detection sequence
     // This simulates: sudo → chmod → /etc/shadow access
@@ -234,7 +234,7 @@ async fn test_e2e_ransomware_detection() {
 
     let schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema.clone());
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     // Ransomware pattern: document → encryption → backup deletion
     let sequence = CompiledSequence {
@@ -382,7 +382,7 @@ async fn test_e2e_entity_isolation() {
 
     let schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema.clone());
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     // Load the same privilege escalation sequence
     let sequence = CompiledSequence {

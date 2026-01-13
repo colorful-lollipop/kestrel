@@ -7,6 +7,7 @@
 
 use kestrel_event::Event;
 use smallvec::{smallvec, SmallVec};
+use std::collections::HashMap;
 
 /// Unique identifier for an NFA state (position in sequence)
 pub type NfaStateId = u16;
@@ -31,6 +32,42 @@ pub struct NfaSequence {
 
     /// Field captures for alert output
     pub captures: Vec<kestrel_eql::ir::IrCapture>,
+
+    /// PERFORMANCE: Pre-computed index: event_type_id -> [step_indices]
+    /// Avoids filtering steps on every event
+    pub(crate) event_type_to_steps: HashMap<u16, SmallVec<[usize; 4]>>,
+}
+
+impl NfaSequence {
+    /// Get relevant step indices for a given event type
+    /// Returns empty slice if no steps match this event type
+    #[inline]
+    pub fn get_relevant_steps(&self, event_type_id: u16) -> &[usize] {
+        self.event_type_to_steps
+            .get(&event_type_id)
+            .map(|v| &v[..])
+            .unwrap_or(&[])
+    }
+
+    /// Get the maximum state ID in this sequence
+    #[inline]
+    pub fn max_state(&self) -> NfaStateId {
+        self.steps.len() as NfaStateId - 1
+    }
+
+    /// Get the first step (if any)
+    #[inline]
+    pub fn first_step(&self) -> Option<&SeqStep> {
+        self.steps.first()
+    }
+
+    /// Check if an event type is relevant to this sequence
+    #[inline]
+    pub fn has_event_type(&self, event_type_id: u16) -> bool {
+        self.event_type_to_steps.contains_key(&event_type_id)
+            || (self.until_step.is_some()
+                && self.until_step.as_ref().map(|s| s.event_type_id) == Some(event_type_id))
+    }
 }
 
 /// A single step in a sequence
@@ -189,6 +226,7 @@ impl NfaSequence {
         maxspan_ms: Option<u64>,
         until_step: Option<SeqStep>,
     ) -> Self {
+        let event_type_to_steps = Self::build_event_type_index(&steps);
         Self {
             id,
             by_field_id,
@@ -196,6 +234,7 @@ impl NfaSequence {
             maxspan_ms,
             until_step: until_step.map(Box::new),
             captures: Vec::new(),
+            event_type_to_steps,
         }
     }
 
@@ -208,6 +247,7 @@ impl NfaSequence {
         until_step: Option<SeqStep>,
         captures: Vec<kestrel_eql::ir::IrCapture>,
     ) -> Self {
+        let event_type_to_steps = Self::build_event_type_index(&steps);
         Self {
             id,
             by_field_id,
@@ -215,7 +255,21 @@ impl NfaSequence {
             maxspan_ms,
             until_step: until_step.map(Box::new),
             captures,
+            event_type_to_steps,
         }
+    }
+
+    /// Build the event type to steps index for O(1) lookup
+    #[inline]
+    fn build_event_type_index(steps: &[SeqStep]) -> HashMap<u16, SmallVec<[usize; 4]>> {
+        let mut index = HashMap::new();
+        for (idx, step) in steps.iter().enumerate() {
+            index
+                .entry(step.event_type_id)
+                .or_insert_with(SmallVec::new)
+                .push(idx);
+        }
+        index
     }
 
     /// Get the total number of steps in this sequence

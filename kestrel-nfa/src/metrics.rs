@@ -33,6 +33,12 @@ pub struct SequenceMetrics {
     /// Total events processed for this sequence
     pub events_processed: AtomicU64,
 
+    /// Total predicate evaluations performed
+    pub evaluations: AtomicU64,
+
+    /// Total time spent in predicate evaluation (nanoseconds)
+    pub eval_time_ns: AtomicU64,
+
     /// Total partial matches created
     pub partial_matches_created: AtomicU64,
 
@@ -47,22 +53,37 @@ pub struct SequenceMetrics {
 
     /// Peak concurrent partial matches
     pub peak_concurrent_matches: AtomicUsize,
+
+    /// Budget violations count (exceeded eval count or time)
+    pub budget_violations: AtomicU64,
 }
 
 impl SequenceMetrics {
     pub fn new() -> Self {
         Self {
             events_processed: AtomicU64::new(0),
+            evaluations: AtomicU64::new(0),
+            eval_time_ns: AtomicU64::new(0),
             partial_matches_created: AtomicU64::new(0),
             active_partial_matches: AtomicUsize::new(0),
             completed_sequences: AtomicU64::new(0),
             evictions: RwLock::new(AHashMap::default()),
             peak_concurrent_matches: AtomicUsize::new(0),
+            budget_violations: AtomicU64::new(0),
         }
     }
 
     pub fn record_event(&self) {
         self.events_processed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_evaluation(&self, time_ns: u64) {
+        self.evaluations.fetch_add(1, Ordering::Relaxed);
+        self.eval_time_ns.fetch_add(time_ns, Ordering::Relaxed);
+    }
+
+    pub fn record_budget_violation(&self) {
+        self.budget_violations.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn partial_match_created(&self) {
@@ -112,6 +133,18 @@ impl SequenceMetrics {
 
     pub fn get_completions(&self) -> u64 {
         self.completed_sequences.load(Ordering::Relaxed)
+    }
+
+    pub fn get_evaluations(&self) -> u64 {
+        self.evaluations.load(Ordering::Relaxed)
+    }
+
+    pub fn get_eval_time_ns(&self) -> u64 {
+        self.eval_time_ns.load(Ordering::Relaxed)
+    }
+
+    pub fn get_budget_violations(&self) -> u64 {
+        self.budget_violations.load(Ordering::Relaxed)
     }
 }
 

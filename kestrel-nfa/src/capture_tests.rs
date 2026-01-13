@@ -30,7 +30,7 @@ mod capture_tests {
         let schema = Arc::new(schema);
 
         let config = NfaEngineConfig::default();
-        let engine = NfaEngine::new(config, std::sync::Arc::new(TestPredicateEvaluator), schema);
+        let engine = NfaEngine::new(config, std::sync::Arc::new(TestPredicateEvaluator));
 
         let captures = vec![
             IrCapture {

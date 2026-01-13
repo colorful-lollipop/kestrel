@@ -23,7 +23,7 @@ impl PredicateEvaluator for TestPredicateEvaluator {
 async fn test_process_injection_sequence() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "process-injection".to_string(),
@@ -80,7 +80,7 @@ async fn test_process_injection_sequence() {
 async fn test_file_exfiltration_sequence() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "file-exfil".to_string(),
@@ -128,7 +128,7 @@ async fn test_file_exfiltration_sequence() {
 async fn test_c2_beaconing_pattern() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "c2-beacon".to_string(),
@@ -179,7 +179,7 @@ async fn test_c2_beaconing_pattern() {
 async fn test_maxspan_enforcement() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "timed-attack".to_string(),
@@ -227,7 +227,7 @@ async fn test_maxspan_enforcement() {
 async fn test_entity_isolation() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "multi-entity".to_string(),
@@ -290,7 +290,7 @@ async fn test_entity_isolation() {
 async fn test_multiple_sequences_different_entities() {
     let schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
-    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator, schema);
+    let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
     let sequence = CompiledSequence {
         id: "attack-chain".to_string(),
