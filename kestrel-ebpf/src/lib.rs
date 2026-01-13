@@ -7,6 +7,7 @@ mod executor;
 mod lsm;
 mod normalize;
 mod programs;
+mod pushdown;
 
 pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
 pub use lsm::{
@@ -15,6 +16,7 @@ pub use lsm::{
 };
 pub use normalize::EventNormalizer;
 pub use programs::{AttachedPrograms, ProgramManager};
+pub use pushdown::InterestPushdown;
 
 use aya::maps::HashMap;
 use aya::Ebpf;
