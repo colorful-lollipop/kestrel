@@ -3,12 +3,11 @@
 // Benchmarks for comparing AC-DFA, Lazy DFA, and NFA performance
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use kestrel_ac_dfa::{AcDfaBuilder, MatchPattern, PatternKind};
+use kestrel_ac_dfa::{AcMatcher, MatchPattern, AcDfaConfig};
 use kestrel_eql::ir::{IrLiteral, IrNode, IrPredicate};
 use kestrel_lazy_dfa::{HotSpotDetector, LazyDfaConfig};
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, SeqStep, NfaSequence};
 use std::sync::Arc;
-use std::time::Duration;
 
 // Mock predicate evaluator for testing
 struct MockEvaluator;
@@ -33,7 +32,7 @@ fn bench_ac_dfa_matching(c: &mut Criterion) {
     let mut group = c.benchmark_group("ac_dfa");
 
     for pattern_count in [10, 100, 1000].iter() {
-        // Create patterns
+        // Create matcher using AcMatcher directly (since we're benchmarking)
         let patterns: Vec<_> = (0..*pattern_count)
             .map(|i| {
                 MatchPattern::equals(
@@ -44,10 +43,8 @@ fn bench_ac_dfa_matching(c: &mut Criterion) {
             })
             .collect();
 
-        let matcher = AcDfaBuilder::new()
-            .add_patterns(patterns)
-            .build()
-            .unwrap();
+        let config = kestrel_ac_dfa::AcDfaConfig::default();
+        let matcher = AcMatcher::new(patterns, config).unwrap();
 
         let test_text = "pattern_42";
 
@@ -137,7 +134,7 @@ fn bench_hot_spot_detection(c: &mut Criterion) {
             |b, &eps| {
                 b.iter(|| {
                     let seq_id = "test-seq";
-                    for _ in 0..eps {
+                    for _ in 0..*eps {
                         detector.record_evaluation(seq_id, 100);
                         detector.record_match(seq_id);
                     }
@@ -245,10 +242,8 @@ fn bench_ac_dfa_vs_nfa(c: &mut Criterion) {
         })
         .collect();
 
-    let ac_matcher = AcDfaBuilder::new()
-        .add_patterns(patterns)
-        .build()
-        .unwrap();
+    let config = kestrel_ac_dfa::AcDfaConfig::default();
+    let ac_matcher = AcMatcher::new(patterns, config).unwrap();
 
     // Create NFA engine
     let steps = vec![
