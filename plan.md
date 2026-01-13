@@ -15,6 +15,159 @@
 
 ---
 
+## 0.1 项目进展总览（2026年1月）
+
+### 当前版本状态
+- **版本号**: v0.2.0
+- **核心状态**: 引擎基础框架完成，进入生产化准备阶段
+- **代码质量**: 28+ 测试全部通过，无已知阻塞问题
+
+### 已完成模块（按架构层次）
+
+#### ✅ 核心引擎层
+- **Schema Registry**: 强类型事件字段注册系统，支持 field_id 化
+- **EventBus**: 事件总线，支持批处理、背压控制、metrics 收集
+- **NFA Engine**: 非确定有限自动机序列引擎，支持多规则并行匹配
+- **StateStore**: TTL/LRU/Quota 三重淘汰机制，支持 per-rule/per-entity 预算
+- **Metrics**: 统一指标收集系统（EngineMetrics + UnifiedMetrics），支持 Prometheus/JSON 导出
+
+#### ✅ 双运行时系统
+- **Wasm Runtime**: 基于 Wasmtime，实现 Host API v1，支持 instance pool 复用
+- **Lua Runtime**: 基于 MLua (LuaJIT)，实现 Host API v1，与 Wasm 共享 ABI
+- **PredicateEvaluator**: 统一谓词评估接口，运行时可插拔
+- **PoolMetrics**: Wasm instance pool 指标（利用率、等待时间、缓存命中率）
+
+#### ✅ 规则加载系统
+- **RuleManager**: 规则包热加载、版本管理、原子切换
+- **RulePackage**: EQL 编译产物打包（metadata + predicates + capabilities）
+- **加载隔离**: load_semaphore 保护，避免并发加载冲突
+
+#### ✅ 离线可复现（Replay）
+- **BinaryLog**: 事件二进制日志，紧凑序列化
+- **ReplayEngine**: 同核回放，保证结果可复现
+- **可复现契约**:
+  - `event_id`: 用于事件排序 tie-breaker
+  - `rule_pack_hash`: 规则包版本哈希
+  - `ts_mono_ns + event_id`: 确定性排序键
+
+#### ✅ 采集层（eBPF）
+- **Normalization**: 事件规范化，强类型字段映射
+- **InterestPushdown**: 按"规则兴趣"过滤，减少无用数据收集
+- **框架完整**: tracepoints/kprobes/LSM hooks 架构就绪
+
+#### ✅ C FFI 兼容接口
+- **kestrel-ffi**: C API 层，完整导出引擎生命周期、规则管理、事件处理、指标查询
+- **ABI 稳定**: C 头文件（kestrel.h）定义完整的 opaque handle 类型
+- **示例程序**: simple.c / advanced.c 展示 API 用法
+- **共享库**: libkestrel_ffi.so (342K)，支持 Linux glibc 2.17+
+
+### 近期完成（2026年1月）
+
+#### Phase A: eBPF 集成测试与性能基线 ✅
+- 创建集成测试套件（10个测试，覆盖 normalize/pushdown/end-to-end）
+- 创建性能基准测试（12个测试，建立性能基线）
+- 导出 InterestPushdown API
+- **文件**: kestrel-ebpf/tests/integration_test.rs, performance_benchmark.rs
+
+#### Phase B: C FFI 兼容接口 ✅
+- **B.1**: 基础框架完成（Engine API, 类型定义, 错误处理）
+- **B.2**: 事件处理 API 完成（process_event, alerts, metrics）
+- 11个测试全部通过
+- C 示例程序运行成功
+- **文件**: kestrel-ffi crate, examples/simple.c, examples/advanced.c
+
+#### Phase C: 可观测性完善（进行中）
+- **C.1**: Wasm pool 指标收集 ✅
+  - PoolMetrics 结构（pool_size, active_instances, acquires, releases, misses）
+  - 等待时间跟踪（total_wait_ns, peak_wait_ns, avg_wait_ns）
+  - 利用率与缓存命中率计算
+- **C.2**: 性能基线测试（待完成）
+
+### 架构优势已验证
+
+#### 1. 性能优势
+- **NFA Engine**: 单规则状态机匹配 < 1μs
+- **EventBus**: Batch 处理提升吞吐量
+- **StateStore**: LRU/TTL/Quota 三重机制控制内存增长
+- **Instance Pool**: Wasm/Lua 实例复用，减少初始化开销
+
+#### 2. 可观测性优势
+- **UnifiedMetrics**: 聚合 Engine + EventBus + Runtime 指标
+- **Per-Rule Metrics**: 每规则独立指标（evaluations, alerts, eval_time）
+- **Pool Metrics**: 实例池利用率、等待时间、缓存命中率
+- **Prometheus Export**: 标准格式，便于接入监控系统
+
+#### 3. 可控性优势
+- **Resource Budget**: Per-rule/per-entity quota 保护
+- **Backpressure**: EventBus 背压机制防止内存溢出
+- **TTL/LRU**: 自动淘汰过期状态
+- **Graceful Degradation**: 阻断模式下可降级到检测模式
+
+### 待完善模块（优先级排序）
+
+#### P0: 生产化基础设施
+- [ ] CI/CD pipeline（目前构建环境存在 cross-device link 问题）
+- [ ] 性能回归基线（定期 benchmark，防止性能退化）
+- [ ] 内存泄漏检测（Valgrind/Sanitizer 集成）
+- [ ] 压力测试（长时间高负载稳定性）
+
+#### P1: eBPF 采集层生产化
+- [ ] Ringbuf polling 稳定性验证
+- [ ] 事件协议版本化（跨内核版本兼容）
+- [ ] 字段完备性（当前仅部分字段）
+- [ ] 降级策略（内核不支持 eBPF 时的 fallback）
+
+#### P2: 实时阻断（Inline/Enforce）
+- [ ] LSM hooks 集成
+- [ ] 阻断策略与授权机制
+- [ ] 误杀回滚机制
+- [ ] 审计取证
+
+#### P3: 规则生态与工具链
+- [ ] EQL 编译器（eqlc）完整实现
+- [ ] 规则包管理工具
+- [ ] 规则测试框架
+- [ ] 规则灰度发布机制
+
+### 技术债务与改进建议
+
+#### 1. 性能优化空间
+- [ ] String → Integer ID 映射（rule_id, sequence_id）
+- [ ] 字段读取批量 hostcall（减少 Wasm/Lua 交叉边界次数）
+- [ ] Regex/Glob 预编译句柄缓存优化
+- [ ] NFA 状态机分区（按 entity_key 哈希，提升 cache locality）
+
+#### 2. 可观测性增强
+- [ ] Wasm/Lua pool 指标集成到 UnifiedMetrics
+- [ ] Prometheus export 新增 pool metrics
+- [ ] 分布式追踪（tracing）集成
+- [ ] 告警聚合与去重
+
+#### 3. 测试覆盖
+- [ ] 端到端集成测试（完整规则包 + 真实事件流）
+- [ ] 并发压力测试（多线程、多规则）
+- [ ] 长时间运行稳定性测试（7x24h）
+- [ ] 内存泄漏专项测试
+
+### 下一步工作计划
+
+#### 短期（2-4周）
+1. **完成 Phase C.2**: 性能基线测试与回归保护
+2. **CI/CD 完善**: 解决构建环境问题，建立自动化测试
+3. **文档完善**: API 文档、架构文档、运维手册
+
+#### 中期（1-2月）
+1. **eBPF 生产化**: Ringbuf 稳定性、事件协议版本化
+2. **规则工具链**: EQL 编译器、规则包管理
+3. **实时阻断**: LSM hooks 集成、阻断策略
+
+#### 长期（3-6月）
+1. **性能优化**: String → ID 映射、批量 hostcall
+2. **规则生态**: 规则市场、社区贡献
+3. **多平台支持**: macOS、Windows 适配
+
+---
+
 ## 1. 目标与边界
 
 ### 1.1 目标
