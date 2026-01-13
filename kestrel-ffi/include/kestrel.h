@@ -45,6 +45,39 @@ typedef struct {
     bool enable_tracing;
 } kestrel_config_t;
 
+// Typed value for event fields
+typedef union {
+    int64_t i64;
+    uint64_t u64;
+    double f64;
+    bool boolean;
+    struct {
+        const uint8_t* data;
+        size_t len;
+    } string;
+    struct {
+        const uint8_t* data;
+        size_t len;
+    } bytes;
+} kestrel_value_t;
+
+// Event field
+typedef struct {
+    uint32_t field_id;
+    kestrel_value_t value;
+} kestrel_field_t;
+
+// Event structure (non-opaque for input)
+typedef struct {
+    uint64_t event_id;
+    uint16_t event_type;
+    uint64_t ts_mono_ns;
+    uint64_t ts_wall_ns;
+    unsigned __int128 entity_key;
+    uint32_t field_count;
+    const kestrel_field_t* fields;
+} kestrel_event_data_t;
+
 // Version
 const char* kestrel_version(void);
 
@@ -75,6 +108,48 @@ kestrel_error_t kestrel_engine_unload_rule(
 kestrel_error_t kestrel_engine_unload_all_rules(
     kestrel_engine_t* engine
 );
+
+// Event processing
+kestrel_error_t kestrel_engine_process_event(
+    kestrel_engine_t* engine,
+    const kestrel_event_data_t* event,
+    kestrel_alert_t*** out_alerts,
+    size_t* out_alert_count
+);
+
+void kestrel_alerts_free(
+    kestrel_alert_t** alerts,
+    size_t count
+);
+
+// Alert queries
+const char* kestrel_alert_get_rule_id(
+    const kestrel_alert_t* alert
+);
+
+uint64_t kestrel_alert_get_timestamp_ns(
+    const kestrel_alert_t* alert
+);
+
+const char* kestrel_alert_get_severity(
+    const kestrel_alert_t* alert
+);
+
+// Metrics
+kestrel_error_t kestrel_engine_get_metrics(
+    kestrel_engine_t* engine,
+    kestrel_metrics_t** out_metrics
+);
+
+uint64_t kestrel_metrics_get_events_processed(
+    const kestrel_metrics_t* metrics
+);
+
+uint64_t kestrel_metrics_get_alerts_generated(
+    const kestrel_metrics_t* metrics
+);
+
+void kestrel_metrics_free(kestrel_metrics_t* metrics);
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,8 @@ use std::os::raw::c_char;
 
 mod engine;
 mod error;
+mod event;
+mod metrics;
 mod types;
 
 pub use error::KestrelError;

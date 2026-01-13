@@ -90,6 +90,19 @@ pub struct kestrel_field_t {
     pub value: kestrel_value_t,
 }
 
+/// Event structure (non-opaque version for FFI input)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct kestrel_event_data_t {
+    pub event_id: u64,
+    pub event_type: u16,
+    pub ts_mono_ns: u64,
+    pub ts_wall_ns: u64,
+    pub entity_key: u128,
+    pub field_count: u32,
+    pub fields: *const kestrel_field_t,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +118,11 @@ mod tests {
         let config = kestrel_config_t::default();
         assert_eq!(config.event_bus_size, 10000);
         assert_eq!(config.worker_threads, 4);
+    }
+
+    #[test]
+    fn test_event_data_size() {
+        // Verify layout (u128 requires 16-byte alignment, causing padding)
+        assert_eq!(std::mem::size_of::<kestrel_event_data_t>(), 64);
     }
 }
