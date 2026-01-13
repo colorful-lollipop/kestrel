@@ -14,13 +14,13 @@ use std::time::Duration;
 struct MockEvaluator;
 
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
         // Return true for all predicates
         Ok(true)
     }
 
     fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(vec![])
+        Ok(vec![1, 2])
     }
 
     fn has_predicate(&self, predicate_id: &str) -> bool {
