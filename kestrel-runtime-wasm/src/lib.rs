@@ -110,6 +110,7 @@ pub struct WasmEngine {
     pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
     pub next_regex_id: Arc<std::sync::atomic::AtomicU32>,
     pub next_glob_id: Arc<std::sync::atomic::AtomicU32>,
+    pub pool_metrics: Arc<PoolMetrics>,
 }
 
 /// Compiled Wasm module with metadata
@@ -147,6 +148,108 @@ pub struct RuleCapabilities {
     pub requires_alert: bool,
     pub requires_block: bool,
     pub max_span_ms: Option<u64>,
+}
+
+/// Pool metrics for tracking instance pool utilization
+#[derive(Debug, Default)]
+pub struct PoolMetrics {
+    /// Total pool size (total instances)
+    pub pool_size: std::sync::atomic::AtomicUsize,
+
+    /// Currently active instances (in use)
+    pub active_instances: std::sync::atomic::AtomicUsize,
+
+    /// Total pool acquires
+    pub total_acquires: std::sync::atomic::AtomicU64,
+
+    /// Total pool releases
+    pub total_releases: std::sync::atomic::AtomicU64,
+
+    /// Total pool misses (had to create new instance)
+    pub pool_misses: std::sync::atomic::AtomicU64,
+
+    /// Total wait time for pool acquisition (nanoseconds)
+    pub total_wait_ns: std::sync::atomic::AtomicU64,
+
+    /// Peak wait time (nanoseconds)
+    pub peak_wait_ns: std::sync::atomic::AtomicU64,
+}
+
+impl PoolMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_acquire(&self, wait_ns: u64) {
+        self.total_acquires.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.active_instances.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_wait_ns.fetch_add(wait_ns, std::sync::atomic::Ordering::Relaxed);
+
+        // Update peak wait time
+        loop {
+            let peak = self.peak_wait_ns.load(std::sync::atomic::Ordering::Relaxed);
+            if wait_ns <= peak {
+                break;
+            }
+            if self
+                .peak_wait_ns
+                .compare_exchange_weak(peak, wait_ns, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
+            }
+        }
+    }
+
+    pub fn record_release(&self) {
+        self.total_releases.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.active_instances.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn record_miss(&self) {
+        self.pool_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn set_pool_size(&self, size: usize) {
+        self.pool_size.store(size, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Get pool utilization percentage (0-100)
+    pub fn utilization_pct(&self) -> f64 {
+        let pool_size = self.pool_size.load(std::sync::atomic::Ordering::Relaxed);
+        let active = self.active_instances.load(std::sync::atomic::Ordering::Relaxed);
+
+        if pool_size > 0 {
+            (active as f64 / pool_size as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Get average wait time in nanoseconds
+    pub fn avg_wait_ns(&self) -> u64 {
+        let acquires = self.total_acquires.load(std::sync::atomic::Ordering::Relaxed);
+        let total_wait = self.total_wait_ns.load(std::sync::atomic::Ordering::Relaxed);
+
+        if acquires > 0 {
+            total_wait / acquires
+        } else {
+            0
+        }
+    }
+
+    /// Get cache hit rate percentage (0-100)
+    pub fn cache_hit_rate_pct(&self) -> f64 {
+        let acquires = self.total_acquires.load(std::sync::atomic::Ordering::Relaxed);
+        let misses = self.pool_misses.load(std::sync::atomic::Ordering::Relaxed);
+
+        if acquires > 0 {
+            let hits = acquires.saturating_sub(misses);
+            (hits as f64 / acquires as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Instance pool for a specific module
@@ -267,6 +370,7 @@ impl WasmEngine {
             glob_cache: Arc::new(RwLock::new(HashMap::new())),
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
+            pool_metrics: Arc::new(PoolMetrics::new()),
         })
     }
 
@@ -709,6 +813,9 @@ impl WasmEngine {
             semaphore: Arc::new(Semaphore::new(pool_size)),
         };
 
+        // Set pool size in metrics
+        self.pool_metrics.set_pool_size(pool_size);
+
         let mut modules = self.modules.write().await;
         let mut pools = self.instance_pool.write().await;
 
@@ -821,6 +928,7 @@ impl Clone for WasmEngine {
             glob_cache: self.glob_cache.clone(),
             next_regex_id: self.next_regex_id.clone(),
             next_glob_id: self.next_glob_id.clone(),
+            pool_metrics: self.pool_metrics.clone(),
         }
     }
 }
@@ -855,10 +963,14 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         })?;
 
         // Run async evaluation in blocking context
+        let engine = self.clone();
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
+                // Record wait time start
+                let wait_start = std::time::Instant::now();
+
                 // Get the instance pool for this rule (write access from the start)
-                let mut pools = self.instance_pool.write().await;
+                let mut pools = engine.instance_pool.write().await;
                 let pool = pools.get_mut(rule_id).ok_or_else(|| {
                     kestrel_nfa::NfaError::PredicateError(format!(
                         "Instance pool not found for rule: {}",
@@ -874,12 +986,17 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
                     ))
                 })?;
 
+                // Record wait time and acquire
+                let wait_ns = wait_start.elapsed().as_nanos() as u64;
+                engine.pool_metrics.record_acquire(wait_ns);
+
                 // Find an available instance
                 let instance_idx = pool
                     .instances
                     .iter()
                     .position(|inst| !inst.in_use)
                     .ok_or_else(|| {
+                        engine.pool_metrics.record_miss();
                         kestrel_nfa::NfaError::PredicateError(
                             "No available instances in pool".to_string(),
                         )
@@ -920,6 +1037,9 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
                 // Reset event for next use
                 pool.instances[instance_idx].store.data_mut().event = None;
                 pool.instances[instance_idx].in_use = false;
+
+                // Record release
+                engine.pool_metrics.record_release();
 
                 Ok(result == 1)
             })
