@@ -53,6 +53,9 @@ struct LogHeader {
     /// Engine build ID (for reproducibility)
     engine_build_id: String,
 
+    /// Rule pack hash (for reproducibility)
+    rule_pack_hash: String,
+
     /// Number of events in log
     event_count: u64,
 
@@ -67,12 +70,13 @@ impl LogHeader {
     const MAGIC: [u8; 4] = [b'K', b'E', b'S', b'T']; // "KEST"
     const CURRENT_VERSION: u32 = 1;
 
-    fn new(event_count: u64, start_ts: u64, end_ts: u64) -> Self {
+    fn new(event_count: u64, start_ts: u64, end_ts: u64, rule_pack_hash: String) -> Self {
         Self {
             magic: Self::MAGIC,
             version: Self::CURRENT_VERSION,
             schema_version: 1,
             engine_build_id: env!("CARGO_PKG_VERSION").to_string(),
+            rule_pack_hash,
             event_count,
             start_ts_mono_ns: start_ts,
             end_ts_mono_ns: end_ts,
@@ -87,6 +91,9 @@ impl LogHeader {
 /// Serialized event for binary log
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SerializedEvent {
+    /// Unique event ID (monotonically increasing, used for deterministic sorting)
+    event_id: u64,
+
     /// Event type ID
     event_type_id: u16,
 
@@ -163,13 +170,13 @@ impl BinaryLog {
     }
 
     /// Write events to log file
-    pub fn write_events(&self, path: PathBuf, events: &[Event]) -> Result<(), ReplayError> {
+    pub fn write_events(&self, path: PathBuf, events: &[Event], rule_pack_hash: String) -> Result<(), ReplayError> {
         if events.is_empty() {
             // Create empty file with header only
             let file = File::create(&path)?;
             let mut writer = BufWriter::new(file);
 
-            let header = LogHeader::new(0, 0, 0);
+            let header = LogHeader::new(0, 0, 0, rule_pack_hash);
             writeln!(
                 writer,
                 "{}",
@@ -191,7 +198,7 @@ impl BinaryLog {
         let start_ts = events.first().map(|e| e.ts_mono_ns).unwrap_or(0);
         let end_ts = events.last().map(|e| e.ts_mono_ns).unwrap_or(0);
 
-        let header = LogHeader::new(events.len() as u64, start_ts, end_ts);
+        let header = LogHeader::new(events.len() as u64, start_ts, end_ts, rule_pack_hash);
 
         // Write header as single-line JSON (for line-based reading)
         writeln!(
@@ -206,6 +213,7 @@ impl BinaryLog {
         for event in events {
             // Convert Event to serializable format
             let serialized = SerializedEvent {
+                event_id: event.event_id,
                 event_type_id: event.event_type_id,
                 ts_mono_ns: event.ts_mono_ns,
                 ts_wall_ns: event.ts_wall_ns,
@@ -637,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_log_header_validation() {
-        let header = LogHeader::new(100, 0, 1000000);
+        let header = LogHeader::new(100, 0, 1000000, "test_hash".to_string());
         assert!(header.is_valid());
 
         let mut invalid = header.clone();
@@ -666,7 +674,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_empty.log");
 
-        let result = log.write_events(log_path, &events);
+        let result = log.write_events(log_path, &events, "test_hash".to_string());
         assert!(result.is_ok());
     }
 
@@ -698,12 +706,14 @@ mod tests {
                 100,
                 events[0].ts_mono_ns,
                 events[events.len() - 1].ts_mono_ns,
+                "test_hash".to_string(),
             );
             let header_str = serde_json::to_string(&header).unwrap();
             writeln!(writer, "{}", header_str).unwrap();
 
             for (i, event) in events.iter().enumerate() {
                 let serialized = SerializedEvent {
+                    event_id: event.event_id,
                     event_type_id: event.event_type_id,
                     ts_mono_ns: event.ts_mono_ns,
                     ts_wall_ns: event.ts_wall_ns,
@@ -762,7 +772,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_replay_consistent.log");
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let mut run_results: Vec<u64> = Vec::new();
 
@@ -817,7 +827,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_mock_time_sync.log");
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager = TimeManager::mock();
         let event_bus = EventBus::new(EventBusConfig::default());
@@ -862,7 +872,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_event_ordering.log");
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager = TimeManager::mock();
         let event_bus = EventBus::new(EventBusConfig::default());
@@ -907,7 +917,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_speed_multiplier.log");
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager_fast = TimeManager::mock();
         let event_bus_fast = EventBus::new(EventBusConfig::default());
@@ -989,7 +999,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_verification_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager = TimeManager::mock();
 
@@ -1044,7 +1054,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_collect_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager = TimeManager::mock();
         let config = ReplayConfig {
@@ -1090,7 +1100,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_reset_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
 
         let time_manager = TimeManager::mock();
         let config = ReplayConfig {
