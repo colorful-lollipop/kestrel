@@ -370,3 +370,374 @@
 
 - **默认 v1：单租户**（一个规则集（多个规则） + 一个策略配置）
 - 但架构上支持多 policy：RuleManager 支持加载多个 rule-set（如 `enterprise/`, `local/`）并按优先级合并/冲突解决（例如同一 rule_id 以更高优先级覆盖）
+
+---
+
+## 14. C FFI 兼容接口（C Compatible Library Interface）
+
+### 14.1 目标与价值
+
+Kestrel 核心引擎用 Rust 实现，为了支持与其他 C/C++ 项目集成（如现有的安全产品、端点防护系统等），需要提供稳定的 C 兼容接口。
+
+**应用场景**：
+- 现有 C/C++ 安全产品集成 Kestrel 检测能力
+- 嵌入式系统（不支持 Rust 运行时）
+- 与其他厂商的联动响应（通过共享库）
+- Python/Go/Java 等语言通过 FFI 调用
+
+### 14.2 设计原则
+
+1. **ABI 稳定性优先**：C API 必须保持向后兼容
+2. **零拷贝或最小拷贝**：性能关键路径避免不必要的内存复制
+3. **错误处理透明**：所有错误通过返回码和错误消息传递
+4. **资源管理明确**：提供显式的创建/销毁函数
+5. **线程安全**：所有 API 必须是线程安全的
+
+### 14.3 核心接口设计
+
+#### 14.3.1 类型定义（kestrel_ffi.h）
+
+```c
+#include <stdint.h>
+#include <stdbool.h>
+
+// 版本信息
+#define KESTREL_VERSION_MAJOR 0
+#define KESTREL_VERSION_MINOR 2
+#define KESTREL_VERSION_PATCH 0
+
+// 错误码
+typedef enum {
+    KESTREL_OK = 0,
+    KESTREL_ERROR_UNKNOWN = -1,
+    KESTREL_ERROR_INVALID_ARG = -2,
+    KESTREL_ERROR_NOMEM = -3,
+    KESTREL_ERROR_NOT_FOUND = -4,
+    KESTREL_ERROR_ALREADY_EXISTS = -5,
+    KESTREL_ERROR_PARSE = -6,
+    KESTREL_ERROR_RUNTIME = -7,
+} kestrel_error_t;
+
+// 不透明句柄类型（向前声明）
+typedef struct kestrel_engine kestrel_engine_t;
+typedef struct kestrel_event kestrel_event_t;
+typedef struct kestrel_rule kestrel_rule_t;
+typedef struct kestrel_alert kestrel_alert_t;
+typedef struct kestrel_metrics kestrel_metrics_t;
+
+// 配置结构
+typedef struct {
+    uint32_t event_bus_size;
+    uint32_t worker_threads;
+    uint32_t batch_size;
+    bool enable_metrics;
+    bool enable_tracing;
+} kestrel_config_t;
+
+// 事件结构
+typedef struct {
+    uint64_t event_id;
+    uint16_t event_type;
+    uint64_t ts_mono_ns;
+    uint64_t ts_wall_ns;
+    uint128_t entity_key;
+    uint32_t field_count;
+    kestrel_field_t* fields;
+} kestrel_event_t;
+
+typedef struct {
+    uint32_t field_id;
+    kestrel_value_t value;
+} kestrel_field_t;
+
+typedef union {
+    int64_t i64;
+    uint64_t u64;
+    double f64;
+    bool boolean;
+    struct {
+        const char* data;
+        size_t len;
+    } string;
+    struct {
+        const uint8_t* data;
+        size_t len;
+    } bytes;
+} kestrel_value_t;
+```
+
+#### 14.3.2 核心引擎 API
+
+```c
+// 引擎生命周期
+kestrel_error_t kestrel_engine_new(
+    const kestrel_config_t* config,
+    kestrel_engine_t** out_engine
+);
+
+void kestrel_engine_free(kestrel_engine_t* engine);
+
+// 规则管理
+kestrel_error_t kestrel_engine_load_rule(
+    kestrel_engine_t* engine,
+    const char* rule_id,
+    const char* rule_definition,
+    const char** error_msg
+);
+
+kestrel_error_t kestrel_engine_unload_rule(
+    kestrel_engine_t* engine,
+    const char* rule_id
+);
+
+kestrel_error_t kestrel_engine_unload_all_rules(
+    kestrel_engine_t* engine
+);
+
+// 事件处理
+kestrel_error_t kestrel_engine_process_event(
+    kestrel_engine_t* engine,
+    const kestrel_event_t* event,
+    kestrel_alert_t*** out_alerts,
+    size_t* out_alert_count
+);
+
+void kestrel_alerts_free(
+    kestrel_alert_t** alerts,
+    size_t count
+);
+
+// 查询告警信息
+const char* kestrel_alert_get_rule_id(
+    const kestrel_alert_t* alert
+);
+
+uint64_t kestrel_alert_get_timestamp_ns(
+    const kestrel_alert_t* alert
+);
+
+const char* kestrel_alert_get_severity(
+    const kestrel_alert_t* alert
+);
+
+// Metrics
+kestrel_error_t kestrel_engine_get_metrics(
+    kestrel_engine_t* engine,
+    kestrel_metrics_t** out_metrics
+);
+
+uint64_t kestrel_metrics_get_events_processed(
+    const kestrel_metrics_t* metrics
+);
+
+uint64_t kestrel_metrics_get_alerts_generated(
+    const kestrel_metrics_t* metrics
+);
+
+void kestrel_metrics_free(kestrel_metrics_t* metrics);
+
+// 版本信息
+const char* kestrel_version(void);
+```
+
+### 14.4 实现架构
+
+```
+┌─────────────────────────────────────┐
+│     C/C++ Application              │
+└──────────────┬──────────────────────┘
+               │ libkestrel.so / kestrel.lib
+               ▼
+┌─────────────────────────────────────┐
+│     C FFI Layer (kestrel-ffi)       │
+│  - C ABI wrappers                   │
+│  - Memory management                │
+│  - Error translation                │
+│  - Type conversions                 │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│     Kestrel Core (Rust)             │
+│  - Engine                           │
+│  - NFA                              │
+│  - Runtimes (Wasm/Lua)              │
+│  - EventBus                         │
+└─────────────────────────────────────┘
+```
+
+### 14.5 内存管理策略
+
+1. **输出内存由调用者释放**：所有返回的指针（alerts、metrics 等）必须由调用者通过对应的 `_free()` 函数释放
+2. **输入内存借用**：引擎不持有输入事件和规则的内存
+3. **全局锁保护**：所有 API 内部使用 mutex 保证线程安全
+
+### 14.6 构建与打包
+
+#### 14.6.1 目录结构
+```
+kestrel-ffi/
+├── include/
+│   └── kestrel.h          # 公开 C 头文件
+├── src/
+│   ├── lib.rs             # FFI 实现
+│   ├── engine.rs          # Engine API
+│   ├── events.rs          # Event API
+│   ├── rules.rs           # Rule API
+│   └── metrics.rs         # Metrics API
+├── tests/
+│   └── c_integration/      # C 集成测试
+│       ├── test_basic.c
+│       └── Makefile
+└── Cargo.toml
+```
+
+#### 14.6.2 构建产物
+
+```bash
+# Linux
+cargo build --release --lib -p kestrel-ffi
+# 生成: target/release/libkestrel.so
+
+# macOS
+cargo build --release --lib -p kestrel-ffi
+# 生成: target/release/libkestrel.dylib
+
+# Windows (MSVC)
+cargo build --release --lib -p kestrel-ffi
+# 生成: target/release/kestrel.dll
+
+# 静态库（可选）
+cargo build --release --lib -p kestrel-ffi
+# 生成: target/release/libkestrel.a
+```
+
+### 14.7 使用示例
+
+#### 14.7.1 C 示例代码
+
+```c
+#include "kestrel.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+int main() {
+    kestrel_engine_t* engine = NULL;
+    kestrel_config_t config = {
+        .event_bus_size = 10000,
+        .worker_threads = 4,
+        .batch_size = 100,
+        .enable_metrics = true,
+        .enable_tracing = false,
+    };
+
+    // 创建引擎
+    kestrel_error_t err = kestrel_engine_new(&config, &engine);
+    if (err != KESTREL_OK) {
+        fprintf(stderr, "Failed to create engine\n");
+        return 1;
+    }
+
+    // 加载规则
+    const char* rule = "sequence where process.name == 'bash'";
+    const char* error_msg = NULL;
+    err = kestrel_engine_load_rule(engine, "rule-1", rule, &error_msg);
+    if (err != KESTREL_OK) {
+        fprintf(stderr, "Failed to load rule: %s\n", error_msg);
+    }
+
+    // 处理事件
+    kestrel_event_t event = {
+        .event_id = 1,
+        .event_type = 1,  // PROCESS_EXEC
+        .ts_mono_ns = 1000000,
+        .ts_wall_ns = 1000000,
+        .entity_key = 12345,
+        .field_count = 2,
+        // ... fields
+    };
+
+    kestrel_alert_t** alerts = NULL;
+    size_t alert_count = 0;
+    err = kestrel_engine_process_event(engine, &event, &alerts, &alert_count);
+
+    if (alert_count > 0) {
+        printf("Generated %zu alerts\n", alert_count);
+        for (size_t i = 0; i < alert_count; i++) {
+            printf("Alert: %s\n", kestrel_alert_get_rule_id(alerts[i]));
+        }
+        kestrel_alerts_free(alerts, alert_count);
+    }
+
+    // 清理
+    kestrel_engine_free(engine);
+    return 0;
+}
+```
+
+#### 14.7.2 Python 集成示例（通过 ctypes/cffi）
+
+```python
+import ctypes
+from ctypes import *
+
+# 加载共享库
+lib = ctypes.CDLL("./libkestrel.so")
+
+# 定义类型和函数签名
+lib.kestrel_engine_new.restype = c_int32
+lib.kestrel_engine_new.argtypes = [POINTER(kestrel_config), POINTER(c_void_p)]
+
+lib.kestrel_engine_process_event.restype = c_int32
+lib.kestrel_engine_process_event.argtypes = [c_void_p, POINTER(kestrel_event), POINTER(c_void_p), POINTER(c_size_t)]
+
+# 使用...
+engine = c_void_p()
+lib.kestrel_engine_new(byref(config), byref(engine))
+```
+
+### 14.8 Phase 规划
+
+#### Phase 1: 核心 FFI 框架（2-3 人周）
+- 创建 kestrel-ffi crate
+- 实现 Engine API wrapper
+- 实现 Event/Alert API wrapper
+- C 头文件定义（kestrel.h）
+- 基础内存管理
+
+#### Phase 2: 规则与 Metrics API（2-3 人周）
+- 规则加载/卸载 API
+- Metrics 查询 API
+- 错误消息处理
+- 资源清理 API
+
+#### Phase 3: 测试与文档（2-3 人周）
+- C 集成测试套件
+- Python bindings 示例
+- 使用文档与示例代码
+- 性能基准测试
+
+#### Phase 4: 多语言支持（1-2 人周）
+- Go cgo 绑定示例
+- Java JNI 绑定示例
+- Node.js FFI 示例
+
+### 14.9 兼容性目标
+
+| 平台 | 最低版本 | 状态 |
+|------|---------|------|
+| Linux glibc | 2.17 | 待实现 |
+| macOS | 10.14+ | 待实现 |
+| Windows | MSVC 2019+ | 待实现 |
+
+### 14.10 质量门槨
+
+1. **ABI 稳定性测试**：跨版本兼容性测试
+2. **内存泄漏检测**：Valgrind/Sanitizer 检查
+3. **线程安全测试**：多线程并发调用测试
+4. **性能测试**：FFI 层开销 < 5% 总延迟
+5. **文档完整性**：每个 API 都有示例代码
+
+### 总体粗估
+- **最小可用版本**（核心 API + 测试）：约 **6–9 人周**
+- **完整生态**（多语言绑定 + 文档）：约 **9–14 人周**
