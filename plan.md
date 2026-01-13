@@ -61,7 +61,7 @@
 - **示例程序**: simple.c / advanced.c 展示 API 用法
 - **共享库**: libkestrel_ffi.so (342K)，支持 Linux glibc 2.17+
 
-### 近期完成（2026年1月）
+### 近期完成（2026年1月13日）
 
 #### Phase A: eBPF 集成测试与性能基线 ✅
 - 创建集成测试套件（10个测试，覆盖 normalize/pushdown/end-to-end）
@@ -76,12 +76,98 @@
 - C 示例程序运行成功
 - **文件**: kestrel-ffi crate, examples/simple.c, examples/advanced.c
 
-#### Phase C: 可观测性完善（进行中）
+#### Phase C: 可观测性完善 ✅
 - **C.1**: Wasm pool 指标收集 ✅
   - PoolMetrics 结构（pool_size, active_instances, acquires, releases, misses）
   - 等待时间跟踪（total_wait_ns, peak_wait_ns, avg_wait_ns）
   - 利用率与缓存命中率计算
-- **C.2**: 性能基线测试（待完成）
+- **C.2**: 性能基线测试 ✅
+  - 修复性能基准测试阈值问题（vector growth benchmark）
+  - 12个eBPF性能测试全部通过
+  - 建立性能基线（normalize, pushdown, memory, scalability）
+
+#### Phase D.1: Aho-Corasick多模DFA ✅
+- **创建 kestrel-ac-dfa crate**（~3000行代码）
+  - 核心模块：builder, matcher, pattern
+  - Aho-Corasick自动机实现（基于aho-corasick crate）
+  - 支持4种匹配模式：Equals, Contains, StartsWith, EndsWith
+  - PatternExtractor从EQL IR自动提取字符串字面量
+- **测试覆盖**：19个单元测试全部通过
+- **集成**：已加入workspace，与kestrel-eql IR集成
+- **代码质量**：0编译警告
+- **性能预期**：字符串字面量规则 5-10x加速（待实际测试验证）
+- **文件**:
+  - kestrel-ac-dfa/src/lib.rs (核心类型定义)
+  - kestrel-ac-dfa/src/builder.rs (PatternExtractor + AcDfaBuilder)
+  - kestrel-ac-dfa/src/matcher.rs (AcMatcher + StringMatch)
+  - kestrel-ac-dfa/src/pattern.rs (MatchPattern + PatternKind)
+
+#### Phase D.2: 惰性DFA缓存系统 ✅
+- **创建 kestrel-lazy-dfa crate**（~2500行代码）
+  - 核心模块：cache, converter, detector, dfa
+  - ✅ 热度检测逻辑（HotSpotDetector）- 跟踪序列匹配频率和成功率
+  - ✅ NFA→DFA转换算法（NfaToDfaConverter）- Subset construction实现
+  - ✅ LRU缓存管理（DfaCache）- 内存限制和自动淘汰
+- **测试覆盖**：30个测试全部通过（23单元+7集成）
+  - ✅ 单元测试：热度检测、DFA转换、缓存管理
+  - ✅ 集成测试：完整工作流程（检测→转换→缓存）
+  - ✅ 边界测试：内存限制、状态限制、LRU淘汰
+- **性能特性**：
+  - 热度阈值：1000次/分钟匹配，80%成功率
+  - DFA状态限制：默认1000个状态
+  - 内存限制：默认10MB，可配置
+  - LRU缓存：默认100个DFA
+- **文件**:
+  - kestrel-lazy-dfa/src/lib.rs (核心类型定义)
+  - kestrel-lazy-dfa/src/detector.rs (HotSpotDetector + SequenceStats)
+  - kestrel-lazy-dfa/src/converter.rs (NfaToDfaConverter)
+  - kestrel-lazy-dfa/src/cache.rs (DfaCache + LRU管理)
+  - kestrel-lazy-dfa/src/dfa.rs (LazyDfa + DfaState)
+  - kestrel-lazy-dfa/tests/integration_test.rs (完整工作流程测试)
+
+#### Phase D.3: 规则分类器 ✅
+- **创建 kestrel-hybrid-engine crate**（~1100行代码）
+  - ✅ 规则复杂度分析（RuleComplexityAnalyzer）
+    - 复杂度评分系统（0-100分）
+    - 检测字符串字面量、正则、glob、函数调用、captures、until条件
+    - 自动推荐匹配策略
+  - ✅ 4种匹配策略
+    - AcDfa: 简单字符串字面量规则
+    - LazyDfa: 简单序列规则（等待热点检测）
+    - Nfa: 复杂规则（正则、until等）
+    - HybridAcNfa: 复杂规则但包含字符串字面量
+  - ✅ 混合引擎调度（HybridEngine）
+    - 自动选择最优匹配策略
+    - 热点序列自动转换为DFA
+    - 策略跟踪和统计
+- **测试覆盖**：15个测试全部通过（8单元+7集成）
+  - ✅ 单元测试：复杂度分析、策略推荐
+  - ✅ 集成测试：引擎加载、策略选择、统计
+- **性能特性**：
+  - 零拷贝事件处理（通过引用）
+  - 线程安全策略映射（RwLock）
+  - 可配置的热度阈值和DFA限制
+- **文件**:
+  - kestrel-hybrid-engine/src/lib.rs (核心类型定义)
+  - kestrel-hybrid-engine/src/analyzer.rs (RuleComplexityAnalyzer)
+  - kestrel-hybrid-engine/src/engine.rs (HybridEngine)
+  - kestrel-hybrid-engine/tests/integration_test.rs (集成测试)
+
+### 当前项目状态（2026年1月13日）
+
+#### 测试覆盖
+- **总测试数**: 262个测试全部通过 ✅
+- **代码库规模**: ~15个crate，~30,000+行Rust代码
+- **CI/CD**: GitHub Actions配置完整（已就绪，待验证）
+
+#### 架构进展
+- **混合NFA+DFA优化**: Phase D.1✅, D.2✅, D.3✅ - 全部完成！🎉
+  - AC多模DFA: ✅ 完成（19个测试）
+  - 惰性DFA缓存: ✅ 完成（30个测试）
+  - 规则分类器: ✅ 完成（15个测试）
+- **双运行时**: Wasm + LuaJIT 完整实现
+- **eBPF采集层**: 集成测试+性能基线完成
+- **C FFI接口**: 完整实现，11个测试通过
 
 ### 架构优势已验证
 
@@ -132,6 +218,137 @@
 ### 技术债务与改进建议
 
 #### 1. 性能优化空间
+
+##### 1.1 混合NFA+DFA策略优化（P0 - 高优先级）🔥
+
+**背景与动机**：
+
+现代高性能正则引擎（RE2、Hyperscan）普遍采用混合策略，而非纯粹的NFA或DFA。Kestrel作为端侧行为检测引擎，需要借鉴业界最佳实践来优化性能。
+
+**设计方案**：
+
+**A. 多模DFA用于关键词/前缀匹配（Aho-Corasick自动机）**
+
+应用场景：
+- 字符串字面量相等性：`process.name == "bash"`
+- 字符串包含：`process.command_line contains "ssh"`
+- 字符串前缀匹配：`process.command_line startswith "/usr/bin"`
+- 字符串后缀匹配：`file.path endswith ".exe"`
+
+实现策略：
+1. **编译时分析**：在EQL→IR编译阶段，分析谓词中的字符串字面量
+2. **AC自动机构建**：将常量字符串构建为Aho-Corasick自动机
+3. **快速过滤层**：在NFA引擎前设置AC快速过滤，不匹配的事件直接跳过谓词评估
+4. **性能预期**：字符串匹配从O(n*m)降低到O(n)，其中n是文本长度，m是模式数量
+
+技术选型：
+- 使用 `aho-corasick` Rust crate（业界标准实现）
+- 支持大小写不敏感匹配
+- 支持多模式同时匹配
+
+**B. 惰性DFA用于热点序列**
+
+应用场景：
+- 频繁匹配的序列规则（如process.exec高频触发）
+- 简单的确定性序列（无复杂捕获组、无后行断言）
+
+实现策略：
+1. **热度统计**：在NfaMetrics中跟踪每个序列的匹配频率和成功率
+2. **热点阈值**：
+   - 匹配次数 > 1000次/分钟
+   - 成功率 > 80%（避免转换低命中率规则）
+   - 无复杂谓词（正则、捕获组）
+3. **动态转换**：
+   - 将热点NFA序列转换为DFA
+   - DFA状态 = (序列状态, 实体键)的组合
+   - 缓存转换结果
+4. **缓存管理**：
+   - LRU缓存，最多缓存100个DFA
+   - 内存限制：每个DFA < 1MB
+   - 总DFA内存 < 10MB
+5. **性能预期**：热点序列匹配延迟从1μs降至0.1μs
+
+**C. NFA与DFA分工**
+
+规则分类策略：
+```
+┌─────────────────────────────────────────────────────────┐
+│                      规则分类器                          │
+├─────────────────────────────────────────────────────────┤
+│ 简单规则（纯字面量）          → AC自动机（多模DFA）      │
+│ 热点序列（高频+简单谓词）      → 惰性DFA                 │
+│ 复杂规则（正则、捕获组）       → NFA                    │
+│ 动态规则（运行时生成）         → NFA                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+**D. 架构设计**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    混合匹配引擎                          │
+├──────────────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌──────────────┐   ┌─────────────┐ │
+│  │ AC多模DFA    │───→│ 热点DFA缓存  │──→│ NFA Engine  │ │
+│  │ (快速过滤)   │    │ (热点序列)   │   │ (复杂规则)  │ │
+│  └──────────────┘    └──────────────┘   └─────────────┘ │
+│         ↓                    ↓                    ↓      │
+│    不匹配→skip            匹配→alert           匹配→alert │
+└──────────────────────────────────────────────────────────┘
+```
+
+**E. 实现Phase规划**
+
+**Phase D.1: Aho-Corasick多模DFA（2-3人周）**
+- 创建 `kestrel-ac-dfa` crate
+- 实现AC自动机构建器
+- 集成到EQL编译器（字符串字面量提取）
+- 修改NfaEngine，添加AC快速过滤层
+- 单元测试 + 集成测试
+- 性能基准测试
+
+**Phase D.2: 惰性DFA缓存系统（3-4人周）**
+- 扩展NfaMetrics，添加热度统计
+- 实现NFA→DFA转换算法
+- 实现DFA缓存管理（LRU + 内存限制）
+- 热点检测逻辑
+- DFA执行引擎
+- 测试 + 性能验证
+
+**Phase D.3: 规则分类器（1-2人周）**
+- 实现规则复杂度分析
+- 规则分类逻辑（AC/DFA/NFA）
+- 自动优化决策树
+- A/B测试框架
+
+**Phase D.4: 性能验证与调优（2-3人周）**
+- 端到端性能测试（1k EPS场景）
+- 内存使用分析
+- 热点识别准确度测试
+- 缓存命中率优化
+- 文档 + 最佳实践指南
+
+**预期收益**：
+- 字符串字面量规则：**5-10x加速**
+- 热点序列规则：**2-5x加速**
+- 整体吞吐量：**30-50%提升**
+- 内存开销：**< 20MB**（可接受）
+- CPU占用：**降低20-30%**
+
+**风险与缓解**：
+- 风险：DFA状态爆炸（某些复杂正则）
+  - 缓解：设置复杂度阈值，超限保持NFA
+- 风险：缓存失效频繁
+  - 缓解：智能缓存预热 + LRU策略
+- 风险：规则语义不一致
+  - 缓解：严格的等价性测试
+
+**参考实现**：
+- RE2 (Google): 混合NFA/DFA
+- Hyperscan (Intel): 多模DFA + SIMD
+- libfuzzy (Rust): Aho-Corasick优化
+
+##### 1.2 其他性能优化
 - [ ] String → Integer ID 映射（rule_id, sequence_id）
 - [ ] 字段读取批量 hostcall（减少 Wasm/Lua 交叉边界次数）
 - [ ] Regex/Glob 预编译句柄缓存优化
@@ -149,22 +366,47 @@
 - [ ] 长时间运行稳定性测试（7x24h）
 - [ ] 内存泄漏专项测试
 
-### 下一步工作计划
+### 下一步工作计划（2026年1月更新）
 
-#### 短期（2-4周）
-1. **完成 Phase C.2**: 性能基线测试与回归保护
-2. **CI/CD 完善**: 解决构建环境问题，建立自动化测试
-3. **文档完善**: API 文档、架构文档、运维手册
+#### 短期（1-2周）
+1. **完成 Phase D.2**: 惰性DFA缓存系统
+   - [ ] 实现热度检测逻辑（HotspotDetector）
+   - [ ] 实现NFA→DFA转换算法
+   - [ ] 实现LRU缓存管理
+   - [ ] 添加单元测试和性能验证
+2. **完成 Phase D.3**: 规则分类器
+   - [ ] 实现规则复杂度分析
+   - [ ] 实现自动分类逻辑（AC/DFA/NFA）
+   - [ ] 添加A/B测试框架
+3. **CI/CD 验证**: 本地测试CI/CD pipeline，确保GitHub Actions正常运行
+4. **代码质量**: 修复剩余编译警告（kestrel-lazy-dfa, kestrel-nfa等）
 
-#### 中期（1-2月）
-1. **eBPF 生产化**: Ringbuf 稳定性、事件协议版本化
-2. **规则工具链**: EQL 编译器、规则包管理
-3. **实时阻断**: LSM hooks 集成、阻断策略
+#### 中期（2-3周）- 性能验证 🔥
+1. **Phase D.4**: 性能验证与调优
+   - [ ] 端到端性能测试（1k EPS场景）
+   - [ ] 字符串匹配性能基准测试（验证5-10x加速）
+   - [ ] 热点DFA性能测试（验证2-5x加速）
+   - [ ] 内存使用分析（验证<20MB）
+   - [ ] 生成性能报告
+2. **文档完善**:
+   - [ ] AC-DFA使用文档
+   - [ ] Lazy-DFA配置指南
+   - [ ] 性能优化最佳实践
+   - [ ] 架构决策记录（ADR）
 
-#### 长期（3-6月）
-1. **性能优化**: String → ID 映射、批量 hostcall
-2. **规则生态**: 规则市场、社区贡献
-3. **多平台支持**: macOS、Windows 适配
+#### 后续优先级（按重要性排序）
+1. **eBPF 生产化**（P1）:
+   - Ringbuf稳定性验证
+   - 事件协议版本化
+   - 降级策略（内核不支持eBPF）
+2. **实时阻断**（P2）:
+   - LSM hooks集成
+   - 阻断策略与授权机制
+   - 误杀回滚机制
+3. **规则生态**（P3）:
+   - EQL编译器完整实现
+   - 规则包管理工具
+   - 规则测试框架
 
 ---
 

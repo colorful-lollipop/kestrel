@@ -1,0 +1,27 @@
+[package]
+name = "kestrel-hybrid-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hybrid NFA+DFA matching engine for Kestrel"
+
+[dependencies]
+# Core dependencies
+ahash = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+parking_lot = "0.12"
+
+# Internal dependencies
+kestrel-nfa = { path = "../kestrel-nfa" }
+kestrel-ac-dfa = { path = "../kestrel-ac-dfa" }
+kestrel-lazy-dfa = { path = "../kestrel-lazy-dfa" }
+kestrel-eql = { path = "../kestrel-eql" }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+
+[dev-dependencies]
+rand = { workspace = true }

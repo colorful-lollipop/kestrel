@@ -1,0 +1,27 @@
+[package]
+name = "kestrel-lazy-dfa"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lazy DFA caching system for hot sequence detection in Kestrel"
+
+[dependencies]
+# Core dependencies
+ahash = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+parking_lot = "0.12"
+
+# LRU cache
+lru = "0.12"
+
+# Internal dependencies
+kestrel-nfa = { path = "../kestrel-nfa" }
+kestrel-eql = { path = "../kestrel-eql" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rand = { workspace = true }

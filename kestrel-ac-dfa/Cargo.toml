@@ -1,0 +1,24 @@
+[package]
+name = "kestrel-ac-dfa"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aho-Corasick multi-pattern DFA for fast string matching in Kestrel"
+
+[dependencies]
+# Core dependencies
+ahash = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+
+# Aho-Corasick implementation
+aho-corasick = "1.0"
+
+# Internal dependencies
+kestrel-eql = { path = "../kestrel-eql" }
+
+[dev-dependencies]
+rand = { workspace = true }

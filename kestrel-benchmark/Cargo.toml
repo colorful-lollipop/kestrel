@@ -12,6 +12,10 @@ kestrel-nfa = { path = "../kestrel-nfa" }
 kestrel-engine = { path = "../kestrel-engine", features = ["wasm", "lua"] }
 kestrel-core = { path = "../kestrel-core" }
 kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm" }
+kestrel-ac-dfa = { path = "../kestrel-ac-dfa" }
+kestrel-lazy-dfa = { path = "../kestrel-lazy-dfa" }
+kestrel-hybrid-engine = { path = "../kestrel-hybrid-engine" }
+kestrel-eql = { path = "../kestrel-eql" }
 
 criterion = "0.5"
 tokio = { version = "1.42", features = ["full"] }
@@ -28,3 +32,7 @@ test-log = "0.2"
 [[bin]]
 name = "kestrel-benchmark"
 path = "src/main.rs"
+
+[[bench]]
+name = "hybrid_benchmark"
+harness = false
