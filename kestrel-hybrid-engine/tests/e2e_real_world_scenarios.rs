@@ -175,7 +175,9 @@ fn create_test_sequence(id: &str, steps: Vec<(u16, &str)>, maxspan: Option<u64>)
         .iter()
         .enumerate()
         .map(|(i, (event_type, pred_id))| {
-            SeqStep::new(*event_type, pred_id.to_string(), (i + 1) as u16)
+            // state_id starts from 0!
+            // SeqStep::new(state_id, predicate_id, event_type_id)
+            SeqStep::new(i as u16, pred_id.to_string(), *event_type)
         })
         .collect();
 
@@ -231,7 +233,7 @@ fn test_scenario_powershell_suspicious() {
     assert!(all_alerts.len() >= 1, "Expected at least 1 alert, got {}", all_alerts.len());
 
     let alert = &all_alerts[0];
-    assert_eq!(alert.rule_id, "rule-process-start");
+    assert_eq!(alert.rule_id, "process-start");
 
     println!("✅ PowerShell suspicious scenario detected!");
     println!("   Rule: {}", alert.rule_name);
@@ -275,7 +277,7 @@ fn test_scenario_file_tampering() {
     );
 
     let alert = &all_alerts[0];
-    assert_eq!(alert.rule_id, "rule-file-tampering");
+    assert_eq!(alert.rule_id, "file-tampering");
     assert_eq!(alert.sequence_id, "file-tampering");
 
     println!("✅ File tampering scenario detected!");
@@ -368,8 +370,8 @@ fn test_multiple_scenarios_mixed() {
 
     // 验证告警类型
     let rule_ids: Vec<_> = all_alerts.iter().map(|a| a.rule_id.as_str()).collect();
-    assert!(rule_ids.contains(&"rule-powershell-suspicious"));
-    assert!(rule_ids.contains(&"rule-file-tampering"));
+    assert!(rule_ids.contains(&"powershell-suspicious"));
+    assert!(rule_ids.contains(&"file-tampering"));
 
     println!("✅ Mixed scenarios handled correctly!");
     println!("   Total alerts: {}", all_alerts.len());

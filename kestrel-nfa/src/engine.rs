@@ -333,7 +333,28 @@ impl NfaEngine {
         if let Some(step) = step_to_process {
             let state_id = step.state_id;
             if state_id == 0 {
+                // Start a new partial match
                 self.start_partial_match(sequence, event.clone(), entity_key)?;
+
+                // Check if this is a single-step sequence (complete immediately)
+                if sequence.step_count() == 1 {
+                    // Single-step sequence - generate alert immediately
+                    if let Some(pm) = self.state_store.get(
+                        sequence_id(sequence),
+                        entity_key,
+                        0
+                    ) {
+                        let alert = self.generate_alert(sequence, pm)?;
+                        alerts.push(alert);
+
+                        // Remove the partial match
+                        self.state_store.remove(
+                            sequence_id(sequence),
+                            entity_key,
+                            0
+                        );
+                    }
+                }
             } else {
                 if let Some(alert) =
                     self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
