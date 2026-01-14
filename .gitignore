@@ -1,8 +1,14 @@
 # Rust
 target/
+.cargo-target/
+target_*/
 Cargo.lock
 **/*.rs.bk
 *.pdb
+
+# Build artifacts in root
+*.elf
+test_eql
 
 # IDEs
 .vscode/
