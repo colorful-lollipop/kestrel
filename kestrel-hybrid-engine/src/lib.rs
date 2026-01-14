@@ -6,6 +6,9 @@
 mod analyzer;
 mod engine;
 
+#[cfg(test)]
+mod release_perf;
+
 pub use analyzer::{
     RuleComplexity, RuleComplexityAnalyzer, StrategyRecommendation,
     MatchingStrategy,

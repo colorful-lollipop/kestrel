@@ -42,6 +42,9 @@ mod builder;
 mod matcher;
 mod pattern;
 
+#[cfg(test)]
+mod perf;
+
 pub use builder::{AcDfaBuilder, PatternExtractor};
 pub use matcher::{AcMatcher, MatchType, StringMatch};
 pub use pattern::{MatchPattern, PatternKind};
