@@ -13,10 +13,13 @@ kestrel-core = { path = "../kestrel-core" }
 kestrel-engine = { path = "../kestrel-engine" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-schema = { path = "../kestrel-schema" }
+kestrel-hybrid-engine = { path = "../kestrel-hybrid-engine" }
+kestrel-nfa = { path = "../kestrel-nfa" }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
+parking_lot = "0.12"
 
 

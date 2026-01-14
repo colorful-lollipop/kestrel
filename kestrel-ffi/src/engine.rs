@@ -4,13 +4,38 @@
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::sync::Arc;
+use std::collections::HashMap;
+use parking_lot::RwLock;
 
 use crate::error::KestrelError;
 use crate::types::*;
 
-/// Internal engine wrapper (simplified for MVP)
+use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig, RuleStrategy};
+use kestrel_nfa::{CompiledSequence, NfaEngineConfig, PredicateEvaluator};
+
+/// Mock evaluator for MVP
+struct MockEvaluator;
+
+impl PredicateEvaluator for MockEvaluator {
+    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+        Ok(true) // For MVP, accept all predicates
+    }
+
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+        Ok(Vec::new()) // For MVP, no required fields
+    }
+
+    fn has_predicate(&self, _predicate_id: &str) -> bool {
+        true // For MVP, always has predicate
+    }
+}
+
+/// Internal engine wrapper with actual hybrid engine
 pub struct EngineWrapper {
-    config: kestrel_config_t,
+    pub config: kestrel_config_t,
+    pub engine: HybridEngine,
+    pub loaded_sequences: RwLock<HashMap<String, String>>, // rule_id -> sequence_id mapping
 }
 
 // Thread-local storage for last error message
@@ -46,8 +71,24 @@ pub unsafe extern "C" fn kestrel_engine_new(
         *config
     };
 
-    // Create simplified engine wrapper
-    let wrapper = Box::new(EngineWrapper { config });
+    // Create hybrid engine configuration
+    let hybrid_config = HybridEngineConfig::default();
+
+    // Create predicate evaluator
+    let evaluator = Arc::new(MockEvaluator);
+
+    // Create hybrid engine
+    let engine = match HybridEngine::new(hybrid_config, evaluator) {
+        Ok(e) => e,
+        Err(_) => return KestrelError::Unknown,
+    };
+
+    // Create engine wrapper
+    let wrapper = Box::new(EngineWrapper {
+        config,
+        engine,
+        loaded_sequences: RwLock::new(HashMap::new()),
+    });
     let engine_ptr = Box::into_raw(wrapper) as *mut kestrel_engine_t;
     *out_engine = engine_ptr;
 
@@ -119,11 +160,26 @@ pub unsafe extern "C" fn kestrel_engine_unload_rule(
         return KestrelError::InvalidArg;
     }
 
-    let _wrapper = &mut *(engine as *mut EngineWrapper);
-    let _rule_id = CStr::from_ptr(rule_id);
+    let wrapper = &mut *(engine as *mut EngineWrapper);
+    let rule_id_str = match CStr::from_ptr(rule_id).to_str() {
+        Ok(s) => s,
+        Err(_) => return KestrelError::InvalidArg,
+    };
 
-    // TODO: Implement actual rule unloading
-    KestrelError::Ok
+    // Remove from loaded sequences mapping
+    let sequence_id = wrapper.loaded_sequences.write().remove(rule_id_str);
+
+    if let Some(seq_id) = sequence_id {
+        tracing::info!(
+            rule_id = rule_id_str,
+            sequence_id = seq_id,
+            "Rule unloaded"
+        );
+        KestrelError::Ok
+    } else {
+        tracing::warn!(rule_id = rule_id_str, "Rule not found");
+        KestrelError::Unknown
+    }
 }
 
 /// Unload all rules from the engine
@@ -138,9 +194,15 @@ pub unsafe extern "C" fn kestrel_engine_unload_all_rules(
         return KestrelError::InvalidArg;
     }
 
-    let _wrapper = &mut *(engine as *mut EngineWrapper);
+    let wrapper = &mut *(engine as *mut EngineWrapper);
 
-    // TODO: Implement actual rule unloading
+    // Clear all loaded sequences
+    let sequences = wrapper.loaded_sequences.write();
+    let count = sequences.len();
+    wrapper.loaded_sequences.write().clear();
+
+    tracing::info!(count = count, "All rules unloaded");
+
     KestrelError::Ok
 }
 
