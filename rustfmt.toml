@@ -1,0 +1,135 @@
+# Rustfmt configuration for Kestrel project
+# See https://rust-lang.github.io/rustfmt/
+
+# Edition
+edition = "2021"
+
+# Maximum line width
+max_width = 100
+
+# Hard tabs or spaces
+hard_tabs = false
+
+# Tab spaces
+tab_spaces = 4
+
+# Newline style
+newline_style = "Unix"
+
+# Use field init shorthand
+use_field_init_shorthand = true
+
+# Use try shorthand
+use_try_shorthand = true
+
+# Force explicit types for public items
+# This improves API documentation
+# public_item_fields = ["explain_type"]  # Not yet stable
+
+# Format code in doc comments
+format_code_in_doc_comments = true
+
+# Format strings
+format_strings = true
+
+# Normalize comments
+normalize_comments = true
+
+# Normalize doc attributes
+normalize_doc_attributes = true
+
+# Wrap comments at max_width
+wrap_comments = true
+comment_width = 100
+
+# Reorder imports
+reorder_imports = true
+reorder_modules = true
+
+# Remove nested parens
+remove_nested_parens = true
+
+# Merge derives
+merge_derives = true
+
+# Use spaces around ranges
+spaces_around_ranges = false
+
+# Struct field alignment
+struct_field_align_threshold = 0
+
+# Match block trailing comma
+match_block_trailing_comma = true
+
+# Trailing comma for function parameters
+trailing_comma = "Vertical"
+
+# Trailing semicolon
+trailing_semicolon = true
+
+# Skip children
+skip_children = false
+
+# Indent style
+indent_style = "Block"
+
+# Imports indent
+imports_indent = "Block"
+
+# Imports layout
+imports_layout = "Mixed"
+
+# Group imports
+group_imports = "StdExternalCrate"
+
+# Reorder impl items
+reorder_impl_items = true
+
+# Use small heuristics
+use_small_heuristics = "Default"
+
+# Overflow delimited expr
+overflow_delimited_expr = true
+
+# Error on line overflow
+error_on_line_overflow = false
+
+# Error on unformatted
+error_on_unformatted = false
+
+# Version
+version = "Two"
+
+# Inline attribute width
+inline_attribute_width = 0
+
+# Blank lines upper bound
+blank_lines_upper_bound = 1
+blank_lines_lower_bound = 0
+
+# Brace style
+brace_style = "SameLineWhere"
+control_brace_style = "AlwaysSameLineWhere"
+
+# Empty item single line
+empty_item_single_line = true
+
+# Enum discrim align threshold
+enum_discrim_align_threshold = 0
+
+# Fn args layout
+fn_args_layout = "Tall"
+
+# Fn call width
+fn_call_width = 80
+
+# Fn single line
+fn_single_line = false
+
+# Where single line
+where_single_line = false
+
+# Force explicit types (not yet stable)
+# force_explicit_abi = true
+# force_explicit_body = true
+# force_explicit_type = true

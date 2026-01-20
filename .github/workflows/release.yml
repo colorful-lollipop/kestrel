@@ -13,13 +13,13 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Create GitHub release
-  create-release:
-    name: Create Release
+  # Extract version and generate changelog
+  prepare-release:
+    name: Prepare Release
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.release.outputs.upload_url }}
       version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
 
     steps:
       - name: Checkout code
@@ -29,10 +29,16 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" =~ (rc|alpha|beta) ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Generate changelog
-        id: changelog
         run: |
           # Get commits since last tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
@@ -44,7 +50,7 @@ jobs:
 
           # Add release header
           cat > release_notes.md << EOF
-          # Release v${{ steps.version.outputs.version }}
+          # Release ${{ steps.version.outputs.version }}
 
           ## Changes
 
@@ -57,22 +63,16 @@ jobs:
 
           cat release_notes.md
 
-      - name: Create GitHub Release
-        id: release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, 'rc') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') }}
+          name: release-notes
+          path: release_notes.md
 
   # Build release binaries
   build:
     name: Build (${{ matrix.target }})
-    needs: create-release
+    needs: prepare-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -133,20 +133,16 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
 
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./${{ matrix.asset_name }}.tar.gz
-          asset_name: ${{ matrix.asset_name }}.tar.gz
-          asset_content_type: application/gzip
+          name: ${{ matrix.asset_name }}
+          path: ./${{ matrix.asset_name }}.tar.gz
 
   # Build and publish to crates.io
   publish-crates:
     name: Publish to crates.io
-    needs: create-release
+    needs: prepare-release
     runs-on: ubuntu-latest
     if: "!contains(github.ref, 'rc') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta')"
 
@@ -197,7 +193,7 @@ jobs:
   # Generate and upload documentation
   publish-docs:
     name: Publish Documentation
-    needs: create-release
+    needs: prepare-release
     runs-on: ubuntu-latest
 
     steps:
@@ -217,4 +213,38 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./target/doc
-          destination_dir: docs/${{ needs.create-release.outputs.version }}
+          destination_dir: docs/${{ needs.prepare-release.outputs.version }}
+
+  # Create GitHub Release with all assets
+  create-release:
+    name: Create GitHub Release
+    needs: [prepare-release, build, publish-crates, publish-docs]
+    runs-on: ubuntu-latest
+    if: always() && needs.prepare-release.result == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ github.ref }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ needs.prepare-release.outputs.is_prerelease }}
+          files: assets/*/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

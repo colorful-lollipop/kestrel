@@ -1,0 +1,114 @@
+# Clippy configuration for Kestrel project
+# See https://rust-lang.github.io/rust-clippy/master/clippy_lints/#configuration
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Disallowed methods
+# Add methods that should not be used in the codebase
+# disallowed-methods = [
+#     "std::option::Option::unwrap",
+#     "std::result::Result::unwrap",
+# ]
+
+# Disallowed types
+# disallowed-types = [
+#     "std::collections::HashMap",
+#     "std::collections::BTreeMap",
+# ]
+
+# Disallowed scripts
+# disallowed-script-identities = [
+#     "Python",
+# ]
+
+# Enforced import renames
+# enforced-import-renames = [
+#     { "serde" = "serde_renamed" },
+# ]
+
+# Missing docs in private items
+missing-docs-in-private-items = false
+
+# Too many arguments threshold
+too-many-arguments-threshold = 7
+
+# Type complexity threshold
+type-complexity-threshold = 250
+
+# Single char binding names threshold
+single-char-binding-names-threshold = 4
+
+# Literal representation threshold
+literal-representation-threshold = 10
+
+# Vec box size threshold
+vec-box-size-threshold = 4096
+
+# Stack size threshold
+stack-size-threshold = 512000
+
+# Enum variant size threshold
+enum-variant-size-threshold = 200
+
+# Verive bit mask threshold
+verbose-bit-mask-threshold = 1
+
+# Warn on all wildcard imports
+warn-on-all-wildcard-imports = true
+
+# Allowed duplicate crates
+allowed-duplicate-crates = []
+
+# Allowed scripts
+allowed-scripts = ["Unicode"]
+
+# Allow expect in tests (useful for test assertions)
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+allow-print-in-tests = true
+
+# Suppress lints from dependencies
+suppress-lint-ignore-strings = false
+
+# Standard macro braces
+standard-macro-braces = []
+
+# Blacklisted names (variable/function names to avoid)
+# blacklisted-names = ["foo", "bar", "baz", "quux"]
+
+# Absolute paths for allowed external types
+# absolute-paths-allowed-crates = []
+
+# Max trait bounds
+max-trait-bounds = 3
+
+# Max include file size
+max-include-file-size = 1000000
+
+# Allow mixed case hex literals
+allow-mixed-uninlined-format-args = true
+
+# Documentation style checks
+doc-valid-idents = [
+    "Kestrel",
+    "eBPF",
+    "EQL",
+    "NFA",
+    "DFA",
+    "Wasm",
+    "LuaJIT",
+    "GitHub",
+    "JSON",
+    "YAML",
+    "API",
+    "FFI",
+    "TODO",
+    "FIXME",
+]
+
+# Allow private mock tests
+allow-dbg-in-tests = true
+
+# Macro matcher stack size
+macro-max-params-stack-size = 12

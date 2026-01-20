@@ -1,0 +1,74 @@
+# Codecov configuration for Kestrel project
+# See https://docs.codecov.com/docs/codecov-yaml
+
+# Coverage configuration
+coverage:
+  status:
+    project:
+      default:
+        # Project-wide coverage target
+        target: 80%
+        threshold: 1%
+        base: auto
+        if_ci_failed: error
+
+    patch:
+      default:
+        # Coverage for individual patches/PRs
+        target: 75%
+        threshold: 1%
+        base: auto
+        if_ci_failed: error
+
+# Ignore paths
+ignore:
+  - "tests/*"
+  - "examples/*"
+  - "benches/*"
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/benches/*"
+
+# Comment configuration
+comment:
+  layout: "reach,diff,flags,files,footer"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+
+# Flag specific coverage
+flags:
+  core:
+    paths:
+      - kestrel-core/
+      - kestrel-engine/
+      - kestrel-schema/
+      - kestrel-event/
+    carryforward: true
+
+  compiler:
+    paths:
+      - kestrel-eql/
+      - kestrel-nfa/
+      - kestrel-rules/
+    carryforward: true
+
+  runtime:
+    paths:
+      - kestrel-runtime-wasm/
+      - kestrel-runtime-lua/
+    carryforward: true
+
+  ebpf:
+    paths:
+      - kestrel-ebpf/
+    carryforward: true
+
+# GitHub specific checks
+github_checks:
+  annotations: true
+
+# Resolve paths
+resolve_paths:
+  repo_root_placeholder: "/root/code/Kestrel"

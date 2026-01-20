@@ -1,0 +1,74 @@
+# Code Owners for Kestrel Project
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# IMPORTANT: This is a template file with placeholder teams.
+# Before using this file, update the team references to match your actual GitHub teams.
+# To set up teams:
+# 1. Go to https://github.com/organizations/kestrel-detection/teams
+# 2. Create teams like: @kestrel-detection/core, @kestrel-detection/ebpf, etc.
+# 3. Replace the placeholder usernames/team names below with your actual teams
+
+# ==================== Core Engine ====================
+# Detection engine and core components
+/kestrel-core/          @kestrel-detection/core  # TODO: Update with actual team
+/kestrel-engine/        @kestrel-detection/core
+/kestrel-schema/        @kestrel-detection/core
+/kestrel-event/         @kestrel-detection/core
+
+# ==================== Rules & Languages ====================
+# EQL compiler and rule management
+/kestrel-eql/           @kestrel-detection/compiler  # TODO: Update with actual team
+/kestrel-rules/         @kestrel-detection/compiler
+/kestrel-nfa/           @kestrel-detection/compiler
+/kestrel-ac-dfa/        @kestrel-detection/compiler
+/kestrel-lazy-dfa/      @kestrel-detection/compiler
+/kestrel-hybrid-engine/ @kestrel-detection/compiler
+
+# ==================== Runtimes ====================
+# Wasm and Lua runtime integrations
+/kestrel-runtime-wasm/  @kestrel-detection/runtime  # TODO: Update with actual team
+/kestrel-runtime-lua/   @kestrel-detection/runtime
+
+# ==================== eBPF ====================
+# eBPF programs and kernel-space integration
+/kestrel-ebpf/          @kestrel-detection/ebpf  # TODO: Update with actual team
+
+# ==================== CLI & Tools ====================
+# Command-line interface and FFI
+/kestrel-cli/           @kestrel-detection/tools  # TODO: Update with actual team
+/kestrel-ffi/           @kestrel-detection/tools
+/kestrel-benchmark/     @kestrel-detection/tools
+
+# ==================== Documentation ====================
+# All markdown documentation files
+*.md                    @kestrel-detection/docs  # TODO: Update with actual team
+/docs/                  @kestrel-detection/docs
+/examples/              @kestrel-detection/docs
+
+# ==================== CI/CD & Infrastructure ====================
+# GitHub Actions workflows and configurations
+.github/                @kestrel-detection/devops  # TODO: Update with actual team
+
+# ==================== Configuration Files ====================
+# Project configuration files
+/Cargo.toml             @kestrel-detection/core
+/Cargo.lock             @kestrel-detection/core
+/.gitignore             @kestrel-detection/core
+/.gitattributes         @kestrel-detection/core
+/rustfmt.toml           @kestrel-detection/core
+/clippy.toml            @kestrel-detection/core
+
+# ==================== Security ====================
+# Security-related files
+/SECURITY.md            @kestrel-detection/security  # TODO: Update with actual team
+/kestrel-ebpf/          @kestrel-detection/security
+
+# ==================== Default Owner ====================
+# For any files not explicitly listed above,
+# require approval from at least one core maintainer
+*                       @kestrel-detection/core  # TODO: Update with actual team
+
+# ==================== Approvers Override ====================
+# In addition to the owners above, any code change must be approved
+# by at least one maintainer from the core team
+# This is enforced via GitHub branch protection rules

@@ -1,0 +1,51 @@
+# Dependabot configuration for Kestrel project
+# See https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      # Check for updates weekly (every Sunday at 00:00 UTC)
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "kestrel-detection/maintainers"  # TODO: Update with actual maintainer team
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Group updates to reduce PR noise
+    groups:
+      rust-security:
+        patterns:
+          - "*"  # All security updates
+        exclude-patterns:
+          - "*-sys"  # Exclude FFI bindings
+      prod-deps:
+        dependency-type: "production"
+        patterns:
+          - "*"  # All production dependencies
+        exclude-patterns:
+          - "*-sys"
+      dev-deps:
+        dependency-type: "development"
+        patterns:
+          - "*"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci"
+      - "dependencies"
+    commit-message:
+      prefix: "ci(deps)"

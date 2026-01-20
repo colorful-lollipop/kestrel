@@ -27,6 +27,11 @@ authors = ["Kestrel Team"]
 license = "Apache-2.0"
 repository = "https://github.com/kestrel-detection/kestrel"
 homepage = "https://github.com/kestrel-detection/kestrel"
+description = "Next-generation endpoint behavioral detection engine with eBPF, NFA, and dual runtime support"
+keywords = ["security", "detection", "ebpf", "eql", "endpoint", "behavioral-analysis", "threat-detection"]
+categories = ["security-tools", "parser-implementations", "command-line-utilities", "development-tools"]
+readme = "README.md"
+documentation = "https://kestrel-detection.github.io/kestrel"
 
 [workspace.dependencies]
 # Async runtime
