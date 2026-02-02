@@ -653,7 +653,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
         // Get the predicate
         let predicates = self.predicates.read().unwrap();
-        let predicate = predicates.get(predicate_id).ok_or_else(|| {
+        let _predicate = predicates.get(predicate_id).ok_or_else(|| {
             kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
         })?;
 

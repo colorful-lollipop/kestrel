@@ -6,7 +6,6 @@ use crate::dfa::LazyDfa;
 use crate::{LazyDfaError, LazyDfaResult};
 use lru::LruCache;
 use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Configuration for the DFA cache
 #[derive(Debug, Clone)]
@@ -165,7 +164,7 @@ impl DfaCache {
     /// Ensure enough memory is available by evicting LRU entries
     fn ensure_memory_available(&self, required: usize) -> LazyDfaResult<()> {
         let current = *self.memory_usage.read();
-        let available = self.config.max_total_memory.saturating_sub(current);
+        let _available = self.config.max_total_memory.saturating_sub(current);
         let threshold = (self.config.max_total_memory as f64 * self.config.memory_eviction_threshold) as usize;
 
         // If we're below threshold, no need to evict

@@ -76,6 +76,12 @@ impl SequenceMetrics {
     pub fn record_event(&self) {
         self.events_processed.fetch_add(1, Ordering::Relaxed);
     }
+    
+    /// Record an event processed - relaxed ordering for hot path
+    #[inline]
+    pub fn record_event_relaxed(&self) {
+        self.events_processed.fetch_add(1, Ordering::Relaxed);
+    }
 
     pub fn record_evaluation(&self, time_ns: u64) {
         self.evaluations.fetch_add(1, Ordering::Relaxed);
@@ -211,9 +217,25 @@ impl NfaMetrics {
     pub fn get_sequence_metrics(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
         self.sequences.read().get(sequence_id).cloned()
     }
+    
+    /// Get metrics for a specific sequence - returns Arc directly
+    /// 
+    /// PERFORMANCE: Avoids extra clone by returning Arc
+    #[inline]
+    pub fn get_sequence_metrics_arc(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
+        self.sequences.read().get(sequence_id).map(Arc::clone)
+    }
 
     /// Record an event processed
     pub fn record_event(&self) {
+        self.total_events_processed.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    /// Record an event processed - relaxed ordering for hot path
+    /// 
+    /// PERFORMANCE: Uses Relaxed ordering which is fastest on x86_64
+    #[inline]
+    pub fn record_event_relaxed(&self) {
         self.total_events_processed.fetch_add(1, Ordering::Relaxed);
     }
 

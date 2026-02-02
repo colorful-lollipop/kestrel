@@ -7,7 +7,6 @@
 
 use crate::HybridEngineError;
 use kestrel_eql::ir::{IrNode, IrPredicate, IrRule, IrFunction};
-use std::collections::HashSet;
 
 /// Complexity score for a rule
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

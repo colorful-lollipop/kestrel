@@ -3,7 +3,6 @@
 // Tracks sequence matching frequency and success rate to determine
 // which sequences should be converted to DFAs for performance.
 
-use crate::LazyDfaError;
 use ahash::AHashMap;
 use std::time::{Duration, Instant};
 

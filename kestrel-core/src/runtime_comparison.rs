@@ -177,8 +177,8 @@ impl RuntimeConsistencyChecker {
     ) -> Result<ConsistencyResult, RuntimeComparisonError> {
         let start = std::time::Instant::now();
 
-        let mut wasm_results = Vec::new();
-        let mut lua_results = Vec::new();
+        let wasm_results = Vec::new();
+        let lua_results = Vec::new();
         let mut mismatches = Vec::new();
 
         #[cfg(feature = "wasm")]

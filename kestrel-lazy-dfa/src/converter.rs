@@ -4,11 +4,10 @@
 // Only converts sequences that are simple enough to avoid state explosion.
 
 use crate::dfa::LazyDfa;
-use crate::dfa::DfaState;
 use crate::{LazyDfaError, LazyDfaResult};
 use kestrel_eql::ir::IrRule;
 use kestrel_nfa::{CompiledSequence, NfaSequence};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// NFA to DFA converter
 pub struct NfaToDfaConverter {

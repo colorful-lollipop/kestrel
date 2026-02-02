@@ -5,15 +5,14 @@
 
 use crate::analyzer::{MatchingStrategy, RuleComplexityAnalyzer, StrategyRecommendation};
 use crate::{HybridEngineError, HybridEngineResult};
-use kestrel_ac_dfa::{AcDfaBuilder, AcMatcher};
+use kestrel_ac_dfa::AcMatcher;
 use kestrel_event::Event;
 use kestrel_lazy_dfa::{
-    DfaCache, HotSpotDetector, LazyDfa, LazyDfaConfig, NfaToDfaConverter,
+    DfaCache, HotSpotDetector, LazyDfaConfig, NfaToDfaConverter,
 };
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, SequenceAlert};
 use std::sync::Arc;
 use parking_lot::RwLock;
-use std::collections::HashMap;
 
 /// Configuration for the hybrid engine
 #[derive(Debug, Clone)]

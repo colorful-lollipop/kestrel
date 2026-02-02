@@ -4,7 +4,7 @@
 // //! rule evaluation, alert generation, and enforcement actions.
 
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionPolicy, ActionTarget,
+    ActionDecision, ActionExecutor, ActionPolicy, ActionTarget,
     ActionType, Alert, AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventEvidence,
     NoOpExecutor, Severity,
 };
@@ -288,7 +288,7 @@ impl DetectionEngine {
             }
         };
 
-        let wasm_engine = match &self.wasm_engine {
+        let _wasm_engine = match &self.wasm_engine {
             Some(e) => e,
             None => {
                 return Err(EngineError::WasmRuntimeError(
@@ -404,7 +404,7 @@ impl DetectionEngine {
     pub async fn start(&mut self) -> Result<(), EngineError> {
         info!("Starting detection engine event loop");
 
-        let alerts_generated = self.alerts_generated.clone();
+        let _alerts_generated = self.alerts_generated.clone();
 
         let event_handle = self.event_bus.handle();
 
@@ -507,7 +507,7 @@ impl DetectionEngine {
                 let matched = match &single_rule.predicate {
                     CompiledPredicate::Wasm {
                         wasm_bytes,
-                        required_fields,
+                        required_fields: _,
                     } => {
                         self.eval_wasm_predicate(wasm_engine, wasm_bytes, event)
                             .await?

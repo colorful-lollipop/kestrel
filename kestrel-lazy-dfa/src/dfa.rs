@@ -3,8 +3,6 @@
 // Represents a DFA constructed from an NFA for fast matching
 // of frequently used sequence patterns.
 
-use crate::LazyDfaError;
-use ahash::AHashMap;
 use kestrel_nfa::NfaStateId;
 use std::collections::HashMap;
 use std::fmt;
@@ -118,7 +116,7 @@ impl LazyDfa {
     }
 
     /// Match an event type against the DFA
-    pub fn match_event(&self, mut current_state: usize, event_type_id: u16) -> Option<usize> {
+    pub fn match_event(&self, current_state: usize, event_type_id: u16) -> Option<usize> {
         let state = self.get_state(current_state)?;
         let next_state = state.get_transition(event_type_id)?;
         Some(next_state)
