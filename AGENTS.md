@@ -367,6 +367,7 @@ The project follows a phased development approach:
 | 5 | ✅ Complete | eBPF collection layer |
 | 6 | ✅ Complete | Real-time blocking (LSM hooks) |
 | 7 | ✅ Complete | Offline replay with reproducibility |
+| Refactor | ✅ Complete | Code redundancy elimination and architecture unification (2026-02-03) |
 
 ## Common Patterns
 

@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security policy documentation (SECURITY.md)
 - GitHub workflows for continuous integration and release automation
 
+### Refactored (2026-02-03)
+- **Code Redundancy Elimination**: Extracted common types from runtime crates to `kestrel-schema`
+  - Unified `Severity`, `RuleMetadata`, `RuleManifest`, `RuleCapabilities`
+  - Unified `EvalResult`, `RuntimeType`, `RuntimeCapabilities`
+  - Unified `AlertRecord`, `EventHandle`, `RegexId`, `GlobId`
+- **Runtime Configuration Unification**: Created `RuntimeConfig` trait
+  - `WasmConfig` and `LuaConfig` both implement the trait
+  - Consistent configuration interface across runtimes
+- **Design Pattern Application**:
+  - Strategy Pattern: `Runtime` trait abstracts Wasm/Lua differences
+  - Adapter Pattern: `WasmRuntimeAdapter`, `LuaRuntimeAdapter`
+  - Template Method: `RuntimeManager` unified runtime management
+- **Performance Optimization**: Use `AHashMap` instead of `HashMap` in hot paths
+- **Statistics**: Removed ~250 lines of duplicate code, unified 15+ type definitions
+
 ## [1.0.0] - 2025-01-12
 
 ### Major Release - Production Ready
