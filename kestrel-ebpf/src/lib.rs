@@ -9,6 +9,8 @@ mod normalize;
 mod programs;
 mod pushdown;
 
+pub mod platform;
+
 pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
 pub use lsm::{
     BlockingAction, BlockingRule, EnforcementEvent, FanotifyFallback, LsmConfig, LsmError,
@@ -17,6 +19,11 @@ pub use lsm::{
 pub use normalize::EventNormalizer;
 pub use programs::{AttachedPrograms, ProgramManager};
 pub use pushdown::InterestPushdown;
+
+pub use platform::{
+    EventTypeRegistry, MockPlatform, Platform, PlatformCapability, PlatformError, PlatformInfo,
+    PlatformManager,
+};
 
 use aya::maps::HashMap;
 use aya::Ebpf;

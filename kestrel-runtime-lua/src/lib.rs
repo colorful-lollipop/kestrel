@@ -5,60 +5,33 @@
 
 use anyhow::Result;
 use mlua::{Function, Lua, RegistryKey};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 use thiserror::Error;
 use tracing::{debug, info};
 
 use kestrel_event::Event;
-use kestrel_schema::{FieldId, SchemaRegistry, TypedValue};
+use kestrel_schema::{
+    EvalResult, EventHandle, FieldId, GlobId, RegexId,
+    RuleManifest, RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry,
+    TypedValue,
+};
 
-/// Host API v1 for Lua predicates (same as Wasm)
-///
-/// Provides functions for:
-/// - Event field reading
-/// - Regex/glob matching
-/// - Alert emission
-
-pub mod host_api {
-    use super::*;
-
-    /// Event handle (same as Wasm)
-    pub type EventHandle = u32;
-
-    /// Regex ID (pre-compiled regex handle)
-    pub type RegexId = u32;
-
-    /// Glob ID (pre-compiled glob handle)
-    pub type GlobId = u32;
-
-    /// Alert record structure
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct AlertRecord {
-        pub rule_id: String,
-        pub severity: String,
-        pub title: String,
-        pub description: Option<String>,
-        pub event_handles: Vec<EventHandle>,
-        pub fields: HashMap<String, TypedValue>,
-    }
-}
-
-use host_api::*;
+// Re-export types from kestrel-schema for backward compatibility
+pub use kestrel_schema::{
+    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle,
+    FieldId as HostFieldId, GlobId as HostGlobId, RegexId as HostRegexId,
+};
 
 /// Lua runtime configuration
 #[derive(Debug, Clone)]
 pub struct LuaConfig {
     /// Enable JIT compilation
     pub enable_jit: bool,
-
     /// Maximum memory per Lua state (in MB)
     pub max_memory_mb: usize,
-
     /// Maximum execution time (in milliseconds)
     pub max_execution_time_ms: u64,
-
     /// Instruction limit for single predicate evaluation
     pub instruction_limit: Option<u64>,
 }
@@ -74,14 +47,28 @@ impl Default for LuaConfig {
     }
 }
 
+impl RuntimeConfig for LuaConfig {
+    fn max_memory_mb(&self) -> usize {
+        self.max_memory_mb
+    }
+
+    fn max_execution_time_ms(&self) -> u64 {
+        self.max_execution_time_ms
+    }
+
+    fn instruction_limit(&self) -> Option<u64> {
+        self.instruction_limit
+    }
+}
+
 /// Lua runtime engine
 pub struct LuaEngine {
     lua: Arc<Lua>,
     config: LuaConfig,
     schema: Arc<SchemaRegistry>,
-    predicates: Arc<StdRwLock<HashMap<String, LuaPredicate>>>,
-    regex_cache: Arc<StdRwLock<HashMap<RegexId, regex::Regex>>>,
-    glob_cache: Arc<StdRwLock<HashMap<GlobId, glob::Pattern>>>,
+    predicates: Arc<StdRwLock<AHashMap<String, LuaPredicate>>>,
+    regex_cache: Arc<StdRwLock<AHashMap<RegexId, regex::Regex>>>,
+    glob_cache: Arc<StdRwLock<AHashMap<GlobId, glob::Pattern>>>,
     next_regex_id: Arc<std::sync::atomic::AtomicU32>,
     next_glob_id: Arc<std::sync::atomic::AtomicU32>,
     /// Current event (wrapped in Arc for thread-safe access)
@@ -95,43 +82,6 @@ pub struct LuaPredicate {
     rule_id: String,
     init_func: Option<Function>,
     eval_func: RegistryKey,
-}
-
-/// Predicate evaluation result
-#[derive(Debug, Clone)]
-pub struct EvalResult {
-    pub matched: bool,
-    pub error: Option<String>,
-    pub captured_fields: HashMap<String, TypedValue>,
-}
-
-/// Rule package metadata (same as Wasm)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleMetadata {
-    pub rule_id: String,
-    pub rule_name: String,
-    pub rule_version: String,
-    pub author: Option<String>,
-    pub description: Option<String>,
-    pub tags: Vec<String>,
-    pub severity: String,
-    pub schema_version: String,
-}
-
-/// Rule package manifest (same as Wasm)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleManifest {
-    pub format_version: String,
-    pub metadata: RuleMetadata,
-    pub capabilities: RuleCapabilities,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleCapabilities {
-    pub supports_inline: bool,
-    pub requires_alert: bool,
-    pub requires_block: bool,
-    pub max_span_ms: Option<u64>,
 }
 
 /// Lua runtime errors
@@ -180,9 +130,9 @@ impl LuaEngine {
             lua: Arc::new(lua),
             config,
             schema,
-            predicates: Arc::new(StdRwLock::new(HashMap::new())),
-            regex_cache: Arc::new(StdRwLock::new(HashMap::new())),
-            glob_cache: Arc::new(StdRwLock::new(HashMap::new())),
+            predicates: Arc::new(StdRwLock::new(AHashMap::new())),
+            regex_cache: Arc::new(StdRwLock::new(AHashMap::new())),
+            glob_cache: Arc::new(StdRwLock::new(AHashMap::new())),
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             current_event: Arc::new(StdRwLock::new(None)),
@@ -432,11 +382,15 @@ impl LuaEngine {
             .get(rule_id)
             .ok_or_else(|| LuaRuntimeError::FunctionNotFound(rule_id.to_string()))?;
 
-        // Set current event
-        *self.current_event.write().unwrap() = Some(event.clone());
+        // Set current event (handle lock poisoning gracefully)
+        if let Ok(mut guard) = self.current_event.write() {
+            *guard = Some(event.clone());
+        }
 
-        // Clear previous alerts
-        self.current_alerts.write().unwrap().clear();
+        // Clear previous alerts (handle lock poisoning gracefully)
+        if let Ok(mut guard) = self.current_alerts.write() {
+            guard.clear();
+        }
 
         let lua = &self.lua;
 
@@ -448,22 +402,26 @@ impl LuaEngine {
         // Call the predicate
         let result: std::result::Result<bool, mlua::Error> = eval_func.call(());
 
-        // Clear current event after evaluation
-        self.current_event.write().unwrap().take();
+        // Clear current event after evaluation (handle lock poisoning gracefully)
+        if let Ok(mut guard) = self.current_event.write() {
+            guard.take();
+        }
 
         match result {
             Ok(match_status) => Ok(EvalResult {
                 matched: match_status,
                 error: None,
-                captured_fields: HashMap::new(),
+                captured_fields: AHashMap::new(),
             }),
             Err(e) => {
-                // Clear current event on error too
-                self.current_event.write().unwrap().take();
+                // Clear current event on error too (handle lock poisoning gracefully)
+                if let Ok(mut guard) = self.current_event.write() {
+                    guard.take();
+                }
                 Ok(EvalResult {
                     matched: false,
                     error: Some(e.to_string()),
-                    captured_fields: HashMap::new(),
+                    captured_fields: AHashMap::new(),
                 })
             }
         }
@@ -494,11 +452,45 @@ impl LuaEngine {
         cache.insert(id, glob);
         Ok(id)
     }
+
+    /// Check if a predicate is loaded
+    pub fn has_predicate(&self, predicate_id: &str) -> bool {
+        if let Ok(predicates) = self.predicates.read() {
+            predicates.contains_key(predicate_id)
+        } else {
+            false
+        }
+    }
+
+    /// Unload a predicate from the engine
+    pub fn unload_predicate(&self, predicate_id: &str) {
+        if let Ok(mut predicates) = self.predicates.write() {
+            predicates.remove(predicate_id);
+        }
+    }
+
+    /// Get runtime capabilities
+    pub fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            regex: true,
+            glob: true,
+            string_ops: true,
+            math_ops: true,
+            max_memory_mb: self.config.max_memory_mb,
+            max_execution_time_ms: self.config.max_execution_time_ms,
+        }
+    }
+
+    /// Get runtime type
+    pub fn runtime_type(&self) -> RuntimeType {
+        RuntimeType::Lua
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_schema::{RuleCapabilities, RuleMetadata};
 
     #[tokio::test]
     async fn test_lua_engine_create() {
@@ -525,25 +517,15 @@ mod tests {
         "#
         .to_string();
 
-        let manifest = RuleManifest {
-            format_version: "1.0".to_string(),
-            metadata: RuleMetadata {
-                rule_id: "test-001".to_string(),
-                rule_name: "Test Rule".to_string(),
-                rule_version: "1.0.0".to_string(),
-                author: None,
-                description: None,
-                tags: vec![],
-                severity: "Low".to_string(),
-                schema_version: "1.0".to_string(),
-            },
-            capabilities: RuleCapabilities {
-                supports_inline: true,
-                requires_alert: true,
-                requires_block: false,
-                max_span_ms: None,
-            },
-        };
+        let manifest = RuleManifest::new(
+            RuleMetadata::new("test-001", "Test Rule")
+                .with_severity("Low")
+        ).with_capabilities(RuleCapabilities {
+            supports_inline: true,
+            requires_alert: true,
+            requires_block: false,
+            max_span_ms: None,
+        });
 
         let result = engine.load_predicate(manifest, script).await;
         assert!(result.is_ok());
@@ -567,25 +549,15 @@ mod tests {
         "#
         .to_string();
 
-        let manifest = RuleManifest {
-            format_version: "1.0".to_string(),
-            metadata: RuleMetadata {
-                rule_id: "test-eval".to_string(),
-                rule_name: "Test Eval".to_string(),
-                rule_version: "1.0.0".to_string(),
-                author: None,
-                description: None,
-                tags: vec![],
-                severity: "Low".to_string(),
-                schema_version: "1.0".to_string(),
-            },
-            capabilities: RuleCapabilities {
-                supports_inline: true,
-                requires_alert: true,
-                requires_block: false,
-                max_span_ms: None,
-            },
-        };
+        let manifest = RuleManifest::new(
+            RuleMetadata::new("test-eval", "Test Eval")
+                .with_severity("Low")
+        ).with_capabilities(RuleCapabilities {
+            supports_inline: true,
+            requires_alert: true,
+            requires_block: false,
+            max_span_ms: None,
+        });
 
         engine.load_predicate(manifest, script).await.unwrap();
 
@@ -623,6 +595,22 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1);
     }
+
+    #[test]
+    fn test_lua_config_defaults() {
+        let config = LuaConfig::default();
+        assert_eq!(config.max_memory_mb, 16);
+        assert_eq!(config.max_execution_time_ms, 100);
+        assert_eq!(config.instruction_limit, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_runtime_config_trait() {
+        let config = LuaConfig::default();
+        assert_eq!(config.max_memory_mb(), 16);
+        assert_eq!(config.max_execution_time_ms(), 100);
+        assert_eq!(config.instruction_limit(), Some(1_000_000));
+    }
 }
 
 /// Implement PredicateEvaluator trait for NFA engine integration
@@ -639,20 +627,22 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
         predicate_id: &str,
         event: &kestrel_event::Event,
     ) -> kestrel_nfa::NfaResult<bool> {
-        // Set the current event context
+        // Set the current event context (handle lock poisoning gracefully)
         {
-            let mut current_event = self.current_event.write().unwrap();
-            *current_event = Some(event.clone());
+            if let Ok(mut current_event) = self.current_event.write() {
+                *current_event = Some(event.clone());
+            }
         }
 
-        // Clear previous alerts
+        // Clear previous alerts (handle lock poisoning gracefully)
         {
-            let mut alerts = self.current_alerts.write().unwrap();
-            alerts.clear();
+            if let Ok(mut alerts) = self.current_alerts.write() {
+                alerts.clear();
+            }
         }
 
-        // Get the predicate
-        let predicates = self.predicates.read().unwrap();
+        // Get the predicate (handle lock poisoning gracefully)
+        let predicates = self.predicates.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _predicate = predicates.get(predicate_id).ok_or_else(|| {
             kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
         })?;
@@ -681,10 +671,11 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
             _ => Ok(false),
         };
 
-        // Clear the event context after evaluation
+        // Clear the event context after evaluation (handle lock poisoning gracefully)
         {
-            let mut current_event = self.current_event.write().unwrap();
-            *current_event = None;
+            if let Ok(mut current_event) = self.current_event.write() {
+                *current_event = None;
+            }
         }
 
         matched

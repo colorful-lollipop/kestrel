@@ -7,13 +7,14 @@
 // - Integration scenarios
 
 use kestrel_hybrid_engine::{
-    HybridEngine, HybridEngineConfig, MatchingStrategy, RuleComplexityAnalyzer, RuleStrategy,
+    analyze_rule, ComplexityWeights, HybridEngine, HybridEngineConfig, MatchingStrategy,
+    RuleComplexityAnalyzer, RuleStrategy,
 };
 use kestrel_eql::ir::*;
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 
-// Mock predicate evaluator
+// Mock predicate evaluator for testing
 struct MockEvaluator;
 
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
@@ -84,7 +85,8 @@ fn test_string_equality() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
     assert_eq!(rec.strategy, MatchingStrategy::AcDfa);
     assert!(rec.complexity.has_string_literals());
@@ -118,10 +120,12 @@ fn test_string_contains() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("String contains: score={}, strategy={:?}",
-             rec.complexity.score, rec.strategy);
+    // Contains function should increase complexity score and be marked as function
+    assert!(rec.complexity.score > 0, "Contains operation should have non-zero complexity");
+    assert!(rec.complexity.has_functions, "Contains function call should be detected");
 }
 
 #[test]
@@ -151,10 +155,12 @@ fn test_string_startswith() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("String startsWith: score={}, strategy={:?}",
-             rec.complexity.score, rec.strategy);
+    // StartsWith is a function call
+    assert!(rec.complexity.has_functions, "StartsWith function call should be detected");
+    assert!(rec.complexity.score >= 0, "Complexity score should be non-negative");
 }
 
 #[test]
@@ -184,10 +190,12 @@ fn test_string_endswith() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("String endsWith: score={}, strategy={:?}",
-             rec.complexity.score, rec.strategy);
+    // EndsWith is a function call
+    assert!(rec.complexity.has_functions, "EndsWith function call should be detected");
+    assert!(rec.complexity.score >= 0, "Complexity score should be non-negative");
 }
 
 // ============================================================================
@@ -229,9 +237,18 @@ fn test_numeric_comparisons() {
         };
 
         rule.add_predicate(predicate);
-        let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+        let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-        println!("Numeric {}: strategy={:?}", op_str, rec.strategy);
+        // All numeric comparisons should be analyzed successfully
+        assert!(
+            matches!(
+                rec.strategy,
+                MatchingStrategy::AcDfa | MatchingStrategy::LazyDfa | MatchingStrategy::Nfa
+            ),
+            "Numeric {} should have a valid strategy",
+            op_str
+        );
     }
 }
 
@@ -274,9 +291,13 @@ fn test_logical_and() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("Logical AND: strategy={:?}", rec.strategy);
+    // AND operation with string and int comparisons - the string literal contributes to complexity
+    // Note: BinaryOp itself doesn't add complexity, but string literals do via has_string_literals()
+    assert!(rec.complexity.has_string_literals(), "AND with string comparison should have string literals");
+    // Score may be 0 for very simple rules without sequences, functions, etc.
 }
 
 #[test]
@@ -314,9 +335,12 @@ fn test_logical_or() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("Logical OR: strategy={:?}", rec.strategy);
+    // OR operation with string comparisons - the string literals contribute to complexity
+    assert!(rec.complexity.has_string_literals(), "OR with string comparisons should have string literals");
+    // Score may be 0 for very simple rules without sequences, functions, etc.
 }
 
 #[test]
@@ -347,9 +371,11 @@ fn test_logical_not() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("Logical NOT: strategy={:?}", rec.strategy);
+    // NOT operation should have non-negative complexity
+    assert!(rec.complexity.score >= 0, "Complexity score should be non-negative");
 }
 
 // ============================================================================
@@ -382,9 +408,13 @@ fn test_in_operator() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("IN operator: strategy={:?}", rec.strategy);
+    // IN operator with multiple string values
+    assert!(rec.complexity.score >= 0, "IN operator should have non-negative complexity");
+    // IN operator counts string literals
+    assert!(rec.complexity.string_literals >= 3, "IN operator with 3 strings should have at least 3 string literals");
 }
 
 // ============================================================================
@@ -401,8 +431,13 @@ fn test_single_step_sequence() {
     engine.load_sequence(seq).unwrap();
 
     let strategy = engine.get_rule_strategy("single-step");
-    assert!(strategy.is_some());
-    println!("Single-step sequence: {:?}", strategy);
+    assert!(strategy.is_some(), "Single-step sequence should have a strategy assigned");
+    // Verify the strategy is valid (any valid strategy is acceptable)
+    match strategy.unwrap() {
+        RuleStrategy::AcDfa | RuleStrategy::LazyDfa | RuleStrategy::Nfa | RuleStrategy::HybridAcNfa => {
+            // All are valid strategies depending on implementation
+        }
+    }
 }
 
 #[test]
@@ -415,8 +450,13 @@ fn test_two_step_sequence() {
     engine.load_sequence(seq).unwrap();
 
     let strategy = engine.get_rule_strategy("two-step");
-    assert!(strategy.is_some());
-    println!("Two-step sequence: {:?}", strategy);
+    assert!(strategy.is_some(), "Two-step sequence should have a strategy assigned");
+    // Two-step sequence should have a valid strategy
+    match strategy.unwrap() {
+        RuleStrategy::AcDfa | RuleStrategy::LazyDfa | RuleStrategy::Nfa | RuleStrategy::HybridAcNfa => {
+            // All are valid strategies for 2-step sequences
+        }
+    }
 }
 
 #[test]
@@ -433,9 +473,12 @@ fn test_multi_step_sequence() {
     for steps in &[3, 5, 7, 10] {
         let id = &format!("multi-step-{}", steps);
         let strategy = engine.get_rule_strategy(id);
-        assert!(strategy.is_some());
-        println!("Multi-step {}: {:?}", steps, strategy);
+        assert!(strategy.is_some(), "Multi-step {} sequence should have a strategy", steps);
     }
+    
+    // Verify that longer sequences have strategies assigned
+    let stats = engine.stats();
+    assert_eq!(stats.total_rules_tracked, 4, "Should track all 4 multi-step sequences");
 }
 
 // ============================================================================
@@ -463,9 +506,15 @@ fn test_empty_predicate() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("Empty predicate: strategy={:?}", rec.strategy);
+    // Empty/true predicate should have minimal complexity
+    assert_eq!(rec.complexity.score, 0, "True literal should have zero complexity");
+    // True literal has no functions, regex, glob, etc.
+    assert!(!rec.complexity.has_functions, "True literal should have no functions");
+    assert!(!rec.complexity.has_regex, "True literal should have no regex");
+    assert!(!rec.complexity.has_glob, "True literal should have no glob patterns");
 }
 
 #[test]
@@ -499,8 +548,10 @@ fn test_maxspan_variations() {
 
         let result = engine.load_sequence(compiled);
         assert!(result.is_ok(), "Should load sequence with maxspan={:?}", maxspan);
-
-        println!("Maxspan {:?}: loaded successfully", maxspan);
+        
+        // Verify sequence was loaded and tracked
+        let stats = engine.stats();
+        assert_eq!(stats.total_rules_tracked, 1, "Should track 1 sequence");
     }
 }
 
@@ -544,8 +595,12 @@ fn test_multiple_predicates_in_rule() {
         rule.add_predicate(predicate);
     }
 
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
-    println!("Multiple predicates: strategy={:?}", rec.strategy);
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
+    
+    // Multiple predicates in a sequence should be analyzed correctly
+    assert_eq!(rec.complexity.sequence_steps, 3, "Should have 3 sequence steps");
+    assert!(rec.complexity.score >= 0, "Complexity should be non-negative");
 }
 
 // ============================================================================
@@ -571,12 +626,15 @@ fn test_full_pipeline_simple_rule() {
         .unwrap();
 
     let result = engine.process_event(&event);
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "Event processing should succeed");
+    
+    // Verify event was processed (result may be empty if sequence not completed)
+    let alerts = result.unwrap();
+    // For a 2-step sequence with 1 event, we expect no alerts yet
+    assert_eq!(alerts.len(), 0, "Single event should not trigger 2-step sequence alert");
 
     let stats = engine.stats();
-    assert_eq!(stats.total_rules_tracked, 1);
-
-    println!("Full pipeline simple: OK");
+    assert_eq!(stats.total_rules_tracked, 1, "Should track 1 rule");
 }
 
 #[test]
@@ -603,13 +661,12 @@ fn test_full_pipeline_complex_rule() {
     // Process multiple events
     for _ in 0..100 {
         let result = engine.process_event(&event);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Event processing should not fail");
     }
 
     let stats = engine.stats();
-    assert_eq!(stats.total_rules_tracked, 5);
-
-    println!("Full pipeline complex: OK, {} rules tracked", stats.total_rules_tracked);
+    assert_eq!(stats.total_rules_tracked, 5, "Should track all 5 rules");
+    assert_eq!(stats.nfa_sequence_count, 5, "Should have 5 NFA sequences");
 }
 
 #[test]
@@ -637,11 +694,17 @@ fn test_engine_with_many_rules() {
         .unwrap();
 
     // Should handle many rules efficiently
+    let mut processed_count = 0;
     for _ in 0..100 {
-        let _ = engine.process_event(&event);
+        let result = engine.process_event(&event);
+        assert!(result.is_ok(), "Processing should not fail with many rules");
+        processed_count += 1;
     }
-
-    println!("Engine with many rules: 50 rules loaded and processed");
+    assert_eq!(processed_count, 100, "Should process all 100 events");
+    
+    // Verify all rules are still tracked after processing
+    let stats = engine.stats();
+    assert_eq!(stats.total_rules_tracked, 50, "All 50 rules should still be tracked");
 }
 
 // ============================================================================
@@ -693,15 +756,16 @@ fn test_analyze_strategy_distribution() {
         }
     }
 
-    println!("\nStrategy Distribution Analysis:");
-    println!("  AcDfa: {} rules ({:.1}%)", ac_dfa_count, ac_dfa_count as f64 / 30.0 * 100.0);
-    println!("  LazyDfa: {} rules ({:.1}%)", lazy_dfa_count, lazy_dfa_count as f64 / 30.0 * 100.0);
-    println!("  Nfa: {} rules ({:.1}%)", nfa_count, nfa_count as f64 / 30.0 * 100.0);
-    println!("  HybridAcNfa: {} rules ({:.1}%)", hybrid_count, hybrid_count as f64 / 30.0 * 100.0);
+    // Verify strategy distribution totals
+    let total_with_strategy = ac_dfa_count + lazy_dfa_count + nfa_count + hybrid_count;
+    assert_eq!(total_with_strategy, 30, "All 30 rules should have a strategy assigned");
+    
+    // Verify distribution is reasonable - at least some rules should be assigned
+    // Note: The exact distribution depends on the strategy selection algorithm
+    assert!(total_with_strategy >= 30, "All rules should have strategies");
 
     let stats = engine.stats();
-    println!("Total rules tracked: {}", stats.total_rules_tracked);
-    assert_eq!(stats.total_rules_tracked, 30);
+    assert_eq!(stats.total_rules_tracked, 30, "Should track all 30 rules");
 }
 
 // ============================================================================
@@ -747,10 +811,12 @@ fn test_suspicious_process_execution() {
     };
 
     rule.add_predicate(predicate);
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("Suspicious process: score={}, strategy={:?}",
-             rec.complexity.score, rec.strategy);
+    // Complex rule with AND + Contains should have appropriate complexity
+    assert!(rec.complexity.score > 0, "Complex rule should have positive complexity");
+    assert!(rec.complexity.has_functions, "Should detect function operations");
 }
 
 #[test]
@@ -802,10 +868,12 @@ fn test_file_access_pattern() {
         rule.add_predicate(predicate);
     }
 
-    let rec = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let analyzer = RuleComplexityAnalyzer::new();
+    let rec = analyzer.analyze(&rule).unwrap();
 
-    println!("File access pattern: score={}, steps={}, strategy={:?}",
-             rec.complexity.score,
-             rec.complexity.sequence_steps,
-             rec.strategy);
+    // 3-step sequence should be properly analyzed
+    assert_eq!(rec.complexity.sequence_steps, 3, "Should have 3 sequence steps");
+    assert!(rec.complexity.score >= 0, "Complexity should be non-negative");
+    // All predicates are true literals, so should be simple
+    assert!(rec.complexity.score < 50, "Simple predicates should have low complexity");
 }

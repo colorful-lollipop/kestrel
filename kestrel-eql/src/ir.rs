@@ -330,9 +330,133 @@ impl IrNode {
     }
 }
 
+impl Default for IrPredicate {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            event_type: String::new(),
+            root: IrNode::Literal { value: IrLiteral::Bool(true) },
+            required_fields: vec![],
+            required_regex: vec![],
+            required_globs: vec![],
+        }
+    }
+}
+
+impl IrPredicate {
+    /// Create a new predicate builder
+    pub fn builder(id: impl Into<String>, event_type: impl Into<String>) -> PredicateBuilder {
+        PredicateBuilder::new(id, event_type)
+    }
+    
+    /// Auto-populate required_fields, required_regex, required_globs from root AST
+    pub fn auto_populate_requirements(&mut self) {
+        self.required_fields = self.root.field_ids();
+        self.required_regex = self.root.regex_patterns();
+        self.required_globs = self.root.glob_patterns();
+    }
+}
+
+/// Builder for IrPredicate to simplify construction
+pub struct PredicateBuilder {
+    id: String,
+    event_type: String,
+    root: Option<IrNode>,
+}
+
+impl PredicateBuilder {
+    /// Create a new predicate builder
+    pub fn new(id: impl Into<String>, event_type: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            event_type: event_type.into(),
+            root: None,
+        }
+    }
+    
+    /// Set the predicate condition (root node)
+    pub fn condition(mut self, node: IrNode) -> Self {
+        self.root = Some(node);
+        self
+    }
+    
+    /// Build the predicate, auto-populating requirements
+    pub fn build(self) -> IrPredicate {
+        let mut predicate = IrPredicate {
+            id: self.id,
+            event_type: self.event_type,
+            root: self.root.unwrap_or_else(|| IrNode::Literal { 
+                value: IrLiteral::Bool(true) 
+            }),
+            required_fields: vec![],
+            required_regex: vec![],
+            required_globs: vec![],
+        };
+        predicate.auto_populate_requirements();
+        predicate
+    }
+}
+
+/// Helper functions for creating common IrNode patterns
+pub mod node_helpers {
+    use super::*;
+    
+    /// Create a field equals string comparison node
+    pub fn field_eq_string(field_id: u32, value: impl Into<String>) -> IrNode {
+        IrNode::BinaryOp {
+            op: IrBinaryOp::Eq,
+            left: Box::new(IrNode::LoadField { field_id }),
+            right: Box::new(IrNode::Literal { 
+                value: IrLiteral::String(value.into()) 
+            }),
+        }
+    }
+    
+    /// Create a field equals integer comparison node
+    pub fn field_eq_int(field_id: u32, value: i64) -> IrNode {
+        IrNode::BinaryOp {
+            op: IrBinaryOp::Eq,
+            left: Box::new(IrNode::LoadField { field_id }),
+            right: Box::new(IrNode::Literal { 
+                value: IrLiteral::Int(value) 
+            }),
+        }
+    }
+    
+    /// Create a string contains function call node
+    pub fn string_contains(field_id: u32, substring: impl Into<String>) -> IrNode {
+        IrNode::FunctionCall {
+            func: IrFunction::Contains,
+            args: vec![
+                IrNode::LoadField { field_id },
+                IrNode::Literal { value: IrLiteral::String(substring.into()) },
+            ],
+        }
+    }
+    
+    /// Create an AND combination of two nodes
+    pub fn and(left: IrNode, right: IrNode) -> IrNode {
+        IrNode::BinaryOp {
+            op: IrBinaryOp::And,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+    
+    /// Create an OR combination of two nodes
+    pub fn or(left: IrNode, right: IrNode) -> IrNode {
+        IrNode::BinaryOp {
+            op: IrBinaryOp::Or,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::node_helpers::*;
 
     #[test]
     fn test_ir_rule_validation() {
@@ -343,20 +467,34 @@ mod tests {
             },
         );
 
-        let predicate = IrPredicate {
-            id: "main".to_string(),
-            event_type: "process".to_string(),
-            root: IrNode::Literal {
-                value: IrLiteral::Bool(true),
-            },
-            required_fields: vec![],
-            required_regex: vec![],
-            required_globs: vec![],
-        };
+        let predicate = IrPredicate::builder("main", "process")
+            .condition(IrNode::Literal { value: IrLiteral::Bool(true) })
+            .build();
 
         rule.add_predicate(predicate);
 
         assert!(rule.validate().is_ok());
+    }
+    
+    #[test]
+    fn test_predicate_builder() {
+        let predicate = IrPredicate::builder("main", "process")
+            .condition(field_eq_string(1, "bash"))
+            .build();
+        
+        assert_eq!(predicate.id, "main");
+        assert_eq!(predicate.event_type, "process");
+        assert_eq!(predicate.required_fields, vec![1]);
+    }
+    
+    #[test]
+    fn test_node_helpers() {
+        let node = field_eq_string(1, "test");
+        let ids = node.field_ids();
+        assert_eq!(ids, vec![1]);
+        
+        let contains_node = string_contains(2, "substring");
+        assert!(matches!(contains_node, IrNode::FunctionCall { func: IrFunction::Contains, .. }));
     }
 
     #[test]

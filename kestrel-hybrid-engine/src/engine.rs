@@ -3,7 +3,7 @@
 // The hybrid engine automatically chooses the optimal matching strategy
 // based on rule complexity and runtime hot spot detection.
 
-use crate::analyzer::{MatchingStrategy, RuleComplexityAnalyzer, StrategyRecommendation};
+use crate::analyzer::{analyze_rule, MatchingStrategy, StrategyRecommendation};
 use crate::{HybridEngineError, HybridEngineResult};
 use kestrel_ac_dfa::AcMatcher;
 use kestrel_event::Event;
@@ -163,7 +163,7 @@ impl HybridEngine {
         let ir_rule = self.create_ir_rule_from_sequence(compiled)?;
 
         // Analyze complexity
-        let recommendation = RuleComplexityAnalyzer::analyze(&ir_rule)?;
+        let recommendation = analyze_rule(&ir_rule)?;
 
         Ok(recommendation)
     }
@@ -215,7 +215,7 @@ impl HybridEngine {
 
         // For now, create an empty matcher
         self.ac_matcher = Some(AcMatcher::builder().build().map_err(|e| {
-            HybridEngineError::EngineError(format!("Failed to build AC-DFA: {}", e))
+            HybridEngineError::engine_error("AC-DFA", format!("Failed to build: {}", e))
         })?);
 
         Ok(())

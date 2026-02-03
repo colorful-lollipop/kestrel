@@ -543,13 +543,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_field_resolution() {
+    fn test_analyzer_creation() {
         let schema = Arc::new(SchemaRegistry::new());
         let analyzer = SemanticAnalyzer::new(schema);
 
-        // This test would require schema setup
-        // For now, we just test the structure
-        assert!(true);
+        // Verify analyzer is properly initialized
+        // The analyzer should be created without panicking
+        // and should have empty field IDs cache
+        assert!(analyzer.field_ids.is_empty());
+        assert_eq!(analyzer.next_field_id, 1);
     }
 
     #[test]

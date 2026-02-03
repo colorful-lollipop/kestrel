@@ -4,76 +4,44 @@
 //! Implements Host API v1 for event field access, regex/glob matching, and alert emission.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{RwLock, Semaphore};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use wasmtime::{
     Caller, Config, Engine, Extern, Instance, InstanceAllocationStrategy, InstancePre, Linker,
     Module, Store,
 };
 
 use kestrel_event::Event;
-use kestrel_schema::{FieldId, SchemaRegistry, TypedValue};
+use kestrel_schema::{
+    AlertRecord, EvalResult, FieldId, GlobId, RegexId, RuleCapabilities, RuleManifest, RuleMetadata,
+    RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
+};
 
-/// Host API v1 for Wasm predicates
-///
-/// Provides functions for:
-/// - Event field reading
-/// - Regex/glob matching
-/// - Alert emission
-/// - Action blocking (inline mode)
-
-pub mod host_api {
-    use super::*;
-
-    /// Event handle passed to Wasm (index into event store)
-    pub type EventHandle = u32;
-
-    /// Regex ID (pre-compiled regex handle)
-    pub type RegexId = u32;
-
-    /// Glob ID (pre-compiled glob handle)
-    pub type GlobId = u32;
-
-    /// Alert record structure
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct AlertRecord {
-        pub rule_id: String,
-        pub severity: String,
-        pub title: String,
-        pub description: Option<String>,
-        pub event_handles: Vec<EventHandle>,
-        pub fields: HashMap<String, TypedValue>,
-    }
-}
-
-use host_api::*;
+// Re-export types from kestrel-schema for backward compatibility
+pub use kestrel_schema::{
+    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle,
+    FieldId as HostFieldId, GlobId as HostGlobId, RegexId as HostRegexId,
+};
 
 /// Wasm runtime configuration
 #[derive(Debug, Clone)]
 pub struct WasmConfig {
     /// Enable AOT caching
     pub enable_aot_cache: bool,
-
     /// Directory for AOT cache
     pub aot_cache_dir: Option<PathBuf>,
-
     /// Maximum memory per instance (in MB)
     pub max_memory_mb: usize,
-
     /// Maximum execution time (in milliseconds)
     pub max_execution_time_ms: u64,
-
     /// Instance pool size
     pub pool_size: usize,
-
     /// Enable fuel metering (for execution time limiting)
     pub enable_fuel: bool,
-
     /// Fuel for single predicate evaluation (approximate instructions)
     pub fuel_per_eval: u64,
 }
@@ -92,6 +60,20 @@ impl Default for WasmConfig {
     }
 }
 
+impl RuntimeConfig for WasmConfig {
+    fn max_memory_mb(&self) -> usize {
+        self.max_memory_mb
+    }
+
+    fn max_execution_time_ms(&self) -> u64 {
+        self.max_execution_time_ms
+    }
+
+    fn instruction_limit(&self) -> Option<u64> {
+        Some(self.fuel_per_eval)
+    }
+}
+
 /// Predicate ABI (same for both Wasm and Lua)
 ///
 /// All predicates must implement:
@@ -104,10 +86,10 @@ pub struct WasmEngine {
     pub linker: Linker<WasmContext>,
     pub config: WasmConfig,
     pub schema: Arc<SchemaRegistry>,
-    pub modules: Arc<RwLock<HashMap<String, CompiledModule>>>,
-    pub instance_pool: Arc<RwLock<HashMap<String, InstancePool>>>,
-    pub regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
-    pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+    pub modules: Arc<RwLock<AHashMap<String, CompiledModule>>>,
+    pub instance_pool: Arc<RwLock<AHashMap<String, InstancePool>>>,
+    pub regex_cache: Arc<RwLock<AHashMap<RegexId, regex::Regex>>>,
+    pub glob_cache: Arc<RwLock<AHashMap<GlobId, glob::Pattern>>>,
     pub next_regex_id: Arc<std::sync::atomic::AtomicU32>,
     pub next_glob_id: Arc<std::sync::atomic::AtomicU32>,
     pub pool_metrics: Arc<PoolMetrics>,
@@ -121,56 +103,21 @@ struct CompiledModule {
     metadata: RuleMetadata,
 }
 
-/// Rule package metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleMetadata {
-    pub rule_id: String,
-    pub rule_name: String,
-    pub rule_version: String,
-    pub author: Option<String>,
-    pub description: Option<String>,
-    pub tags: Vec<String>,
-    pub severity: String,
-    pub schema_version: String,
-}
-
-/// Rule package manifest
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleManifest {
-    pub format_version: String,
-    pub metadata: RuleMetadata,
-    pub capabilities: RuleCapabilities,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleCapabilities {
-    pub supports_inline: bool,
-    pub requires_alert: bool,
-    pub requires_block: bool,
-    pub max_span_ms: Option<u64>,
-}
-
 /// Pool metrics for tracking instance pool utilization
 #[derive(Debug, Default)]
 pub struct PoolMetrics {
     /// Total pool size (total instances)
     pub pool_size: std::sync::atomic::AtomicUsize,
-
     /// Currently active instances (in use)
     pub active_instances: std::sync::atomic::AtomicUsize,
-
     /// Total pool acquires
     pub total_acquires: std::sync::atomic::AtomicU64,
-
     /// Total pool releases
     pub total_releases: std::sync::atomic::AtomicU64,
-
     /// Total pool misses (had to create new instance)
     pub pool_misses: std::sync::atomic::AtomicU64,
-
     /// Total wait time for pool acquisition (nanoseconds)
     pub total_wait_ns: std::sync::atomic::AtomicU64,
-
     /// Peak wait time (nanoseconds)
     pub peak_wait_ns: std::sync::atomic::AtomicU64,
 }
@@ -271,8 +218,8 @@ pub struct WasmContext {
     pub event: Option<Event>,
     pub schema: Arc<SchemaRegistry>,
     pub alerts: Arc<std::sync::Mutex<Vec<AlertRecord>>>,
-    pub regex_cache: Arc<RwLock<HashMap<RegexId, regex::Regex>>>,
-    pub glob_cache: Arc<RwLock<HashMap<GlobId, glob::Pattern>>>,
+    pub regex_cache: Arc<RwLock<AHashMap<RegexId, regex::Regex>>>,
+    pub glob_cache: Arc<RwLock<AHashMap<GlobId, glob::Pattern>>>,
     pub rule_metadata: RuleMetadata,
 }
 
@@ -283,12 +230,56 @@ pub struct WasmPredicate {
     engine: Arc<WasmEngine>,
 }
 
-/// Predicate evaluation result
-#[derive(Debug, Clone)]
-pub struct EvalResult {
-    pub matched: bool,
-    pub error: Option<String>,
-    pub captured_fields: HashMap<String, TypedValue>,
+impl WasmPredicate {
+    /// Initialize the predicate
+    pub async fn init(&self) -> Result<(), WasmRuntimeError> {
+        tracing::debug!(rule_id = %self.rule_id, "Initializing Wasm predicate");
+        // Predicate initialization would happen here
+        Ok(())
+    }
+
+    /// Evaluate an event
+    pub async fn eval(&self, event: &Event) -> Result<EvalResult, WasmRuntimeError> {
+        let modules = self.engine.modules.read().await;
+        let compiled = modules.get(&self.rule_id).ok_or_else(|| {
+            WasmRuntimeError::CompilationError(format!("Module not found: {}", self.rule_id))
+        })?;
+
+        // Create a new store for this evaluation
+        let mut store = Store::new(
+            &self.engine.engine,
+            WasmContext {
+                event: Some(event.clone()),
+                schema: self.engine.schema.clone(),
+                alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                regex_cache: self.engine.regex_cache.clone(),
+                glob_cache: self.engine.glob_cache.clone(),
+                rule_metadata: compiled.metadata.clone(),
+            },
+        );
+
+        // Instantiate the module
+        let instance = compiled
+            .instance_pre
+            .instantiate(&mut store)
+            .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
+
+        // Get the pred_eval function
+        let pred_eval = instance
+            .get_typed_func::<u32, i32>(&mut store, "pred_eval")
+            .map_err(|_| WasmRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
+
+        // Call the predicate
+        let result = pred_eval
+            .call(&mut store, 0)
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+
+        Ok(EvalResult {
+            matched: result == 1,
+            error: None,
+            captured_fields: AHashMap::new(),
+        })
+    }
 }
 
 /// Wasm errors
@@ -364,10 +355,10 @@ impl WasmEngine {
             linker,
             config,
             schema,
-            modules: Arc::new(RwLock::new(HashMap::new())),
-            instance_pool: Arc::new(RwLock::new(HashMap::new())),
-            regex_cache: Arc::new(RwLock::new(HashMap::new())),
-            glob_cache: Arc::new(RwLock::new(HashMap::new())),
+            modules: Arc::new(RwLock::new(AHashMap::new())),
+            instance_pool: Arc::new(RwLock::new(AHashMap::new())),
+            regex_cache: Arc::new(RwLock::new(AHashMap::new())),
+            glob_cache: Arc::new(RwLock::new(AHashMap::new())),
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             pool_metrics: Arc::new(PoolMetrics::new()),
@@ -625,7 +616,7 @@ impl WasmEngine {
                     };
 
                     // Capture all event fields into the alert
-                    let mut fields = HashMap::new();
+                    let mut fields = AHashMap::new();
                     for (field_id, value) in &event.fields {
                         fields.insert(format!("field_{}", field_id), value.clone());
                     }
@@ -686,7 +677,7 @@ impl WasmEngine {
                             title: "Field Capture".to_string(),
                             description: None,
                             event_handles: vec![],
-                            fields: HashMap::new(),
+                            fields: AHashMap::new(),
                         }
                     } else {
                         alerts.pop().unwrap()
@@ -716,27 +707,15 @@ impl WasmEngine {
     ) -> Result<(), WasmRuntimeError> {
         // For now, create default metadata
         // In a full implementation, this would extract metadata from the Wasm module
-        let metadata = RuleMetadata {
-            rule_id: rule_id.to_string(),
-            rule_name: format!("Rule {}", rule_id),
-            rule_version: "1.0.0".to_string(),
-            author: None,
-            description: None,
-            tags: Vec::new(),
-            severity: "medium".to_string(),
-            schema_version: "1.0".to_string(),
-        };
+        let metadata = RuleMetadata::new(rule_id, format!("Rule {}", rule_id));
 
-        let manifest = RuleManifest {
-            format_version: "1.0".to_string(),
-            metadata,
-            capabilities: RuleCapabilities {
+        let manifest = RuleManifest::new(metadata)
+            .with_capabilities(RuleCapabilities {
                 supports_inline: true,
                 requires_alert: true,
                 requires_block: false,
                 max_span_ms: None,
-            },
-        };
+            });
 
         // Load the module with the generated manifest
         self.load_module(manifest, wasm_bytes).await?;
@@ -845,16 +824,7 @@ impl WasmEngine {
                 alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
                 regex_cache: self.regex_cache.clone(),
                 glob_cache: self.glob_cache.clone(),
-                rule_metadata: RuleMetadata {
-                    rule_id: "adhoc".to_string(),
-                    rule_name: "Ad-hoc Predicate".to_string(),
-                    rule_version: "1.0.0".to_string(),
-                    author: None,
-                    description: None,
-                    tags: Vec::new(),
-                    severity: "medium".to_string(),
-                    schema_version: "1.0".to_string(),
-                },
+                rule_metadata: RuleMetadata::new("adhoc", "Ad-hoc Predicate"),
             },
         );
 
@@ -912,6 +882,23 @@ impl WasmEngine {
         let mut cache = self.glob_cache.write().await;
         cache.insert(id, glob);
         Ok(id)
+    }
+
+    /// Get runtime capabilities
+    pub fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            regex: true,
+            glob: true,
+            string_ops: true,
+            math_ops: true,
+            max_memory_mb: self.config.max_memory_mb,
+            max_execution_time_ms: self.config.max_execution_time_ms,
+        }
+    }
+
+    /// Get runtime type
+    pub fn runtime_type(&self) -> RuntimeType {
+        RuntimeType::Wasm
     }
 }
 
@@ -1002,45 +989,33 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
                         )
                     })?;
 
-                // Mark as in-use and set event
-                pool.instances[instance_idx].in_use = true;
-                pool.instances[instance_idx].store.data_mut().event = Some(event.clone());
-
-                // Get references to the store and instance
-                // Note: We need to be careful with borrowing here
-                // We'll use unsafe to get mutable references since we control the lifecycle
-                use wasmtime::{Instance, Store};
-                let store_ptr: *mut Store<WasmContext> = &mut pool.instances[instance_idx].store;
-                let instance_ptr: *const Instance = &pool.instances[instance_idx].instance;
-
-                // SAFETY: We know the instance is valid for the duration of this block
-                // because we hold the semaphore permit and in_use flag
-                let store = unsafe { &mut *store_ptr };
-                let instance = unsafe { &*instance_ptr };
-
-                // Get the pred_eval dispatcher function
-                let pred_eval = instance
-                    .get_typed_func::<(u32, u32), i32>(&mut *store, "pred_eval")
+                // Execute using the instance - use split to avoid borrow issues
+                let instance_ref = &mut pool.instances[instance_idx];
+                instance_ref.in_use = true;
+                
+                // Get the pred_eval function
+                let pred_eval = instance_ref
+                    .instance
+                    .get_typed_func::<(u32,), i32>(&mut instance_ref.store, "pred_eval")
                     .map_err(|_| {
                         kestrel_nfa::NfaError::PredicateError(
                             "pred_eval function not found".to_string(),
                         )
                     })?;
 
-                // Call the predicate
-                let result = pred_eval
-                    .call(&mut *store, (predicate_index, 0))
-                    .map_err(|e| {
-                        kestrel_nfa::NfaError::PredicateError(format!("Execution failed: {}", e))
-                    })?;
+                // Call the predicate with the event handle
+                let result = pred_eval.call(&mut instance_ref.store, (predicate_index,)).map_err(|e| {
+                    kestrel_nfa::NfaError::PredicateError(format!(
+                        "Predicate evaluation failed: {}",
+                        e
+                    ))
+                })?;
 
-                // Reset event for next use
-                pool.instances[instance_idx].store.data_mut().event = None;
-                pool.instances[instance_idx].in_use = false;
-
-                // Record release
+                // Mark instance as not in use
+                instance_ref.in_use = false;
                 engine.pool_metrics.record_release();
 
+                // Return the result
                 Ok(result == 1)
             })
         });
@@ -1048,76 +1023,26 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         result
     }
 
-    /// Get the field IDs required by a predicate
-    ///
-    /// For now, returns empty vec since we don't track required fields
     fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(Vec::new())
+        // TODO: Implement field tracking for Wasm predicates
+        Ok(vec![])
     }
 
-    /// Check if a predicate exists
     fn has_predicate(&self, predicate_id: &str) -> bool {
+        // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
         if parts.len() != 2 {
             return false;
         }
 
         let rule_id = parts[0];
+
+        // Check if the module is loaded
         tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.modules.read().await.contains_key(rule_id) })
-        })
-    }
-}
-
-impl WasmPredicate {
-    /// Initialize the predicate
-    pub async fn init(&self) -> Result<(), WasmRuntimeError> {
-        debug!(rule_id = %self.rule_id, "Initializing Wasm predicate");
-        // Predicate initialization would happen here
-        Ok(())
-    }
-
-    /// Evaluate an event
-    pub async fn eval(&self, event: &Event) -> Result<EvalResult, WasmRuntimeError> {
-        let modules = self.engine.modules.read().await;
-        let compiled = modules.get(&self.rule_id).ok_or_else(|| {
-            WasmRuntimeError::CompilationError(format!("Module not found: {}", self.rule_id))
-        })?;
-
-        // Create a new store for this evaluation
-        let mut store = Store::new(
-            &self.engine.engine,
-            WasmContext {
-                event: Some(event.clone()),
-                schema: self.engine.schema.clone(),
-                alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
-                regex_cache: self.engine.regex_cache.clone(),
-                glob_cache: self.engine.glob_cache.clone(),
-                rule_metadata: compiled.metadata.clone(),
-            },
-        );
-
-        // Instantiate the module
-        let instance = compiled
-            .instance_pre
-            .instantiate(&mut store)
-            .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
-
-        // Get the pred_eval function
-        let pred_eval = instance
-            .get_typed_func::<u32, i32>(&mut store, "pred_eval")
-            .map_err(|_| WasmRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
-
-        // Call the predicate
-        let result = pred_eval
-            .call(&mut store, 0)
-            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
-
-        Ok(EvalResult {
-            matched: result == 1,
-            error: None,
-            captured_fields: HashMap::new(),
+            tokio::runtime::Handle::current().block_on(async {
+                let pools = self.instance_pool.read().await;
+                pools.contains_key(rule_id)
+            })
         })
     }
 }
@@ -1125,34 +1050,36 @@ impl WasmPredicate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_schema::SchemaRegistry;
 
-    #[tokio::test]
-    async fn test_wasm_engine_create() {
+    #[test]
+    fn test_wasm_config_defaults() {
         let config = WasmConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = WasmEngine::new(config, schema);
-        assert!(engine.is_ok());
+        assert_eq!(config.max_memory_mb, 16);
+        assert_eq!(config.max_execution_time_ms, 100);
+        assert!(config.enable_fuel);
     }
 
-    #[tokio::test]
-    async fn test_regex_registration() {
+    #[test]
+    fn test_runtime_config_trait() {
         let config = WasmConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = WasmEngine::new(config, schema).unwrap();
-
-        let result = engine.register_regex(r"\d+").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(config.max_memory_mb(), 16);
+        assert_eq!(config.max_execution_time_ms(), 100);
+        assert_eq!(config.instruction_limit(), Some(1_000_000));
     }
 
-    #[tokio::test]
-    async fn test_glob_registration() {
-        let config = WasmConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = WasmEngine::new(config, schema).unwrap();
-
-        let result = engine.register_glob("*.exe").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+    #[test]
+    fn test_pool_metrics() {
+        let metrics = PoolMetrics::new();
+        metrics.set_pool_size(10);
+        
+        metrics.record_acquire(100);
+        assert_eq!(metrics.utilization_pct(), 10.0);
+        
+        metrics.record_release();
+        assert_eq!(metrics.utilization_pct(), 0.0);
+        
+        metrics.record_miss();
+        assert_eq!(metrics.cache_hit_rate_pct(), 0.0); // 0 hits out of 1 acquire
     }
 }

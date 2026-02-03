@@ -91,7 +91,8 @@ mod tests {
             }
             Err(EqlError::UnknownField { .. }) => {
                 // Expected - schema not set up for fields
-                assert!(true);
+                // This is a valid error case - the parser works but semantic analysis
+                // correctly identifies that 'process.pid' field is not registered in schema
             }
             Err(e) => {
                 panic!("Unexpected error: {:?}", e);

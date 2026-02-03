@@ -59,10 +59,11 @@ mod normalization_tests {
         let raw = create_mock_raw_event(1, 1234, 1000000);
         let empty_data = &[];
 
-        // Normalization with empty data should handle gracefully
-        let result = normalizer.normalize(&raw, empty_data);
-        // We expect this might fail with empty data, but shouldn't panic
-        assert!(result.is_ok() || result.is_err());
+        // Normalization with empty data should handle gracefully without panicking
+        // The test passes if we reach this point (no panic occurred)
+        let _result = normalizer.normalize(&raw, empty_data);
+        // Note: Result may be Ok or Err depending on implementation,
+        // but the important thing is that it doesn't panic
     }
 }
 

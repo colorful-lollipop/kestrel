@@ -5,7 +5,7 @@
 
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
 /// Field identifier (u32 for fast lookup)
@@ -23,21 +23,341 @@ pub type TimestampMono = u64;
 /// Timestamp in nanoseconds (wall clock)
 pub type TimestampWall = u64;
 
-/// Schema registry that maintains field definitions and type information
+/// Event handle for Host API
+pub type EventHandle = u32;
+
+/// Regex ID (pre-compiled regex handle)
+pub type RegexId = u32;
+
+/// Glob ID (pre-compiled glob handle)
+pub type GlobId = u32;
+
+// ============================================================================
+// Common Types - Extracted from runtime crates to eliminate duplication
+// ============================================================================
+
+/// Severity levels for alerts and rules
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+pub enum Severity {
+    Informational,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Severity::Informational => write!(f, "Informational"),
+            Severity::Low => write!(f, "Low"),
+            Severity::Medium => write!(f, "Medium"),
+            Severity::High => write!(f, "High"),
+            Severity::Critical => write!(f, "Critical"),
+        }
+    }
+}
+
+impl Default for Severity {
+    fn default() -> Self {
+        Severity::Medium
+    }
+}
+
+/// Rule metadata - shared between all rule types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleMetadata {
+    /// Unique rule identifier
+    pub rule_id: String,
+    /// Rule name
+    pub rule_name: String,
+    /// Rule version
+    pub rule_version: String,
+    /// Rule author
+    pub author: Option<String>,
+    /// Rule description
+    pub description: Option<String>,
+    /// Tags for categorization
+    pub tags: Vec<String>,
+    /// Severity level
+    pub severity: String,
+    /// Schema version
+    pub schema_version: String,
+}
+
+impl RuleMetadata {
+    /// Create a new rule metadata with default values
+    pub fn new(rule_id: impl Into<String>, rule_name: impl Into<String>) -> Self {
+        Self {
+            rule_id: rule_id.into(),
+            rule_name: rule_name.into(),
+            rule_version: "1.0.0".to_string(),
+            author: None,
+            description: None,
+            tags: Vec::new(),
+            severity: "medium".to_string(),
+            schema_version: "1.0".to_string(),
+        }
+    }
+
+    /// Set the severity
+    pub fn with_severity(mut self, severity: impl Into<String>) -> Self {
+        self.severity = severity.into();
+        self
+    }
+
+    /// Set the description
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Set the author
+    pub fn with_author(mut self, author: impl Into<String>) -> Self {
+        self.author = Some(author.into());
+        self
+    }
+
+    /// Add tags
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
+    }
+}
+
+/// Rule capabilities - defines what a rule can do
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleCapabilities {
+    /// Supports inline execution
+    pub supports_inline: bool,
+    /// Requires alert capability
+    pub requires_alert: bool,
+    /// Requires block capability
+    pub requires_block: bool,
+    /// Maximum span for sequence rules
+    pub max_span_ms: Option<u64>,
+}
+
+impl Default for RuleCapabilities {
+    fn default() -> Self {
+        Self {
+            supports_inline: false,
+            requires_alert: true,
+            requires_block: false,
+            max_span_ms: None,
+        }
+    }
+}
+
+impl RuleCapabilities {
+    /// Create default capabilities for a detection rule
+    pub fn detection() -> Self {
+        Self {
+            supports_inline: false,
+            requires_alert: true,
+            requires_block: false,
+            max_span_ms: None,
+        }
+    }
+
+    /// Create capabilities for inline blocking rule
+    pub fn inline_blocking() -> Self {
+        Self {
+            supports_inline: true,
+            requires_alert: true,
+            requires_block: true,
+            max_span_ms: None,
+        }
+    }
+}
+
+/// Rule package manifest - used for loading rules
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleManifest {
+    /// Manifest format version
+    pub format_version: String,
+    /// Rule metadata
+    pub metadata: RuleMetadata,
+    /// Rule capabilities
+    pub capabilities: RuleCapabilities,
+}
+
+impl RuleManifest {
+    /// Create a new manifest with the given metadata
+    pub fn new(metadata: RuleMetadata) -> Self {
+        Self {
+            format_version: "1.0".to_string(),
+            metadata,
+            capabilities: RuleCapabilities::default(),
+        }
+    }
+
+    /// Set capabilities
+    pub fn with_capabilities(mut self, capabilities: RuleCapabilities) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+}
+
+/// Runtime type identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RuntimeType {
+    /// WebAssembly runtime
+    Wasm,
+    /// Lua/LuaJIT runtime
+    Lua,
+    /// Native runtime (for built-in predicates)
+    Native,
+}
+
+impl std::fmt::Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeType::Wasm => write!(f, "wasm"),
+            RuntimeType::Lua => write!(f, "lua"),
+            RuntimeType::Native => write!(f, "native"),
+        }
+    }
+}
+
+/// Runtime capabilities - what features a runtime supports
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RuntimeCapabilities {
+    /// Supports regex matching
+    pub regex: bool,
+    /// Supports glob pattern matching
+    pub glob: bool,
+    /// Supports string manipulation functions
+    pub string_ops: bool,
+    /// Supports mathematical operations
+    pub math_ops: bool,
+    /// Maximum memory per evaluation (in MB)
+    pub max_memory_mb: usize,
+    /// Maximum execution time per evaluation (in ms)
+    pub max_execution_time_ms: u64,
+}
+
+impl Default for RuntimeCapabilities {
+    fn default() -> Self {
+        Self {
+            regex: true,
+            glob: true,
+            string_ops: true,
+            math_ops: true,
+            max_memory_mb: 128,
+            max_execution_time_ms: 100,
+        }
+    }
+}
+
+/// Common runtime configuration trait
+pub trait RuntimeConfig: Clone + Send + Sync {
+    /// Get maximum memory in MB
+    fn max_memory_mb(&self) -> usize;
+    /// Get maximum execution time in milliseconds
+    fn max_execution_time_ms(&self) -> u64;
+    /// Get instruction/fuel limit if applicable
+    fn instruction_limit(&self) -> Option<u64>;
+}
+
+/// Evaluation result from a runtime - unified across all runtimes
 #[derive(Debug, Clone)]
+pub struct EvalResult {
+    /// Whether the predicate matched
+    pub matched: bool,
+    /// Optional error message
+    pub error: Option<String>,
+    /// Captured field values
+    pub captured_fields: AHashMap<String, TypedValue>,
+}
+
+impl EvalResult {
+    /// Create a successful match result
+    pub fn matched() -> Self {
+        Self {
+            matched: true,
+            error: None,
+            captured_fields: AHashMap::new(),
+        }
+    }
+
+    /// Create a non-match result
+    pub fn not_matched() -> Self {
+        Self {
+            matched: false,
+            error: None,
+            captured_fields: AHashMap::new(),
+        }
+    }
+
+    /// Create an error result
+    pub fn error(msg: impl Into<String>) -> Self {
+        Self {
+            matched: false,
+            error: Some(msg.into()),
+            captured_fields: AHashMap::new(),
+        }
+    }
+
+    /// Add a captured field
+    pub fn with_capture(mut self, key: impl Into<String>, value: TypedValue) -> Self {
+        self.captured_fields.insert(key.into(), value);
+        self
+    }
+}
+
+/// Alert record for Host API - unified structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertRecord {
+    pub rule_id: String,
+    pub severity: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub event_handles: Vec<EventHandle>,
+    pub fields: AHashMap<String, TypedValue>,
+}
+
+// ============================================================================
+// Schema Registry
+// ============================================================================
+
+/// Schema registry that maintains field definitions and type information
+#[derive(Debug)]
 pub struct SchemaRegistry {
     /// Field ID to definition mapping
-    fields: Arc<AHashMap<FieldId, FieldDef>>,
+    fields: Arc<RwLock<AHashMap<FieldId, FieldDef>>>,
     /// Field path to ID mapping for fast lookups
-    field_paths: Arc<AHashMap<String, FieldId>>,
+    field_paths: Arc<RwLock<AHashMap<String, FieldId>>>,
     /// Event type definitions
-    event_types: Arc<AHashMap<EventTypeId, EventTypeDef>>,
+    event_types: Arc<RwLock<AHashMap<EventTypeId, EventTypeDef>>>,
     /// Event type name to ID mapping
-    event_type_names: Arc<AHashMap<String, EventTypeId>>,
+    event_type_names: Arc<RwLock<AHashMap<String, EventTypeId>>>,
     /// Next available field ID
-    next_field_id: FieldId,
+    next_field_id: RwLock<FieldId>,
     /// Next available event type ID
-    next_event_type_id: EventTypeId,
+    next_event_type_id: RwLock<EventTypeId>,
+}
+
+impl Clone for SchemaRegistry {
+    fn clone(&self) -> Self {
+        // Clone the data from locks, not the locks themselves
+        // If lock is poisoned, use default values
+        let fields = self.fields.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let field_paths = self.field_paths.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let event_types = self.event_types.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let event_type_names = self.event_type_names.read().ok().map(|g| g.clone()).unwrap_or_default();
+        let next_field_id = self.next_field_id.read().ok().map(|g| *g).unwrap_or(1);
+        let next_event_type_id = self.next_event_type_id.read().ok().map(|g| *g).unwrap_or(1);
+        
+        Self {
+            fields: Arc::new(RwLock::new(fields)),
+            field_paths: Arc::new(RwLock::new(field_paths)),
+            event_types: Arc::new(RwLock::new(event_types)),
+            event_type_names: Arc::new(RwLock::new(event_type_names)),
+            next_field_id: RwLock::new(next_field_id),
+            next_event_type_id: RwLock::new(next_event_type_id),
+        }
+    }
 }
 
 impl Default for SchemaRegistry {
@@ -50,88 +370,111 @@ impl SchemaRegistry {
     /// Create a new schema registry
     pub fn new() -> Self {
         Self {
-            fields: Arc::new(AHashMap::default()),
-            field_paths: Arc::new(AHashMap::default()),
-            event_types: Arc::new(AHashMap::default()),
-            event_type_names: Arc::new(AHashMap::default()),
-            next_field_id: 1,
-            next_event_type_id: 1,
+            fields: Arc::new(RwLock::new(AHashMap::default())),
+            field_paths: Arc::new(RwLock::new(AHashMap::default())),
+            event_types: Arc::new(RwLock::new(AHashMap::default())),
+            event_type_names: Arc::new(RwLock::new(AHashMap::default())),
+            next_field_id: RwLock::new(1),
+            next_event_type_id: RwLock::new(1),
         }
     }
 
     /// Register a field definition and return its ID
-    pub fn register_field(&mut self, def: FieldDef) -> Result<FieldId, SchemaError> {
-        if self.field_paths.contains_key(&def.path) {
+    pub fn register_field(&self, def: FieldDef) -> Result<FieldId, SchemaError> {
+        let mut paths = self.field_paths.write().map_err(|_| {
+            SchemaError::LockError("Field paths lock poisoned".to_string())
+        })?;
+        
+        if paths.contains_key(&def.path) {
             return Err(SchemaError::FieldAlreadyExists(def.path));
         }
 
-        let id = self.next_field_id;
-        self.next_field_id += 1;
+        let mut next_id = self.next_field_id.write().map_err(|_| {
+            SchemaError::LockError("Next field ID lock poisoned".to_string())
+        })?;
+        let id = *next_id;
+        *next_id += 1;
+        drop(next_id);
 
-        let mut fields = (*self.fields).clone();
-        fields.insert(id, def.clone());
-
-        let mut paths = (*self.field_paths).clone();
         paths.insert(def.path.clone(), id);
+        drop(paths);
 
-        self.fields = Arc::new(fields);
-        self.field_paths = Arc::new(paths);
+        let mut fields = self.fields.write().map_err(|_| {
+            SchemaError::LockError("Fields lock poisoned".to_string())
+        })?;
+        fields.insert(id, def);
 
         Ok(id)
     }
 
     /// Register an event type definition
-    pub fn register_event_type(&mut self, def: EventTypeDef) -> Result<EventTypeId, SchemaError> {
-        if self.event_type_names.contains_key(&def.name) {
+    pub fn register_event_type(&self, def: EventTypeDef) -> Result<EventTypeId, SchemaError> {
+        let mut names = self.event_type_names.write().map_err(|_| {
+            SchemaError::LockError("Event type names lock poisoned".to_string())
+        })?;
+        
+        if names.contains_key(&def.name) {
             return Err(SchemaError::EventTypeAlreadyExists(def.name));
         }
 
-        let id = self.next_event_type_id;
-        self.next_event_type_id += 1;
+        let mut next_id = self.next_event_type_id.write().map_err(|_| {
+            SchemaError::LockError("Next event type ID lock poisoned".to_string())
+        })?;
+        let id = *next_id;
+        *next_id += 1;
+        drop(next_id);
 
-        let mut types = (*self.event_types).clone();
-        types.insert(id, def.clone());
-
-        let mut names = (*self.event_type_names).clone();
         names.insert(def.name.clone(), id);
+        drop(names);
 
-        self.event_types = Arc::new(types);
-        self.event_type_names = Arc::new(names);
+        let mut types = self.event_types.write().map_err(|_| {
+            SchemaError::LockError("Event types lock poisoned".to_string())
+        })?;
+        types.insert(id, def);
 
         Ok(id)
     }
 
     /// Get event type ID by name
     pub fn get_event_type_id(&self, name: &str) -> Option<EventTypeId> {
-        self.event_type_names.get(name).copied()
+        self.event_type_names.read().ok()?.get(name).copied()
     }
 
     /// Get field definition by ID
-    pub fn get_field(&self, id: FieldId) -> Option<&FieldDef> {
-        self.fields.get(&id)
+    pub fn get_field(&self, id: FieldId) -> Option<FieldDef> {
+        self.fields.read().ok()?.get(&id).cloned()
     }
 
     /// Get field ID by path
     pub fn get_field_id(&self, path: &str) -> Option<FieldId> {
-        self.field_paths.get(path).copied()
+        self.field_paths.read().ok()?.get(path).copied()
     }
 
     /// Get event type definition by ID
-    pub fn get_event_type(&self, id: EventTypeId) -> Option<&EventTypeDef> {
-        self.event_types.get(&id)
+    pub fn get_event_type(&self, id: EventTypeId) -> Option<EventTypeDef> {
+        self.event_types.read().ok()?.get(&id).cloned()
     }
 
     /// List all registered fields
-    pub fn list_fields(&self) -> Vec<(FieldId, &FieldDef)> {
-        self.fields.iter().map(|(id, def)| (*id, def)).collect()
+    pub fn list_fields(&self) -> Vec<(FieldId, FieldDef)> {
+        self.fields
+            .read()
+            .ok()
+            .map(|fields| {
+                fields.iter().map(|(id, def)| (*id, def.clone())).collect()
+            })
+            .unwrap_or_default()
     }
 
     /// List all registered event types
-    pub fn list_event_types(&self) -> Vec<(EventTypeId, &EventTypeDef)> {
+    pub fn list_event_types(&self) -> Vec<(EventTypeId, EventTypeDef)> {
         self.event_types
-            .iter()
-            .map(|(id, def)| (*id, def))
-            .collect()
+            .read()
+            .ok()
+            .map(|types| {
+                types.iter().map(|(id, def)| (*id, def.clone())).collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -341,6 +684,9 @@ pub enum SchemaError {
 
     #[error("Type mismatch: expected {expected}, got {actual}")]
     TypeMismatch { expected: String, actual: String },
+
+    #[error("Lock error: {0}")]
+    LockError(String),
 }
 
 #[cfg(test)]
@@ -349,7 +695,7 @@ mod tests {
 
     #[test]
     fn test_register_field() {
-        let mut registry = SchemaRegistry::new();
+        let registry = SchemaRegistry::new();
         let field = FieldDef {
             path: "process.executable".to_string(),
             data_type: FieldDataType::String,
@@ -366,7 +712,7 @@ mod tests {
 
     #[test]
     fn test_field_path_lookup() {
-        let mut registry = SchemaRegistry::new();
+        let registry = SchemaRegistry::new();
         let field = FieldDef {
             path: "process.pid".to_string(),
             data_type: FieldDataType::U64,
@@ -380,7 +726,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_field() {
-        let mut registry = SchemaRegistry::new();
+        let registry = SchemaRegistry::new();
         let field = FieldDef {
             path: "process.name".to_string(),
             data_type: FieldDataType::String,
@@ -390,5 +736,54 @@ mod tests {
         registry.register_field(field.clone()).unwrap();
         let result = registry.register_field(field);
         assert!(matches!(result, Err(SchemaError::FieldAlreadyExists(_))));
+    }
+
+    #[test]
+    fn test_severity_display() {
+        assert_eq!(Severity::Critical.to_string(), "Critical");
+        assert_eq!(Severity::High.to_string(), "High");
+        assert_eq!(Severity::Medium.to_string(), "Medium");
+        assert_eq!(Severity::Low.to_string(), "Low");
+        assert_eq!(Severity::Informational.to_string(), "Informational");
+    }
+
+    #[test]
+    fn test_severity_ordering() {
+        assert!(Severity::Critical > Severity::High);
+        assert!(Severity::High > Severity::Medium);
+        assert!(Severity::Medium > Severity::Low);
+        assert!(Severity::Low > Severity::Informational);
+    }
+
+    #[test]
+    fn test_rule_metadata_builder() {
+        let meta = RuleMetadata::new("rule-001", "Test Rule")
+            .with_severity("high")
+            .with_description("A test rule")
+            .with_author("Test Author");
+
+        assert_eq!(meta.rule_id, "rule-001");
+        assert_eq!(meta.rule_name, "Test Rule");
+        assert_eq!(meta.severity, "high");
+        assert_eq!(meta.description, Some("A test rule".to_string()));
+        assert_eq!(meta.author, Some("Test Author".to_string()));
+    }
+
+    #[test]
+    fn test_eval_result() {
+        let matched = EvalResult::matched();
+        assert!(matched.matched);
+        assert!(matched.error.is_none());
+
+        let not_matched = EvalResult::not_matched();
+        assert!(!not_matched.matched);
+
+        let error = EvalResult::error("test error");
+        assert!(!error.matched);
+        assert_eq!(error.error, Some("test error".to_string()));
+
+        let with_capture = EvalResult::matched()
+            .with_capture("field1", TypedValue::I64(42));
+        assert_eq!(with_capture.captured_fields.get("field1"), Some(&TypedValue::I64(42)));
     }
 }

@@ -22,6 +22,18 @@ use kestrel_eql::{EqlCompiler, IrRuleType};
 #[cfg(feature = "wasm")]
 use kestrel_runtime_wasm::{WasmConfig, WasmEngine};
 
+// Runtime abstraction layer
+pub mod runtime;
+pub use runtime::{
+    EvalResult, Runtime, RuntimeCapabilities, RuntimeError, RuntimeManager, RuntimeResult,
+    RuntimeType,
+};
+
+#[cfg(feature = "wasm")]
+pub use runtime::WasmRuntimeAdapter;
+#[cfg(feature = "lua")]
+pub use runtime::LuaRuntimeAdapter;
+
 /// Engine operation mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EngineMode {
@@ -158,6 +170,9 @@ pub struct DetectionEngine {
 
     /// Action counter (atomic for thread safety)
     actions_generated: Arc<std::sync::atomic::AtomicU64>,
+
+    /// Error counter for tracking engine errors (atomic for thread safety)
+    errors_count: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl DetectionEngine {
@@ -263,6 +278,7 @@ impl DetectionEngine {
             single_event_rules,
             alerts_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             actions_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            errors_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -388,6 +404,9 @@ impl DetectionEngine {
         let actions_generated = self
             .actions_generated
             .load(std::sync::atomic::Ordering::Relaxed);
+        let errors_count = self
+            .errors_count
+            .load(std::sync::atomic::Ordering::Relaxed);
         let single_event_rule_count = self.single_event_rules.read().await.len();
 
         EngineStats {
@@ -395,6 +414,7 @@ impl DetectionEngine {
             single_event_rule_count,
             alerts_generated,
             actions_generated,
+            errors_count,
         }
     }
 
@@ -484,6 +504,8 @@ impl DetectionEngine {
                 }
                 Err(e) => {
                     error!(error = %e, "NFA engine error");
+                    self.errors_count
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -623,6 +645,7 @@ pub struct EngineStats {
     pub single_event_rule_count: usize,
     pub alerts_generated: u64,
     pub actions_generated: u64,
+    pub errors_count: u64,
 }
 
 /// Engine errors

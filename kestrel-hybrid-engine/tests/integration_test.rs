@@ -4,7 +4,7 @@
 // strategy selection to event processing.
 
 use kestrel_hybrid_engine::{
-    HybridEngine, HybridEngineConfig, MatchingStrategy, RuleComplexityAnalyzer,
+    analyze_rule, HybridEngine, HybridEngineConfig, MatchingStrategy, RuleComplexityAnalyzer,
     RuleStrategy,
 };
 use kestrel_eql::ir::*;
@@ -81,7 +81,7 @@ fn test_rule_complexity_analyzer_simple() {
 
     rule.add_predicate(predicate);
 
-    let recommendation = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let recommendation = analyze_rule(&rule).unwrap();
 
     assert_eq!(recommendation.strategy, MatchingStrategy::AcDfa);
     assert!(recommendation.confidence > 0.8);
@@ -118,12 +118,13 @@ fn test_rule_complexity_analyzer_complex() {
 
     rule.add_predicate(predicate);
 
-    let recommendation = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let recommendation = analyze_rule(&rule).unwrap();
 
-    // Should recommend NFA due to regex
+    // Should recommend HybridAcNfa due to regex + string literals
+    // (regex function has a string argument, so it's complex but has string literals)
     assert!(matches!(
         recommendation.strategy,
-        MatchingStrategy::Nfa
+        MatchingStrategy::HybridAcNfa
     ));
     assert!(!recommendation.complexity.is_simple());
     assert!(recommendation.complexity.has_regex);
@@ -273,7 +274,7 @@ fn test_complexity_scoring() {
 
     rule.add_predicate(predicate);
 
-    let recommendation = RuleComplexityAnalyzer::analyze(&rule).unwrap();
+    let recommendation = analyze_rule(&rule).unwrap();
 
     // Should be simple with low score
     assert!(recommendation.complexity.score < 50);

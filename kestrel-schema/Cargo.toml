@@ -8,5 +8,5 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
-ahash = { workspace = true }
+ahash = { workspace = true, features = ["serde"] }
 smallvec = { workspace = true }

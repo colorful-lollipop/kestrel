@@ -11,6 +11,12 @@ use thiserror::Error;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
+pub mod compiler;
+pub use compiler::{
+    CompileResult, CompiledForm, CompiledRule, CompilationError, CompilationManager,
+    IrCondition, IrPredicate, IrRule, IrRuleType, IrSequenceStep, RuleCompiler,
+};
+
 /// Rule manager configuration
 #[derive(Debug, Clone)]
 pub struct RuleManagerConfig {
@@ -59,27 +65,11 @@ pub struct RuleMetadata {
     pub severity: Severity,
 }
 
-/// Rule severity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Severity {
-    Informational,
-    Low,
-    Medium,
-    High,
-    Critical,
-}
+// Re-export Severity from kestrel-schema for backward compatibility
+pub use kestrel_schema::Severity;
 
-impl std::fmt::Display for Severity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Severity::Informational => write!(f, "Informational"),
-            Severity::Low => write!(f, "Low"),
-            Severity::Medium => write!(f, "Medium"),
-            Severity::High => write!(f, "High"),
-            Severity::Critical => write!(f, "Critical"),
-        }
-    }
-}
+/// Rule severity levels (alias for kestrel_schema::Severity)
+pub type RuleSeverity = kestrel_schema::Severity;
 
 /// Loaded rule
 #[derive(Debug, Clone)]

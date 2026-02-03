@@ -40,15 +40,11 @@ pub struct Alert {
     pub context: serde_json::Value,
 }
 
-/// Alert severity
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Severity {
-    Informational,
-    Low,
-    Medium,
-    High,
-    Critical,
-}
+// Re-export Severity from kestrel-schema for unified type
+pub use kestrel_schema::Severity;
+
+/// Alert severity (alias for kestrel_schema::Severity)
+pub type AlertSeverity = kestrel_schema::Severity;
 
 /// Event evidence captured in an alert
 #[derive(Debug, Clone, Serialize, Deserialize)]

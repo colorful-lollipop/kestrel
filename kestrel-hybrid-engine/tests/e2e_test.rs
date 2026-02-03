@@ -70,13 +70,9 @@ fn test_e2e_workflow() {
     let strategy2 = engine.get_rule_strategy("medium-seq");
     let strategy3 = engine.get_rule_strategy("tiny-seq");
 
-    assert!(strategy1.is_some());
-    assert!(strategy2.is_some());
-    assert!(strategy3.is_some());
-
-    println!("Strategy for simple-seq: {:?}", strategy1);
-    println!("Strategy for medium-seq: {:?}", strategy2);
-    println!("Strategy for tiny-seq: {:?}", strategy3);
+    assert!(strategy1.is_some(), "simple-seq should have a strategy");
+    assert!(strategy2.is_some(), "medium-seq should have a strategy");
+    assert!(strategy3.is_some(), "tiny-seq should have a strategy");
 
     // 4. Process events
     let event = kestrel_event::Event::builder()
@@ -88,16 +84,18 @@ fn test_e2e_workflow() {
         .unwrap();
 
     // Process multiple events
+    let mut processed = 0;
     for _ in 0..100 {
-        let _ = engine.process_event(&event);
+        let result = engine.process_event(&event);
+        assert!(result.is_ok(), "Event processing should not fail");
+        processed += 1;
     }
+    assert_eq!(processed, 100, "Should process all 100 events");
 
     // 5. Check statistics
     let stats = engine.stats();
-    assert_eq!(stats.total_rules_tracked, 3);
-    assert_eq!(stats.nfa_sequence_count, 3);
-
-    println!("Engine stats: {:?}", stats);
+    assert_eq!(stats.total_rules_tracked, 3, "Should track 3 rules");
+    assert_eq!(stats.nfa_sequence_count, 3, "Should have 3 NFA sequences");
 }
 
 #[test]
@@ -122,12 +120,14 @@ fn test_e2e_with_different_complexities() {
     let stats = engine.stats();
     assert_eq!(stats.total_rules_tracked, 10);
 
-    // Print all strategies
+    // Verify all 10 sequences have strategies
+    let mut strategies_found = 0;
     for i in 1..=10 {
-        if let Some(strategy) = engine.get_rule_strategy(&format!("seq-{}", i)) {
-            println!("seq-{}: {:?}", i, strategy);
+        if engine.get_rule_strategy(&format!("seq-{}", i)).is_some() {
+            strategies_found += 1;
         }
     }
+    assert_eq!(strategies_found, 10, "All 10 sequences should have strategies");
 
     // Process events
     let event = kestrel_event::Event::builder()
@@ -138,13 +138,17 @@ fn test_e2e_with_different_complexities() {
         .build()
         .unwrap();
 
+    let mut processed = 0;
     for _ in 0..50 {
-        let _ = engine.process_event(&event);
+        let result = engine.process_event(&event);
+        assert!(result.is_ok(), "Event processing should not fail");
+        processed += 1;
     }
+    assert_eq!(processed, 50, "Should process all 50 events");
 
-    // Final stats
+    // Final stats should show all rules still tracked
     let final_stats = engine.stats();
-    println!("Final stats: {:?}", final_stats);
+    assert_eq!(final_stats.total_rules_tracked, 10, "All 10 rules should still be tracked");
 }
 
 #[test]
@@ -166,15 +170,17 @@ fn test_e2e_strategy_consistency() {
         .collect();
 
     // All should have some strategy
-    assert!(strategies.iter().all(|s| s.is_some()));
+    assert!(strategies.iter().all(|s| s.is_some()), "All sequences should have strategies assigned");
 
     // First strategy should be the same for all
     let first_strategy = strategies[0].unwrap();
     for strategy in &strategies[1..] {
         assert_eq!(strategy.unwrap(), first_strategy, "All similar sequences should have the same strategy");
     }
-
-    println!("All sequences have strategy: {:?}", first_strategy);
+    
+    // Verify consistent strategy assignment
+    let stats = engine.stats();
+    assert_eq!(stats.total_rules_tracked, 5, "Should track all 5 identical sequences");
 }
 
 #[test]
@@ -239,9 +245,11 @@ fn test_e2e_event_processing_throughput() {
     let elapsed = start.elapsed();
 
     let throughput = 1000.0 / elapsed.as_secs_f64();
-    println!("Event processing throughput: {:.2} events/sec", throughput);
-    println!("Average latency: {:.2} μs/event", elapsed.as_micros() as f64 / 1000.0);
+    let avg_latency_us = elapsed.as_micros() as f64 / 1000.0;
 
     // Should process at least 1k events/sec (conservative baseline for debug mode)
     assert!(throughput > 1_000.0, "Throughput should be > 1k events/sec, got {:.2}", throughput);
+    
+    // Verify latency is reasonable (< 1ms per event)
+    assert!(avg_latency_us < 1000.0, "Average latency should be < 1ms, got {:.2} μs", avg_latency_us);
 }

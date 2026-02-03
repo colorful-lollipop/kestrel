@@ -7,8 +7,19 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use uuid::Uuid;
+
+/// Get current timestamp in nanoseconds safely
+/// 
+/// Returns 0 if system time is before UNIX_EPOCH (extremely rare edge case)
+pub fn current_timestamp_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
+}
 
 /// Action type - represents the enforcement action to take
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -123,12 +134,7 @@ impl ActionDecision {
             action,
             policy,
             target,
-            timestamp_ns: {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64
-            },
+            timestamp_ns: current_timestamp_ns(),
             reason,
             evidence,
         }
@@ -186,12 +192,7 @@ impl ActionResult {
             success: true,
             error: None,
             actual_action: Some(actual_action),
-            timestamp_ns: {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64
-            },
+            timestamp_ns: current_timestamp_ns(),
             details: serde_json::json!({}),
         }
     }
@@ -203,12 +204,7 @@ impl ActionResult {
             success: false,
             error: Some(error),
             actual_action: None,
-            timestamp_ns: {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64
-            },
+            timestamp_ns: current_timestamp_ns(),
             details: serde_json::json!({}),
         }
     }
@@ -524,10 +520,7 @@ impl QuarantineExecutor {
 
         // Generate quarantine ID and new path
         let quarantine_id = Uuid::new_v4().to_string();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = current_timestamp_ns() / 1_000_000_000;
         let extension = source_path
             .extension()
             .and_then(|e| e.to_str())
@@ -1001,10 +994,7 @@ impl ActionExecutor for NoOpExecutor {
             success: true,
             error: None,
             actual_action: Some(ActionType::Alert),
-            timestamp_ns: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64,
+            timestamp_ns: current_timestamp_ns(),
             details: serde_json::json!({
                 "mode": "no-op",
                 "policy": "alert-only"
