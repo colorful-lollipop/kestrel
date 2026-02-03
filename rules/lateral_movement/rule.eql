@@ -1,0 +1,8 @@
+-- Lateral Movement Detection Rule (EQL Format)
+-- Detects remote access and authentication patterns
+
+sequence by process.entity_id
+  [process where process.executable in ("/usr/bin/ssh", "/usr/bin/scp", "/usr/bin/rsync")
+   and process.args regex~ ".*@.*"]
+  [network where network.dest_port == 22]
+with maxspan=60s

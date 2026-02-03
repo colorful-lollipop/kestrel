@@ -1,0 +1,7 @@
+-- Privilege Escalation Detection Rule (EQL Format)
+-- Detects sudo/su usage and sensitive file access
+
+sequence by process.entity_id
+  [process where process.executable == "/usr/bin/sudo" or process.executable == "/bin/su"]
+  [file where file.path in ("/etc/shadow", "/etc/sudoers", "/etc/passwd")]
+with maxspan=30s

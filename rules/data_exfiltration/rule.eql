@@ -1,0 +1,10 @@
+-- Data Exfiltration Detection Rule (EQL Format)
+-- Detects archive creation followed by upload
+
+sequence by process.entity_id
+  [process where process.executable in ("tar", "zip", "gzip", "7z", "7za")
+   and process.args regex~ ".*\\.(sql|db|doc|pdf).*"]
+  [network where network.direction == "outbound"
+   and (network.dest_host regex~ ".*(dropbox|drive\\.google|s3\\.amazonaws|blob\\.core\\.windows).*"
+        or network.dest_port in (443, 80))]
+with maxspan=5m

@@ -1,0 +1,25 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "revshell-001",
+    "rule_name": "Reverse Shell Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects reverse shell establishment by correlating network connections with subsequent shell execution. Monitors for common reverse shell patterns: bash -i, nc -e, python -c 'import socket', etc.",
+    "tags": ["reverse-shell", "command-and-control", "network", "execution", "behavioral"],
+    "severity": "Critical",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/techniques/T1059/",
+      "https://attack.mitre.org/techniques/T1071/",
+      "https://www.revshells.com/"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": true,
+    "max_span_ms": 10000,
+    "mitre_attack": ["T1059", "T1071", "T1505"]
+  }
+}

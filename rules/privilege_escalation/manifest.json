@@ -1,0 +1,25 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "privesc-001",
+    "rule_name": "Privilege Escalation Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects privilege escalation attempts through sudo/su abuse, SUID exploitation, and sensitive system file modification",
+    "tags": ["privilege-escalation", "sudo", "suid", "persistence", "defense-evasion"],
+    "severity": "High",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/tactics/TA0004/",
+      "https://attack.mitre.org/techniques/T1548/",
+      "https://attack.mitre.org/techniques/T1166/"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": true,
+    "max_span_ms": 60000,
+    "mitre_attack": ["T1548", "T1166", "T1168"]
+  }
+}

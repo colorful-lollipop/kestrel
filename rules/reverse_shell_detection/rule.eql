@@ -1,0 +1,9 @@
+-- Reverse Shell Detection Rule (EQL Format)
+-- Detects network connection followed by shell execution
+
+sequence by process.entity_id
+  [network where network.direction == "outbound" and 
+   (network.dest_port == 4444 or network.dest_port == 5555 or 
+    network.dest_port in (1024, 65535))]
+  [process where process.executable in ("/bin/bash", "/bin/sh", "/bin/zsh")]
+with maxspan=10s

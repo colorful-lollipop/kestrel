@@ -1,0 +1,25 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "latmove-001",
+    "rule_name": "Lateral Movement Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects lateral movement attempts including: SSH-based movement, remote service execution (psexec, wmi, winrm patterns), credential reuse indicators, and unusual authentication patterns",
+    "tags": ["lateral-movement", "remote-execution", "ssh", "credential-reuse", "persistence"],
+    "severity": "High",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/tactics/TA0008/",
+      "https://attack.mitre.org/techniques/T1021/",
+      "https://attack.mitre.org/techniques/T1077/"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": false,
+    "max_span_ms": 60000,
+    "mitre_attack": ["T1021", "T1077", "T1550"]
+  }
+}

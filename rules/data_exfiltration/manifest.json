@@ -1,0 +1,25 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "exfil-001",
+    "rule_name": "Data Exfiltration Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects data exfiltration attempts including: large outbound transfers, compressed archive creation followed by network activity, database dumps followed by upload, and unusual upload patterns",
+    "tags": ["data-exfiltration", "data-theft", "network", "compression", "exfil"],
+    "severity": "High",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/techniques/T1041/",
+      "https://attack.mitre.org/techniques/T1048/",
+      "https://attack.mitre.org/techniques/T1567/"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": true,
+    "max_span_ms": 300000,
+    "mitre_attack": ["T1041", "T1048", "T1567"]
+  }
+}

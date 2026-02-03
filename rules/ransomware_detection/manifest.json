@@ -1,0 +1,24 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "ransomware-001",
+    "rule_name": "Ransomware Behavior Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects ransomware-like behavior: rapid file modifications with suspicious extensions (.encrypted, .locked, .crypto, .vault, .ransom)",
+    "tags": ["ransomware", "file-encryption", "behavioral-detection", "high-priority"],
+    "severity": "Critical",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/techniques/T1486/",
+      "https://www.nomoreransom.org/en/index.html"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": true,
+    "max_span_ms": 30000,
+    "mitre_attack": ["T1486"]
+  }
+}

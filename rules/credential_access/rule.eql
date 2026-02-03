@@ -1,0 +1,16 @@
+-- Credential Access Detection Rule (EQL Format)
+-- Detects access to credential files and memory dump attempts
+
+process where 
+  file.path in (
+    "/etc/shadow", 
+    "/etc/master.passwd",
+    "/root/.ssh/id_rsa",
+    "/root/.ssh/id_dsa",
+    "/root/.ssh/id_ecdsa",
+    "/root/.ssh/id_ed25519"
+  )
+  or file.path regex~ ".*\\.ssh/.*"
+  or file.path regex~ ".*Login Data.*"
+  or file.path regex~ ".*logins\\.json.*"
+  or process.executable in ("mimipenguin", "mimikatz", "fcrackzip", "john", "hashcat")

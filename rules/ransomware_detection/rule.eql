@@ -1,0 +1,7 @@
+-- Ransomware Detection Rule (EQL Format)
+-- Detects rapid file encryption behavior
+
+sequence by process.entity_id
+  [file where file.path regex~ ".*\\.(doc|docx|xls|xlsx|ppt|pptx|pdf|jpg|jpeg|png)$"]
+  [file where file.name regex~ ".*\\.(encrypted|locked|crypto|vault|ransom|crypted)$"]
+with maxspan=5s

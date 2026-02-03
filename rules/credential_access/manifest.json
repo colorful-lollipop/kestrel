@@ -1,0 +1,25 @@
+{
+  "format_version": "1.0",
+  "metadata": {
+    "rule_id": "credaccess-001",
+    "rule_name": "Credential Access Detection",
+    "rule_version": "1.0.0",
+    "author": "Kestrel Security Team",
+    "description": "Detects credential access attempts including: /etc/shadow and password file access, memory dumping for credential extraction (lsass-like patterns on Linux), keylogging indicators, and credential manager access",
+    "tags": ["credential-access", "password-dump", "memory-dump", "keylogger", "defense-evasion"],
+    "severity": "Critical",
+    "schema_version": "1.0",
+    "references": [
+      "https://attack.mitre.org/tactics/TA0006/",
+      "https://attack.mitre.org/techniques/T1003/",
+      "https://attack.mitre.org/techniques/T1056/"
+    ]
+  },
+  "capabilities": {
+    "supports_inline": false,
+    "requires_alert": true,
+    "requires_block": true,
+    "max_span_ms": 30000,
+    "mitre_attack": ["T1003", "T1005", "T1056"]
+  }
+}
