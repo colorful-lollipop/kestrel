@@ -13,18 +13,17 @@
 //! - **Metrics Collection**: Detailed performance and decision metrics
 
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionEvidence, ActionExecutor, ActionPolicy,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionPolicy,
     ActionResult, ActionTarget, ActionType, Alert, Severity,
 };
 use kestrel_event::Event;
 use kestrel_nfa::SequenceAlert;
 use lru::LruCache;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::{EbpfCollector, EnforcementAction, EnforcementDecision};
 
@@ -223,7 +222,7 @@ impl EbpfExecutor {
         let audit_channel_size = config.audit_channel_size;
         let decision_cache_size = config.decision_cache_size;
         let max_decisions_per_second = config.max_decisions_per_second;
-        let policy = config.policy;
+        let _policy = config.policy;
 
         let audit_tx = if enable_audit {
             let (tx, _) = mpsc::channel(audit_channel_size);
@@ -422,8 +421,7 @@ impl EbpfExecutor {
                     acc
                 }
             })
-            .0
-            .clone();
+            .0;
 
         let target = self.extract_target_from_event(event);
         let decision = ActionDecision::new(
@@ -473,7 +471,7 @@ impl EbpfExecutor {
         reason: String,
         ttl_ms: u64,
     ) -> Result<ActionDecision, EbpfExecutorError> {
-        let current_time_ns = now_ns();
+        let _current_time_ns = now_ns();
         let decision = ActionDecision::new(
             "manual".to_string(),
             action_type,
@@ -594,7 +592,7 @@ impl EbpfExecutor {
         if let Some(first) = events.first() {
             self.extract_target_from_event(first)
         } else {
-            let now_ns = now_ns();
+            let _now_ns = now_ns();
             ActionTarget::ProcessExec {
                 pid: 0,
                 executable: "unknown".to_string(),

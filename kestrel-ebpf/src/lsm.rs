@@ -421,7 +421,7 @@ impl ActionExecutor for LsmExecutor {
         let pid = Self::extract_pid(&decision.target);
         let blocking_action = Self::convert_action(decision.action)?;
 
-        let mut lsm_hooks = self
+        let lsm_hooks = self
             .lsm_hooks
             .lock()
             .map_err(|e| ActionError::ActionFailed(format!("Failed to lock LSM hooks: {:?}", e)))?;

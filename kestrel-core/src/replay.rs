@@ -160,6 +160,8 @@ impl From<kestrel_schema::TypedValue> for SerializedValue {
 /// Stores events in a JSON-based format for compatibility and debugging.
 /// In production, would use more efficient binary serialization.
 pub struct BinaryLog {
+    /// Schema registry for type information (reserved for future use)
+    #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
 }
 
@@ -362,6 +364,8 @@ impl Default for ReplayConfig {
 /// Replays events from binary log with deterministic timing.
 pub struct ReplaySource {
     config: ReplayConfig,
+    /// Schema registry for type information (reserved for future use)
+    #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
     time_manager: TimeManager,
 

@@ -1,9 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use kestrel_event::Event;
 use kestrel_runtime_wasm::{WasmConfig, WasmEngine};
-use kestrel_schema::TypedValue;
 
 use super::{calculate_percentiles, create_single_test_event, format_duration};
 
@@ -29,7 +27,7 @@ pub fn run_wasm_benchmarks() {
     }
 }
 
-fn run_wasm_evaluation_benchmark(engine: &WasmEngine) {
+fn run_wasm_evaluation_benchmark(_engine: &WasmEngine) {
     println!("  Wasm Predicate Evaluation:");
 
     let wasm_bytes = wat::parse_str(

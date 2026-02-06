@@ -18,6 +18,8 @@ pub struct RuntimeConsistencyChecker {
     wasm_engine: Option<Arc<WasmEngine>>,
     #[cfg(feature = "lua")]
     lua_engine: Option<Arc<LuaEngine>>,
+    /// Schema registry for type information (reserved for future use)
+    #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
 }
 

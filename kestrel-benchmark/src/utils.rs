@@ -1,5 +1,5 @@
 use kestrel_event::Event;
-use kestrel_schema::{FieldId, SchemaRegistry, TypedValue};
+use kestrel_schema::{SchemaRegistry, TypedValue};
 use rand::Rng;
 use std::sync::Arc;
 

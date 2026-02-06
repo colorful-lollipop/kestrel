@@ -2,10 +2,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use kestrel_core::{AlertOutputConfig, EventBusConfig};
 use kestrel_engine::{DetectionEngine, EngineConfig};
 
-use super::{format_bytes, format_duration, generate_test_events};
+use super::format_bytes;
 
 fn get_memory_usage() -> Option<u64> {
     std::fs::read_to_string("/proc/self/status")

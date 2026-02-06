@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use kestrel_core::{AlertOutputConfig, EventBusConfig};
 use kestrel_engine::{DetectionEngine, EngineConfig};
 
 use super::{calculate_percentiles, create_single_test_event, format_duration};
@@ -83,11 +82,11 @@ pub fn run_nfa_latency_benchmarks() {
 
     println!("\n=== NFA Sequence Latency Benchmark ===\n");
 
-    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let _runtime = tokio::runtime::Runtime::new().unwrap();
 
     let config = NfaEngineConfig::default();
 
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(NoOpPredicateEvaluator);
     let mut nfa_engine = NfaEngine::new(config, evaluator);
 

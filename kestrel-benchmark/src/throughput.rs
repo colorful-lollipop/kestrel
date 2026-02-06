@@ -1,10 +1,8 @@
-use criterion::{BenchmarkGroup, BenchmarkId, Criterion};
-use std::time::Duration;
+use criterion::{BenchmarkId, Criterion};
 
-use kestrel_core::{AlertOutputConfig, EventBusConfig};
 use kestrel_engine::{DetectionEngine, EngineConfig};
 
-use super::{create_test_schema, format_bytes, format_duration, generate_test_events};
+use super::{format_duration, generate_test_events};
 
 const THROUGHPUT_EVENT_COUNTS: &[usize] = &[1000, 5000, 10000, 20000];
 

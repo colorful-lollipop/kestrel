@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use kestrel_core::{AlertOutputConfig, EventBusConfig};
 use kestrel_engine::{DetectionEngine, EngineConfig};
 
 use super::{format_bytes, generate_test_events};

@@ -192,7 +192,7 @@ impl WasmRuntimeAdapter {
 #[cfg(feature = "wasm")]
 #[async_trait::async_trait]
 impl Runtime for WasmRuntimeAdapter {
-    async fn evaluate(&self, predicate_id: &str, event: &Event) -> RuntimeResult<EvalResult> {
+    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> RuntimeResult<EvalResult> {
         // For now, use ad-hoc evaluation as the primary method
         // In production, you'd want to check if the module is loaded first
         Err(RuntimeError::NotAvailable(
@@ -202,7 +202,7 @@ impl Runtime for WasmRuntimeAdapter {
 
     async fn evaluate_adhoc(&self, bytes: &[u8], event: &Event) -> RuntimeResult<EvalResult> {
         match self.inner.eval_adhoc_predicate(bytes, event).await {
-            Ok(matched) => Ok(EvalResult::matched()),
+            Ok(_matched) => Ok(EvalResult::matched()),
             Err(e) => Err(RuntimeError::ExecutionError(e.to_string())),
         }
     }
@@ -212,7 +212,7 @@ impl Runtime for WasmRuntimeAdapter {
         Ok(vec![])
     }
 
-    fn has_predicate(&self, predicate_id: &str) -> bool {
+    fn has_predicate(&self, _predicate_id: &str) -> bool {
         // Check if module exists in the engine
         // This is a simplified check - in production, you'd want a proper API
         true

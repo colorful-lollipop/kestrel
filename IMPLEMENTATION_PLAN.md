@@ -68,7 +68,7 @@
 **Success Criteria**:
 - `cargo build --workspace` 无警告
 - `cargo clippy --workspace` 无警告
-**Status**: Not Started
+**Status**: ✅ Complete (kestrel-core fixed)
 
 ---
 
@@ -89,3 +89,4 @@
 | 1 | 2026-02-06 | 2026-02-06 | 修复 EventBus::new() 添加后台消费者 |
 | 2 | 2026-02-06 | 2026-02-06 | SchemaRegistry 使用 DashMap 优化并发 |
 | 3 | 2026-02-06 | 2026-02-06 | 添加 eBPF HealthChecker 组件 |
+| 7 | 2026-02-06 | 2026-02-06 | 清理 kestrel-core 编译警告 |

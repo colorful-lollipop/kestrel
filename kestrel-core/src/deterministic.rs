@@ -11,6 +11,8 @@ use crate::alert::Alert;
 use crate::replay::BinaryLog;
 
 pub struct DeterministicVerifier {
+    /// Schema registry for type information (reserved for future use)
+    #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
 }
 
@@ -230,6 +232,8 @@ impl Default for ReplayVerificationReport {
 }
 
 pub struct ReplaySource {
+    /// Binary log for replay (reserved for future use)
+    #[allow(dead_code)]
     log: BinaryLog,
     events: Vec<Event>,
     current_index: usize,
@@ -334,6 +338,8 @@ impl ReplaySource {
 }
 
 pub struct DeterministicTestRunner {
+    /// Schema registry for type information (reserved for future use)
+    #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
     results: Arc<RwLock<Vec<DeterministicResult>>>,
 }

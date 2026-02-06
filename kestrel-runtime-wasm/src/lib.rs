@@ -372,7 +372,7 @@ impl WasmEngine {
             .func_wrap(
                 "kestrel",
                 "event_get_i64",
-                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i64 {
+                |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i64 {
                     let ctx = caller.data();
                     let event = match ctx.event.as_ref() {
                         Some(e) => e,
@@ -404,7 +404,7 @@ impl WasmEngine {
             .func_wrap(
                 "kestrel",
                 "event_get_u64",
-                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> u64 {
+                |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> u64 {
                     let ctx = caller.data();
                     let event = match ctx.event.as_ref() {
                         Some(e) => e,
@@ -485,7 +485,7 @@ impl WasmEngine {
             .func_wrap(
                 "kestrel",
                 "event_get_bool",
-                |mut caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
+                |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
                     let ctx = caller.data();
                     let event = match ctx.event.as_ref() {
                         Some(e) => e,
@@ -602,7 +602,7 @@ impl WasmEngine {
             .func_wrap(
                 "kestrel",
                 "alert_emit",
-                |mut caller: Caller<'_, WasmContext>, event_handle: u32| -> i32 {
+                |caller: Caller<'_, WasmContext>, event_handle: u32| -> i32 {
                     // Get the context data
                     let ctx = caller.data();
 
@@ -646,7 +646,7 @@ impl WasmEngine {
             .func_wrap(
                 "kestrel",
                 "capture_field",
-                |mut caller: Caller<'_, WasmContext>, field_id: u32| -> i32 {
+                |caller: Caller<'_, WasmContext>, field_id: u32| -> i32 {
                     // Get the context data
                     let ctx = caller.data();
 
@@ -933,7 +933,7 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
     fn evaluate(
         &self,
         predicate_id: &str,
-        event: &kestrel_event::Event,
+        _event: &kestrel_event::Event,
     ) -> kestrel_nfa::NfaResult<bool> {
         // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();

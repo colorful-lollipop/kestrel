@@ -11,8 +11,8 @@ use parking_lot::RwLock;
 use crate::error::KestrelError;
 use crate::types::*;
 
-use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig, RuleStrategy};
-use kestrel_nfa::{CompiledSequence, NfaEngineConfig, PredicateEvaluator};
+use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
+use kestrel_nfa::PredicateEvaluator;
 
 /// Mock evaluator for MVP
 struct MockEvaluator;

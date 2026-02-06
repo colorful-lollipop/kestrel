@@ -49,7 +49,7 @@ impl<T: Default> ObjectPool<T> {
     ///
     /// If the pool is empty, creates a new object.
     /// Returns the object and a guard that returns it to the pool when dropped.
-    pub fn acquire(&self) -> PooledObject<T> {
+    pub fn acquire(&self) -> PooledObject<'_, T> {
         let obj = {
             let mut pool = self.pool.lock().unwrap();
             if let Some(obj) = pool.pop() {
@@ -72,7 +72,7 @@ impl<T: Default> ObjectPool<T> {
     /// Try to acquire an object from the pool without blocking
     ///
     /// Returns None if the pool lock is poisoned.
-    pub fn try_acquire(&self) -> Option<PooledObject<T>> {
+    pub fn try_acquire(&self) -> Option<PooledObject<'_, T>> {
         let mut pool = self.pool.lock().ok()?;
         if let Some(obj) = pool.pop() {
             drop(pool);
@@ -95,18 +95,19 @@ impl<T: Default> ObjectPool<T> {
     /// Return an object to the pool
     ///
     /// If the pool is at capacity, the object is dropped.
-    fn release(&self, mut obj: T) {
+    fn release(&self, _obj: T) {
         // Only keep objects if we're under the max size
         let current = self.current_size.load(Ordering::Relaxed);
         if current < self.max_size {
-            // Clear/reset the object before returning to pool
-            obj = T::default();
+            // Create a fresh default object for the pool
+            let obj = T::default();
 
             if let Ok(mut pool) = self.pool.lock() {
                 pool.push(obj);
                 self.current_size.fetch_add(1, Ordering::Relaxed);
             }
         }
+        // If at capacity, _obj is dropped when it goes out of scope
     }
 
     /// Get pool metrics

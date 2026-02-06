@@ -6,8 +6,7 @@ use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluat
 use kestrel_schema::{SchemaRegistry, TypedValue};
 
 use super::{
-    calculate_percentiles, format_duration, generate_matching_sequence_events,
-    generate_non_matching_events,
+    calculate_percentiles, format_duration,
 };
 
 struct NoOpPredicateEvaluator;
@@ -31,7 +30,7 @@ pub fn run_nfa_benchmarks() {
 
     let config = NfaEngineConfig::default();
 
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(NoOpPredicateEvaluator);
     let mut nfa_engine = NfaEngine::new(config, evaluator);
 
