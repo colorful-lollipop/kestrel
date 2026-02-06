@@ -156,6 +156,7 @@ fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::field_ref => Ok(Expr::FieldRef(inner.as_span().as_str().to_string())),
         Rule::function_call => build_function_call(inner),
         Rule::in_expr_atom => build_in_expr(inner),
+        Rule::quantifier_expr => build_quantifier_expr(inner),
         _ => Err(EqlError::syntax(
             inner.as_span().as_str(),
             &format!("Unexpected rule: {:?}", inner.as_rule()),
@@ -189,6 +190,7 @@ fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::field_ref => Ok(Expr::FieldRef(span.to_string())),
         Rule::function_call => build_function_call(inner),
         Rule::in_expr_atom => build_in_expr(inner),
+        Rule::quantifier_expr => build_quantifier_expr(inner),
         Rule::atom => build_primary_expr(inner),
         Rule::expr => build_expr(inner),
         Rule::comparison_expr => build_binary_op(inner),
@@ -239,6 +241,52 @@ fn build_in_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     }
 
     Ok(Expr::In(Box::new(InExpr { value, values })))
+}
+
+fn build_quantifier_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
+    let span = pair.as_span().as_str();
+    let mut inner = pair.into_inner();
+    
+    // Determine quantifier type from the span (starts with "any" or "all")
+    let quantifier = if span.starts_with("any") {
+        QuantifierType::Any
+    } else if span.starts_with("all") {
+        QuantifierType::All
+    } else {
+        return Err(EqlError::syntax(span, "Expected 'any' or 'all'"));
+    };
+    
+    // First element is the field reference (array field)
+    let field_pair = inner
+        .next()
+        .ok_or_else(|| EqlError::syntax("quantifier", "Expected array field reference"))?;
+    let array_field = field_pair.as_str().to_string();
+    
+    // Second element is the comparison operator
+    let op_pair = inner
+        .next()
+        .ok_or_else(|| EqlError::syntax("quantifier", "Expected comparison operator"))?;
+    let op_str = op_pair.as_str();
+    let operator = parse_operator_from_str(op_str)?;
+    
+    // Third element is the value expression
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| EqlError::syntax("quantifier", "Expected value expression"))?;
+    let value = build_expr(value_pair)?;
+    
+    // Build the condition as a binary operation
+    let condition = Expr::BinaryOp(Box::new(BinaryOp {
+        operator,
+        left: Expr::FieldRef(array_field.clone()),
+        right: value,
+    }));
+    
+    Ok(Expr::ArrayQuantifier(Box::new(ArrayQuantifier {
+        quantifier,
+        array_field,
+        condition,
+    })))
 }
 
 fn build_binary_op(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
@@ -353,6 +401,44 @@ mod tests {
                 assert_eq!(sq.steps.len(), 2);
             }
             _ => panic!("Expected sequence query"),
+        }
+    }
+
+    #[test]
+    fn test_parse_array_quantifier_any() {
+        let result = parse("process where any(process.args == \"-v\")").unwrap();
+        match result {
+            Query::Event(eq) => {
+                assert_eq!(eq.event_type, "process");
+                assert!(eq.condition.is_some());
+                // Check that we have an ArrayQuantifier
+                if let Some(Expr::ArrayQuantifier(aq)) = eq.condition {
+                    assert_eq!(aq.quantifier, QuantifierType::Any);
+                    assert_eq!(aq.array_field, "process.args");
+                } else {
+                    panic!("Expected ArrayQuantifier expression");
+                }
+            }
+            _ => panic!("Expected event query"),
+        }
+    }
+
+    #[test]
+    fn test_parse_array_quantifier_all() {
+        let result = parse("file where all(file.permissions > 0)").unwrap();
+        match result {
+            Query::Event(eq) => {
+                assert_eq!(eq.event_type, "file");
+                assert!(eq.condition.is_some());
+                // Check that we have an ArrayQuantifier
+                if let Some(Expr::ArrayQuantifier(aq)) = eq.condition {
+                    assert_eq!(aq.quantifier, QuantifierType::All);
+                    assert_eq!(aq.array_field, "file.permissions");
+                } else {
+                    panic!("Expected ArrayQuantifier expression");
+                }
+            }
+            _ => panic!("Expected event query"),
         }
     }
 }

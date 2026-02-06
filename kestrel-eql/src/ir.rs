@@ -70,6 +70,12 @@ pub enum IrNode {
         value: Box<IrNode>,
         values: Vec<IrLiteral>,
     },
+    /// Array quantifier (any/all)
+    ArrayQuantifier {
+        quantifier: IrQuantifierType,
+        field_id: u32,
+        element_condition: Box<IrNode>,
+    },
 }
 
 /// Literal value
@@ -107,6 +113,15 @@ pub enum IrBinaryOp {
 pub enum IrUnaryOp {
     Not,
     Neg,
+}
+
+/// Array quantifier type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IrQuantifierType {
+    /// Any element matches
+    Any,
+    /// All elements match
+    All,
 }
 
 /// Built-in function

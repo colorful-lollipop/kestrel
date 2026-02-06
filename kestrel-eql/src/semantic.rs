@@ -252,6 +252,7 @@ impl SemanticAnalyzer {
             Expr::UnaryOp(op) => self.analyze_unary_op(op),
             Expr::FunctionCall(fc) => self.analyze_function_call(fc),
             Expr::In(in_expr) => self.analyze_in_expr(in_expr),
+            Expr::ArrayQuantifier(aq) => self.analyze_array_quantifier(aq),
         }
     }
 
@@ -437,6 +438,28 @@ impl SemanticAnalyzer {
         Ok(IrNode::In {
             value,
             values: values?,
+        })
+    }
+
+    fn analyze_array_quantifier(&mut self, aq: &ArrayQuantifier) -> Result<IrNode> {
+        use crate::ir::IrQuantifierType;
+        
+        // Resolve the array field
+        let field_id = self.resolve_field(&aq.array_field)?;
+        
+        // Convert quantifier type
+        let quantifier = match aq.quantifier {
+            QuantifierType::Any => IrQuantifierType::Any,
+            QuantifierType::All => IrQuantifierType::All,
+        };
+        
+        // Analyze the element condition
+        let element_condition = Box::new(self.analyze_expr(&aq.condition)?);
+        
+        Ok(IrNode::ArrayQuantifier {
+            quantifier,
+            field_id,
+            element_condition,
         })
     }
 

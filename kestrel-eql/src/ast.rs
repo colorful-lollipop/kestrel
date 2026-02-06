@@ -93,6 +93,8 @@ pub enum Expr {
     FunctionCall(FunctionCall),
     /// In expression: `x in (1, 2, 3)`
     In(Box<InExpr>),
+    /// Array quantifier: `any(process.args == "-v")`
+    ArrayQuantifier(Box<ArrayQuantifier>),
 }
 
 /// Binary operation
@@ -150,6 +152,26 @@ pub struct FunctionCall {
 pub struct InExpr {
     pub value: Box<Expr>,
     pub values: Vec<Expr>,
+}
+
+/// Array quantifier: any/all
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuantifierType {
+    /// Any element matches: `any(array == value)`
+    Any,
+    /// All elements match: `all(array == value)`
+    All,
+}
+
+/// Array quantifier expression
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArrayQuantifier {
+    /// Quantifier type (any or all)
+    pub quantifier: QuantifierType,
+    /// Field reference to the array field
+    pub array_field: String,
+    /// Condition to check against each element
+    pub condition: Expr,
 }
 
 /// Type annotation for expressions

@@ -317,6 +317,9 @@ impl WasmCodeGenerator {
             IrNode::In { value, values: _ } => {
                 self.analyze_node_types(value)?;
             }
+            IrNode::ArrayQuantifier { element_condition, .. } => {
+                self.analyze_node_types(element_condition)?;
+            }
             IrNode::Literal { value: _ } => {}
         }
         Ok(())
@@ -374,10 +377,13 @@ impl WasmCodeGenerator {
                                 offset,
                                 length: s.len() as u32,
                             });
-                            self.next_offset += s.len() as u32 + 1;
+                            self.next_offset += s.len() as u32 + 1; // +1 for null terminator
                         }
                     }
                 }
+            }
+            IrNode::ArrayQuantifier { element_condition, .. } => {
+                self.collect_node_literals(element_condition)?;
             }
         }
         Ok(())
@@ -512,6 +518,19 @@ impl WasmCodeGenerator {
             }
             IrNode::In { value, values } => {
                 self.generate_in(output, value, values, is_root)?;
+            }
+            IrNode::ArrayQuantifier {
+                quantifier,
+                field_id,
+                element_condition,
+            } => {
+                self.generate_array_quantifier(
+                    output,
+                    *quantifier,
+                    *field_id,
+                    element_condition,
+                    is_root,
+                )?;
             }
         }
 
@@ -1049,6 +1068,53 @@ impl WasmCodeGenerator {
                 writeln!(output, "    (i64.or)")?;
             }
         }
+
+        if is_root {
+            writeln!(output, "    (if (result i32)")?;
+            writeln!(output, "      (then (i32.const 1))")?;
+            writeln!(output, "      (else (i32.const 0))")?;
+            writeln!(output, "    )")?;
+        }
+
+        Ok(())
+    }
+
+    /// Generate array quantifier (any/all)
+    ///
+    /// Note: This requires Host API support for array iteration.
+    /// Currently generates a placeholder that loads the field and checks condition.
+    fn generate_array_quantifier(
+        &self,
+        output: &mut Vec<u8>,
+        quantifier: crate::ir::IrQuantifierType,
+        field_id: u32,
+        element_condition: &IrNode,
+        is_root: bool,
+    ) -> Result<()> {
+        let quantifier_name = match quantifier {
+            crate::ir::IrQuantifierType::Any => "any",
+            crate::ir::IrQuantifierType::All => "all",
+        };
+
+        writeln!(
+            output,
+            "    ;; Array quantifier: {} on field {}",
+            quantifier_name, field_id
+        )?;
+
+        // TODO: Implement proper array iteration via Host API
+        // For now, generate a placeholder that evaluates the condition once
+        // This is a simplified implementation - full implementation requires
+        // Host API functions to iterate over array elements
+
+        // Load the array field
+        self.generate_load_field(output, field_id, false)?;
+
+        // Generate element condition check
+        // Note: In full implementation, this would be called for each element
+        self.generate_node(output, element_condition, false)?;
+
+        writeln!(output, "    ;; TODO: Iterate over array elements")?;
 
         if is_root {
             writeln!(output, "    (if (result i32)")?;

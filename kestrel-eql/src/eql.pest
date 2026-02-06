@@ -52,8 +52,14 @@ in_expr_atom = {
     atom ~ "in" ~ "(" ~ expr_list ~ ")"
 }
 
+// Array quantifier: any(array_field == value) or all(array_field > 0)
+quantifier_expr = {
+    ("any" | "all") ~ "(" ~ field_ref ~ comparison_op ~ expr ~ ")"
+}
+
 // Primary expression
 primary = {
+    quantifier_expr |
     function_call |
     in_expr_atom |
     atom
