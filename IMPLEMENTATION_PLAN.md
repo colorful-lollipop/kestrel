@@ -30,7 +30,7 @@
 - 添加 EbpfHealthChecker 组件
 - 实现连接断开自动重连
 - 降级到 fanotify 的 fallback 机制
-**Status**: Not Started
+**Status**: ✅ Complete
 
 ---
 
@@ -88,3 +88,4 @@
 |-------|----------|----------|------|
 | 1 | 2026-02-06 | 2026-02-06 | 修复 EventBus::new() 添加后台消费者 |
 | 2 | 2026-02-06 | 2026-02-06 | SchemaRegistry 使用 DashMap 优化并发 |
+| 3 | 2026-02-06 | 2026-02-06 | 添加 eBPF HealthChecker 组件 |

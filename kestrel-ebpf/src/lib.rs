@@ -4,6 +4,7 @@
 //! security events from the Linux kernel using eBPF programs.
 
 mod executor;
+mod health;
 mod lsm;
 mod normalize;
 mod programs;
@@ -12,6 +13,10 @@ mod pushdown;
 pub mod platform;
 
 pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
+pub use health::{
+    EbpfHealthChecker, EbpfHealthStatus, HealthCheckConfig, HealthCheckError,
+    HealthMetrics, HealthMetricsSnapshot,
+};
 pub use lsm::{
     BlockingAction, BlockingRule, EnforcementEvent, FanotifyFallback, LsmConfig, LsmError,
     LsmExecutor, LsmFallback, LsmHookType, LsmHooks,
@@ -134,6 +139,10 @@ pub struct EbpfCollector {
     normalizer: normalize::EventNormalizer,
     next_event_id: Arc<AtomicU64>,
     _polling_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Health checker for monitoring eBPF status
+    health_checker: Option<Arc<health::EbpfHealthChecker>>,
+    /// Health metrics reference
+    health_metrics: Option<Arc<health::HealthMetrics>>,
 }
 
 impl EbpfCollector {
@@ -152,7 +161,45 @@ impl EbpfCollector {
             normalizer: normalize::EventNormalizer::new(schema),
             next_event_id: Arc::new(AtomicU64::new(1)),
             _polling_handle: None,
+            health_checker: None,
+            health_metrics: None,
         }
+    }
+
+    /// Create a new collector with health checking enabled
+    pub fn new_with_health(
+        event_tx: mpsc::Sender<Event>,
+        ebpf: Ebpf,
+        health_config: health::HealthCheckConfig,
+    ) -> (Self, Arc<health::EbpfHealthChecker>) {
+        use kestrel_schema::SchemaRegistry;
+
+        // Create schema registry for normalizer
+        let schema = Arc::new(SchemaRegistry::new());
+
+        // Create health checker
+        let health_checker = Arc::new(health::EbpfHealthChecker::new(health_config));
+        let health_metrics = health_checker.metrics().clone();
+
+        let collector = Self {
+            ebpf: Arc::new(Mutex::new(ebpf)),
+            attached: AttachedPrograms::new(),
+            event_tx,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            interests: Arc::new(std::sync::RwLock::new(HashSet::new())),
+            normalizer: normalize::EventNormalizer::new(schema),
+            next_event_id: Arc::new(AtomicU64::new(1)),
+            _polling_handle: None,
+            health_checker: Some(health_checker.clone()),
+            health_metrics: Some(health_metrics),
+        };
+
+        (collector, health_checker)
+    }
+
+    /// Get health metrics if health checking is enabled
+    pub fn health_metrics(&self) -> Option<Arc<health::HealthMetrics>> {
+        self.health_metrics.clone()
     }
 
     pub async fn load(&mut self) -> Result<(), EbpfError> {
@@ -197,6 +244,7 @@ impl EbpfCollector {
         let next_event_id = self.next_event_id.clone();
         let shutdown = self.shutdown.clone();
         let interests = self.interests.clone();
+        let health_metrics = self.health_metrics.clone();
 
         let handle = tokio::task::spawn(async move {
             info!("Ring buffer polling task started");
@@ -294,6 +342,10 @@ impl EbpfCollector {
                                 match e {
                                     TrySendError::Closed(_) => {
                                         error!("EventBus channel closed, stopping polling");
+                                        // Record failure in health metrics
+                                        if let Some(ref metrics) = health_metrics {
+                                            metrics.record_failure();
+                                        }
                                         break;
                                     }
                                     TrySendError::Full(_) => {
@@ -301,6 +353,10 @@ impl EbpfCollector {
                                         warn!(
                                             "EventBus channel full, dropping event (backpressure)"
                                         );
+                                        // Record dropped event
+                                        if let Some(ref metrics) = health_metrics {
+                                            metrics.record_dropped();
+                                        }
                                     }
                                 }
                             } else {
@@ -309,6 +365,10 @@ impl EbpfCollector {
                                     pid = exec_event.pid,
                                     "Event sent to EventBus successfully"
                                 );
+                                // Record successful event
+                                if let Some(ref metrics) = health_metrics {
+                                    metrics.record_event();
+                                }
                             }
                         }
                         Err(e) => {
@@ -317,6 +377,10 @@ impl EbpfCollector {
                                 pid = exec_event.pid,
                                 "Failed to normalize execve event"
                             );
+                            // Record failure in health metrics
+                            if let Some(ref metrics) = health_metrics {
+                                metrics.record_failure();
+                            }
                         }
                     }
                 } else {
