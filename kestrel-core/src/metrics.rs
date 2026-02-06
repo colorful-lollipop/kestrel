@@ -524,11 +524,24 @@ mod tests {
     }
 }
 
+/// Pool metrics snapshot for Prometheus export
+#[derive(Debug, Clone, Default)]
+pub struct PoolMetricsSnapshot {
+    pub pool_size: usize,
+    pub active_instances: usize,
+    pub total_acquires: u64,
+    pub total_releases: u64,
+    pub pool_misses: u64,
+    pub total_wait_ns: u64,
+    pub peak_wait_ns: u64,
+}
+
 /// Unified metrics collector that aggregates metrics from all engine components
 #[derive(Debug)]
 pub struct UnifiedMetrics {
     pub engine: EngineMetrics,
     pub event_bus: Option<EventBusMetricsSnapshot>,
+    pub pool: Option<PoolMetricsSnapshot>,
 }
 
 impl UnifiedMetrics {
@@ -536,6 +549,7 @@ impl UnifiedMetrics {
         Self {
             engine: EngineMetrics::new(),
             event_bus: None,
+            pool: None,
         }
     }
 
@@ -543,11 +557,17 @@ impl UnifiedMetrics {
         Self {
             engine,
             event_bus: None,
+            pool: None,
         }
     }
 
     pub fn with_event_bus(mut self, event_bus_metrics: EventBusMetricsSnapshot) -> Self {
         self.event_bus = Some(event_bus_metrics);
+        self
+    }
+
+    pub fn with_pool(mut self, pool_metrics: PoolMetricsSnapshot) -> Self {
+        self.pool = Some(pool_metrics);
         self
     }
 
@@ -583,6 +603,49 @@ impl UnifiedMetrics {
             ));
         }
 
+        // Pool metrics if available
+        if let Some(pool) = &self.pool {
+            output.push_str("\n# Pool Metrics\n");
+            output.push_str("# HELP kestrel_pool_size Total pool size\n");
+            output.push_str("# TYPE kestrel_pool_size gauge\n");
+            output.push_str(&format!("kestrel_pool_size {}\n", pool.pool_size));
+            
+            output.push_str("# HELP kestrel_pool_active_instances Currently active instances\n");
+            output.push_str("# TYPE kestrel_pool_active_instances gauge\n");
+            output.push_str(&format!("kestrel_pool_active_instances {}\n", pool.active_instances));
+            
+            output.push_str("# HELP kestrel_pool_acquires_total Total pool acquires\n");
+            output.push_str("# TYPE kestrel_pool_acquires_total counter\n");
+            output.push_str(&format!("kestrel_pool_acquires_total {}\n", pool.total_acquires));
+            
+            output.push_str("# HELP kestrel_pool_releases_total Total pool releases\n");
+            output.push_str("# TYPE kestrel_pool_releases_total counter\n");
+            output.push_str(&format!("kestrel_pool_releases_total {}\n", pool.total_releases));
+            
+            output.push_str("# HELP kestrel_pool_misses_total Total pool misses\n");
+            output.push_str("# TYPE kestrel_pool_misses_total counter\n");
+            output.push_str(&format!("kestrel_pool_misses_total {}\n", pool.pool_misses));
+            
+            output.push_str("# HELP kestrel_pool_wait_time_total Total wait time (ns)\n");
+            output.push_str("# TYPE kestrel_pool_wait_time_total counter\n");
+            output.push_str(&format!("kestrel_pool_wait_time_total {}\n", pool.total_wait_ns));
+            
+            output.push_str("# HELP kestrel_pool_peak_wait_time Peak wait time (ns)\n");
+            output.push_str("# TYPE kestrel_pool_peak_wait_time gauge\n");
+            output.push_str(&format!("kestrel_pool_peak_wait_time {}\n", pool.peak_wait_ns));
+            
+            // Calculate hit rate
+            let total_requests = pool.total_acquires + pool.pool_misses;
+            let hit_rate = if total_requests > 0 {
+                (pool.total_acquires as f64 / total_requests as f64) * 100.0
+            } else {
+                0.0
+            };
+            output.push_str("# HELP kestrel_pool_hit_rate Pool hit rate (0-100)\n");
+            output.push_str("# TYPE kestrel_pool_hit_rate gauge\n");
+            output.push_str(&format!("kestrel_pool_hit_rate {:.2}\n", hit_rate));
+        }
+
         output
     }
 
@@ -600,6 +663,19 @@ impl UnifiedMetrics {
             });
         }
 
+        // Add pool metrics if available
+        if let Some(pool) = &self.pool {
+            result["pool"] = serde_json::json!({
+                "size": pool.pool_size,
+                "active_instances": pool.active_instances,
+                "total_acquires": pool.total_acquires,
+                "total_releases": pool.total_releases,
+                "misses": pool.pool_misses,
+                "total_wait_ns": pool.total_wait_ns,
+                "peak_wait_ns": pool.peak_wait_ns,
+            });
+        }
+
         result
     }
 
@@ -608,6 +684,7 @@ impl UnifiedMetrics {
         UnifiedMetricsSnapshot {
             engine: self.engine.snapshot(),
             event_bus: self.event_bus.clone(),
+            pool: self.pool.clone(),
         }
     }
 }
@@ -623,4 +700,64 @@ impl Default for UnifiedMetrics {
 pub struct UnifiedMetricsSnapshot {
     pub engine: MetricsSnapshot,
     pub event_bus: Option<EventBusMetricsSnapshot>,
+    pub pool: Option<PoolMetricsSnapshot>,
+}
+
+#[cfg(test)]
+mod unified_metrics_tests {
+    use super::*;
+
+    #[test]
+    fn test_pool_metrics_prometheus_export() {
+        let mut unified = UnifiedMetrics::new();
+        
+        // Add pool metrics
+        let pool = PoolMetricsSnapshot {
+            pool_size: 10,
+            active_instances: 3,
+            total_acquires: 100,
+            total_releases: 97,
+            pool_misses: 5,
+            total_wait_ns: 1_000_000,
+            peak_wait_ns: 50_000,
+        };
+        unified = unified.with_pool(pool);
+        
+        // Export to Prometheus format
+        let output = unified.export_prometheus();
+        
+        // Verify pool metrics are included
+        assert!(output.contains("kestrel_pool_size 10"));
+        assert!(output.contains("kestrel_pool_active_instances 3"));
+        assert!(output.contains("kestrel_pool_acquires_total 100"));
+        assert!(output.contains("kestrel_pool_releases_total 97"));
+        assert!(output.contains("kestrel_pool_misses_total 5"));
+        assert!(output.contains("kestrel_pool_wait_time_total 1000000"));
+        assert!(output.contains("kestrel_pool_peak_wait_time 50000"));
+        
+        // Verify hit rate calculation (100 / (100 + 5) * 100 = 95.24)
+        assert!(output.contains("kestrel_pool_hit_rate 95.24"));
+    }
+
+    #[test]
+    fn test_pool_metrics_json_export() {
+        let mut unified = UnifiedMetrics::new();
+        
+        let pool = PoolMetricsSnapshot {
+            pool_size: 10,
+            active_instances: 3,
+            total_acquires: 100,
+            total_releases: 97,
+            pool_misses: 5,
+            total_wait_ns: 1_000_000,
+            peak_wait_ns: 50_000,
+        };
+        unified = unified.with_pool(pool);
+        
+        let json = unified.export_json();
+        
+        assert_eq!(json["pool"]["size"], 10);
+        assert_eq!(json["pool"]["active_instances"], 3);
+        assert_eq!(json["pool"]["total_acquires"], 100);
+    }
 }
