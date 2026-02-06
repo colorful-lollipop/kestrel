@@ -78,7 +78,7 @@
 - 核心模块 rustdoc 完整
 - 添加 architecture.md 架构图
 - 添加贡献者指南
-**Status**: Not Started
+**Status**: ✅ Complete
 
 ---
 
@@ -90,3 +90,4 @@
 | 2 | 2026-02-06 | 2026-02-06 | SchemaRegistry 使用 DashMap 优化并发 |
 | 3 | 2026-02-06 | 2026-02-06 | 添加 eBPF HealthChecker 组件 |
 | 7 | 2026-02-06 | 2026-02-06 | 清理 kestrel-core 编译警告 |
+| 8 | 2026-02-06 | 2026-02-06 | 添加 architecture.md 架构文档 |
