@@ -4,6 +4,7 @@
 
 pub mod action;
 pub mod alert;
+pub mod config_reload;
 pub mod deterministic;
 pub mod eventbus;
 pub mod metrics;
@@ -31,7 +32,14 @@ pub use deterministic::{
     ReplayVerificationResult, VerificationMismatch,
 };
 
-pub use metrics::{EngineMetrics, MetricsSnapshot, RuleMetrics, UnifiedMetrics, UnifiedMetricsSnapshot};
+pub use config_reload::{
+    ConfigChange, ConfigManager, ConfigReloadError, ConfigSnapshot, ConfigVersion,
+};
+
+pub use metrics::{
+    EngineMetrics, MetricsSnapshot, PoolMetricsSnapshot, RuleMetrics, UnifiedMetrics,
+    UnifiedMetricsSnapshot,
+};
 
 pub use object_pool::{EventVecPool, ObjectPool, PoolManager, PoolMetrics, PooledObject};
 
