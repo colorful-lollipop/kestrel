@@ -5,7 +5,6 @@
 
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
 /// Field identifier (u32 for fast lookup)
@@ -322,40 +321,39 @@ pub struct AlertRecord {
 // ============================================================================
 
 /// Schema registry that maintains field definitions and type information
+/// 
+/// Uses DashMap for concurrent access without locking, providing better
+/// performance under high concurrency.
 #[derive(Debug)]
 pub struct SchemaRegistry {
     /// Field ID to definition mapping
-    fields: Arc<RwLock<AHashMap<FieldId, FieldDef>>>,
+    fields: dashmap::DashMap<FieldId, FieldDef>,
     /// Field path to ID mapping for fast lookups
-    field_paths: Arc<RwLock<AHashMap<String, FieldId>>>,
+    field_paths: dashmap::DashMap<String, FieldId>,
     /// Event type definitions
-    event_types: Arc<RwLock<AHashMap<EventTypeId, EventTypeDef>>>,
+    event_types: dashmap::DashMap<EventTypeId, EventTypeDef>,
     /// Event type name to ID mapping
-    event_type_names: Arc<RwLock<AHashMap<String, EventTypeId>>>,
+    event_type_names: dashmap::DashMap<String, EventTypeId>,
     /// Next available field ID
-    next_field_id: RwLock<FieldId>,
+    next_field_id: std::sync::atomic::AtomicU32,
     /// Next available event type ID
-    next_event_type_id: RwLock<EventTypeId>,
+    next_event_type_id: std::sync::atomic::AtomicU16,
 }
 
 impl Clone for SchemaRegistry {
     fn clone(&self) -> Self {
-        // Clone the data from locks, not the locks themselves
-        // If lock is poisoned, use default values
-        let fields = self.fields.read().ok().map(|g| g.clone()).unwrap_or_default();
-        let field_paths = self.field_paths.read().ok().map(|g| g.clone()).unwrap_or_default();
-        let event_types = self.event_types.read().ok().map(|g| g.clone()).unwrap_or_default();
-        let event_type_names = self.event_type_names.read().ok().map(|g| g.clone()).unwrap_or_default();
-        let next_field_id = self.next_field_id.read().ok().map(|g| *g).unwrap_or(1);
-        let next_event_type_id = self.next_event_type_id.read().ok().map(|g| *g).unwrap_or(1);
-        
+        // Clone all data from DashMaps to new ones
         Self {
-            fields: Arc::new(RwLock::new(fields)),
-            field_paths: Arc::new(RwLock::new(field_paths)),
-            event_types: Arc::new(RwLock::new(event_types)),
-            event_type_names: Arc::new(RwLock::new(event_type_names)),
-            next_field_id: RwLock::new(next_field_id),
-            next_event_type_id: RwLock::new(next_event_type_id),
+            fields: self.fields.clone(),
+            field_paths: self.field_paths.clone(),
+            event_types: self.event_types.clone(),
+            event_type_names: self.event_type_names.clone(),
+            next_field_id: std::sync::atomic::AtomicU32::new(
+                self.next_field_id.load(std::sync::atomic::Ordering::SeqCst)
+            ),
+            next_event_type_id: std::sync::atomic::AtomicU16::new(
+                self.next_event_type_id.load(std::sync::atomic::Ordering::SeqCst)
+            ),
         }
     }
 }
@@ -370,111 +368,83 @@ impl SchemaRegistry {
     /// Create a new schema registry
     pub fn new() -> Self {
         Self {
-            fields: Arc::new(RwLock::new(AHashMap::default())),
-            field_paths: Arc::new(RwLock::new(AHashMap::default())),
-            event_types: Arc::new(RwLock::new(AHashMap::default())),
-            event_type_names: Arc::new(RwLock::new(AHashMap::default())),
-            next_field_id: RwLock::new(1),
-            next_event_type_id: RwLock::new(1),
+            fields: dashmap::DashMap::new(),
+            field_paths: dashmap::DashMap::new(),
+            event_types: dashmap::DashMap::new(),
+            event_type_names: dashmap::DashMap::new(),
+            next_field_id: std::sync::atomic::AtomicU32::new(1),
+            next_event_type_id: std::sync::atomic::AtomicU16::new(1),
         }
     }
 
     /// Register a field definition and return its ID
     pub fn register_field(&self, def: FieldDef) -> Result<FieldId, SchemaError> {
-        let mut paths = self.field_paths.write().map_err(|_| {
-            SchemaError::LockError("Field paths lock poisoned".to_string())
-        })?;
-        
-        if paths.contains_key(&def.path) {
+        // Check if field already exists
+        if self.field_paths.contains_key(&def.path) {
             return Err(SchemaError::FieldAlreadyExists(def.path));
         }
 
-        let mut next_id = self.next_field_id.write().map_err(|_| {
-            SchemaError::LockError("Next field ID lock poisoned".to_string())
-        })?;
-        let id = *next_id;
-        *next_id += 1;
-        drop(next_id);
+        // Get next ID atomically
+        let id = self.next_field_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        paths.insert(def.path.clone(), id);
-        drop(paths);
-
-        let mut fields = self.fields.write().map_err(|_| {
-            SchemaError::LockError("Fields lock poisoned".to_string())
-        })?;
-        fields.insert(id, def);
+        // Insert into both maps
+        self.field_paths.insert(def.path.clone(), id);
+        self.fields.insert(id, def);
 
         Ok(id)
     }
 
     /// Register an event type definition
     pub fn register_event_type(&self, def: EventTypeDef) -> Result<EventTypeId, SchemaError> {
-        let mut names = self.event_type_names.write().map_err(|_| {
-            SchemaError::LockError("Event type names lock poisoned".to_string())
-        })?;
-        
-        if names.contains_key(&def.name) {
+        // Check if event type already exists
+        if self.event_type_names.contains_key(&def.name) {
             return Err(SchemaError::EventTypeAlreadyExists(def.name));
         }
 
-        let mut next_id = self.next_event_type_id.write().map_err(|_| {
-            SchemaError::LockError("Next event type ID lock poisoned".to_string())
-        })?;
-        let id = *next_id;
-        *next_id += 1;
-        drop(next_id);
+        // Get next ID atomically
+        let id = self.next_event_type_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        names.insert(def.name.clone(), id);
-        drop(names);
-
-        let mut types = self.event_types.write().map_err(|_| {
-            SchemaError::LockError("Event types lock poisoned".to_string())
-        })?;
-        types.insert(id, def);
+        // Insert into both maps
+        self.event_type_names.insert(def.name.clone(), id);
+        self.event_types.insert(id, def);
 
         Ok(id)
     }
 
     /// Get event type ID by name
     pub fn get_event_type_id(&self, name: &str) -> Option<EventTypeId> {
-        self.event_type_names.read().ok()?.get(name).copied()
+        self.event_type_names.get(name).map(|v| *v.value())
     }
 
     /// Get field definition by ID
     pub fn get_field(&self, id: FieldId) -> Option<FieldDef> {
-        self.fields.read().ok()?.get(&id).cloned()
+        self.fields.get(&id).map(|v| v.value().clone())
     }
 
     /// Get field ID by path
     pub fn get_field_id(&self, path: &str) -> Option<FieldId> {
-        self.field_paths.read().ok()?.get(path).copied()
+        self.field_paths.get(path).map(|v| *v.value())
     }
 
     /// Get event type definition by ID
     pub fn get_event_type(&self, id: EventTypeId) -> Option<EventTypeDef> {
-        self.event_types.read().ok()?.get(&id).cloned()
+        self.event_types.get(&id).map(|v| v.value().clone())
     }
 
     /// List all registered fields
     pub fn list_fields(&self) -> Vec<(FieldId, FieldDef)> {
         self.fields
-            .read()
-            .ok()
-            .map(|fields| {
-                fields.iter().map(|(id, def)| (*id, def.clone())).collect()
-            })
-            .unwrap_or_default()
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect()
     }
 
     /// List all registered event types
     pub fn list_event_types(&self) -> Vec<(EventTypeId, EventTypeDef)> {
         self.event_types
-            .read()
-            .ok()
-            .map(|types| {
-                types.iter().map(|(id, def)| (*id, def.clone())).collect()
-            })
-            .unwrap_or_default()
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect()
     }
 }
 

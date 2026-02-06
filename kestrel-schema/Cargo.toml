@@ -10,3 +10,4 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 ahash = { workspace = true, features = ["serde"] }
 smallvec = { workspace = true }
+dashmap = { workspace = true }

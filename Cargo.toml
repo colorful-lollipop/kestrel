@@ -55,6 +55,7 @@ smallvec = "1.13"
 ahash = "0.8"
 regex = "1.11"
 glob = "0.3"
+dashmap = "6.0"
 
 # Benchmarking
 criterion = "0.5"
