@@ -297,10 +297,21 @@ impl EventBus {
         }
     }
 
-    /// Create a new event bus (legacy constructor, does not connect to downstream)
-    #[deprecated(note = "Use new_with_sink() to connect to a downstream consumer")]
+    /// Create a new event bus with a default consumer that counts processed events
+    /// 
+    /// This is useful for testing and simple use cases where you don't need a custom sink.
+    /// For production use, prefer `new_with_sink()` to connect to a downstream consumer.
     pub fn new(config: EventBusConfig) -> Self {
-        let (sink_tx, _sink_rx) = mpsc::channel(1);
+        let (sink_tx, mut sink_rx) = mpsc::channel(1);
+        
+        // Spawn a background consumer that simply receives and drops events
+        // This ensures events_processed metrics are correctly updated
+        tokio::spawn(async move {
+            while sink_rx.recv().await.is_some() {
+                // Events are consumed and dropped, metrics already updated by worker_partition
+            }
+        });
+        
         Self::new_with_sink(config, sink_tx)
     }
 
