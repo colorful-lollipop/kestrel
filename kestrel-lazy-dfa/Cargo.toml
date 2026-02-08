@@ -16,7 +16,7 @@ serde = { workspace = true }
 parking_lot = "0.12"
 
 # LRU cache
-lru = "0.12"
+lru = "0.16"
 
 # Internal dependencies
 kestrel-nfa = { path = "../kestrel-nfa" }
