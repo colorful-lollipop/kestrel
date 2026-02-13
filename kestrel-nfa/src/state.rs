@@ -187,7 +187,7 @@ impl PartialMatch {
     /// Uses the first event's timestamp (started_at) for accurate maxspan calculation
     pub fn is_expired(&self, now_ns: u64, maxspan_ms: Option<u64>) -> bool {
         if let Some(maxspan) = maxspan_ms {
-            let maxspan_ns = maxspan * 1_000_000; // Convert ms to ns
+            let maxspan_ns = maxspan.saturating_mul(1_000_000); // Convert ms to ns
             let elapsed = now_ns.saturating_sub(self.started_at);
             elapsed > maxspan_ns
         } else {

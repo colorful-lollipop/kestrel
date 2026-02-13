@@ -10,9 +10,10 @@ This file provides guidance for AI coding agents working with the Kestrel projec
 
 - **Language**: Rust (Edition 2021, MSRV 1.82)
 - **Platform**: Linux kernel 5.10+ (eBPF support required)
-- **Architecture**: Modular workspace with 18 crates
+- **Architecture**: Modular workspace with 16 crates
 - **License**: Apache-2.0
-- **Status**: Production-ready (v1.0.0)
+- **Version**: 0.1.0
+- **Status**: Active development (production-ready features)
 
 ### Target Use Cases
 
@@ -23,24 +24,24 @@ This file provides guidance for AI coding agents working with the Kestrel projec
 
 ## Workspace Structure
 
-The project is organized as a Cargo workspace with the following crates:
+The project is organized as a Cargo workspace defined in the root `Cargo.toml`. Here are all workspace members:
 
 ### Core Crates (Foundation Layer)
 
 | Crate | Description | Dependencies |
 |-------|-------------|--------------|
-| `kestrel-schema` | Type system, FieldId mapping, SchemaRegistry | None (foundation) |
+| `kestrel-schema` | Type system, FieldId mapping, SchemaRegistry, RuleMetadata, TypedValue | None (foundation) |
 | `kestrel-event` | Sparse event structure with dual timestamps | schema |
-| `kestrel-core` | EventBus, Alert, Action, Time/Replay | schema, event |
+| `kestrel-core` | EventBus, Alert, Action, Time/Replay, ReplaySource, deterministic verification | schema, event |
 
 ### Engine Crates (Processing Layer)
 
 | Crate | Description | Dependencies |
 |-------|-------------|--------------|
-| `kestrel-rules` | Rule loading/management (JSON/YAML/EQL) | schema, event |
-| `kestrel-engine` | Detection engine core, rule evaluation | core, rules, nfa |
-| `kestrel-nfa` | NFA sequence engine with state management | schema, event |
-| `kestrel-hybrid-engine` | Hybrid DFA/NFA engine | nfa, lazy-dfa |
+| `kestrel-rules` | Rule loading/management (JSON/YAML/EQL), RuleManager | schema, event |
+| `kestrel-engine` | Detection engine core, rule evaluation, DetectionEngine | core, rules, nfa |
+| `kestrel-nfa` | NFA sequence engine with state management, NfaEngine | schema, event |
+| `kestrel-hybrid-engine` | Hybrid DFA/NFA engine with analyzer | nfa, lazy-dfa |
 
 ### Runtime Crates (Execution Layer)
 
@@ -54,7 +55,7 @@ The project is organized as a Cargo workspace with the following crates:
 
 | Crate | Description | Dependencies |
 |-------|-------------|--------------|
-| `kestrel-ebpf` | eBPF programs, LSM hooks, RingBuf | core |
+| `kestrel-ebpf` | eBPF programs, LSM hooks, RingBuf polling | core |
 | `kestrel-ffi` | Foreign Function Interface bindings | engine |
 
 ### Tooling Crates
@@ -69,7 +70,7 @@ The project is organized as a Cargo workspace with the following crates:
 | Crate | Description |
 |-------|-------------|
 | `kestrel-ac-dfa` | Aho-Corasick DFA implementation |
-| `kestrel-lazy-dfa` | Lazy DFA construction |
+| `kestrel-lazy-dfa` | Lazy DFA construction with caching |
 
 ### Dependency Graph
 
@@ -145,6 +146,8 @@ cargo test -p kestrel-nfa
 
 ### Integration Tests
 
+Integration tests are located in `tests/` directories within each crate:
+
 ```bash
 # E2E tests
 cargo test --workspace --test '*e2e*'
@@ -153,6 +156,9 @@ cargo test --workspace --test '*e2e*'
 # - kestrel-engine/tests/detection_scenarios.rs
 # - kestrel-engine/tests/integration_e2e.rs
 # - kestrel-hybrid-engine/tests/comprehensive_e2e.rs
+# - kestrel-hybrid-engine/tests/e2e_test.rs
+# - kestrel-hybrid-engine/tests/e2e_real_world_scenarios.rs
+# - kestrel-core/tests/* (deterministic, replay tests)
 ```
 
 ### Code Coverage
@@ -223,20 +229,30 @@ cargo run --bin kestrel -- list --rules ./rules
 
 ### Rustfmt Configuration (rustfmt.toml)
 
+Key settings from `rustfmt.toml`:
+
 - **Edition**: 2021
 - **Max width**: 100 characters
 - **Tab spaces**: 4 (spaces, not tabs)
-- **Newline**: Unix style
-- **Imports**: Grouped (StdExternalCrate), reordered
-- **Comments**: Wrapped at 100 chars, normalized
+- **Newline**: Unix style (`newline_style = "Unix"`)
+- **Imports**: Grouped (`group_imports = "StdExternalCrate"`), reordered
+- **Comments**: Wrapped at 100 chars (`wrap_comments = true`, `comment_width = 100`)
+- **Format strings**: Enabled (`format_strings = true`)
+- **Normalize comments**: Enabled (`normalize_comments = true`)
+- **Trailing comma**: Vertical style (`trailing_comma = "Vertical"`)
+- **Use field init shorthand**: Enabled
+- **Use try shorthand**: Enabled
 
 ### Clippy Configuration (clippy.toml)
+
+Key settings from `clippy.toml`:
 
 - **Cognitive complexity threshold**: 30
 - **Too many arguments threshold**: 7
 - **Type complexity threshold**: 250
 - **Enum variant size threshold**: 200
-- **Wildcard imports**: Warn on all
+- **Wildcard imports**: Warn on all (`warn-on-all-wildcard-imports = true`)
+- **Allow in tests**: `allow-expect-in-tests = true`, `allow-unwrap-in-tests = true`, `allow-dbg-in-tests = true`
 
 ### Coding Standards
 
@@ -309,6 +325,12 @@ Example rules are located in:
 - `rules/wasm_example_rule/` - Wasm-based rule example
 - `rules/lua_example_rule/` - Lua-based rule example
 - `rules/example_rule.json` - JSON rule example
+- `rules/credential_access/` - Credential access detection rules
+- `rules/data_exfiltration/` - Data exfiltration detection rules
+- `rules/lateral_movement/` - Lateral movement detection rules
+- `rules/privilege_escalation/` - Privilege escalation detection rules
+- `rules/ransomware_detection/` - Ransomware detection rules
+- `rules/reverse_shell_detection/` - Reverse shell detection rules
 
 ## Key Design Principles
 
@@ -316,7 +338,7 @@ Example rules are located in:
 
 2. **Sparse Events**: Events only store non-null fields using `SmallVec` for inline optimization (8-element inline storage).
 
-3. **Dual Timestamps**: Events carry both monotonic (for ordering/windows) and wall-clock timestamps (for forensics).
+3. **Dual Timestamps**: Events carry both monotonic (`ts_mono_ns`, for ordering/windows) and wall-clock timestamps (`ts_wall_ns`, for forensics).
 
 4. **Three Execution Modes**:
    - `Inline`: Real-time blocking with strict budget
@@ -324,6 +346,8 @@ Example rules are located in:
    - `Offline`: Forensic analysis with deterministic results
 
 5. **Entity Grouping**: Events are grouped by `EntityKey` (u128) for sequence detection across related events.
+
+6. **Unified Types**: Common types like `Severity`, `RuleMetadata`, `RuleCapabilities`, `RuntimeType`, `EvalResult`, `AlertRecord`, `TypedValue` are defined in `kestrel-schema` and shared across all crates.
 
 ## Security Considerations
 
@@ -367,7 +391,7 @@ The project follows a phased development approach:
 | 5 | ✅ Complete | eBPF collection layer |
 | 6 | ✅ Complete | Real-time blocking (LSM hooks) |
 | 7 | ✅ Complete | Offline replay with reproducibility |
-| Refactor | ✅ Complete | Code redundancy elimination and architecture unification (2026-02-03) |
+| Refactor | ✅ Complete | Code redundancy elimination and architecture unification |
 
 ## Common Patterns
 
@@ -418,23 +442,33 @@ let stats = manager.load_all().await?;
 - **API docs**: [docs/api.md](./docs/api.md)
 - **Contributing**: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - **Security**: [SECURITY.md](./SECURITY.md)
+- **Architecture refactor**: [ARCH_REFACTOR_SUMMARY.md](./ARCH_REFACTOR_SUMMARY.md)
+- **Refactor summary**: [REFACTOR_SUMMARY.md](./REFACTOR_SUMMARY.md)
 
 ## External Dependencies
 
-Key external crates used:
+Key external crates used (defined in workspace root `Cargo.toml`):
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | tokio | 1.42 | Async runtime |
 | serde | 1.0 | Serialization |
+| serde_json | 1.0 | JSON serialization |
 | wasmtime | 26.0 | Wasm runtime |
 | mlua | 0.10 | Lua runtime (LuaJIT) |
 | aya | 0.13 | eBPF framework |
 | smallvec | 1.13 | Inline storage |
 | ahash | 0.8 | Fast hashing |
+| dashmap | 6.0 | Concurrent hashmap |
+| regex | 1.11 | Regex matching |
 | thiserror | 2.0 | Error definitions |
+| anyhow | 1.0 | Application errors |
 | tracing | 0.1 | Logging |
+| tracing-subscriber | 0.3 | Log formatting |
 | clap | 4.5 | CLI parsing |
+| criterion | 0.5 | Benchmarking |
+| rand | 0.8 | Random generation |
+| tempfile | 3.13 | Test temp files |
 
 ## CI/CD
 
@@ -455,11 +489,37 @@ All PRs must pass:
 
 ## Project Statistics
 
-- **Total Rust files**: ~146
+- **Total Rust source files**: ~70 (in src/ directories, excluding tests and target)
 - **Total eBPF C files**: 2
 - **Lines of code**: ~20,000+ (including tests and documentation)
-- **Test coverage**: ~99% (63/64 tests passing)
+- **Test coverage**: ~99% (most tests passing)
 
 ## Language
 
-Project documentation and comments are primarily in **English**, with some Chinese documentation in README_CN.md for local users.
+Project documentation and comments are primarily in **English**, with Chinese documentation in README.md and README_CN.md for local users. Code comments should be in English.
+
+## Commit Message Convention
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`
+
+Example:
+```
+feat(nfa): Add support for EQL sequence rules
+
+Implemented NFA engine for detecting event sequences with:
+- maxspan support for time windows
+- until clause for termination conditions
+- by clause for entity grouping
+
+Closes #123
+```
