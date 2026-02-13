@@ -17,10 +17,10 @@ kestrel-lazy-dfa = { path = "../kestrel-lazy-dfa" }
 kestrel-hybrid-engine = { path = "../kestrel-hybrid-engine" }
 kestrel-eql = { path = "../kestrel-eql" }
 
-criterion = "0.5"
+criterion = "0.8"
 tokio = { version = "1.42", features = ["full"] }
 futures = "0.3"
-rand = "0.8"
+rand = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"

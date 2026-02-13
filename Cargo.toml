@@ -58,15 +58,15 @@ glob = "0.3"
 dashmap = "6.0"
 
 # Benchmarking
-criterion = "0.5"
-rand = "0.8"
+criterion = "0.8"
+rand = "0.10"
 wat = "1.0"
 
 # Wasm runtime
-wasmtime = "26.0"
+wasmtime = "41.0"
 
 # Lua runtime (use vendored LuaJIT to avoid system dependencies)
-mlua = { version = "0.10", features = ["luajit", "vendored", "send"] }
+mlua = { version = "0.11", features = ["luajit", "vendored", "send"] }
 
 # eBPF (for later phases)
 aya = { version = "0.13", default-features = false }
