@@ -13,6 +13,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+async-trait = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }
 kestrel-schema = { path = "../kestrel-schema" }
@@ -21,3 +22,5 @@ kestrel-nfa = { path = "../kestrel-nfa" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+wat = { workspace = true }
+kestrel-eql = { path = "../kestrel-eql" }

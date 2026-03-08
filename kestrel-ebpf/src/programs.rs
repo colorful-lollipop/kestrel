@@ -3,8 +3,8 @@
 //! This module contains the eBPF program implementations.
 
 use crate::EbpfError;
-use aya::programs::Lsm;
 use aya::Ebpf;
+use aya::programs::Lsm;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
@@ -14,6 +14,12 @@ pub struct AttachedPrograms {
     pub lsm_file_open: Option<Lsm>,
     pub lsm_socket_connect: Option<Lsm>,
     pub lsm_inode_permission: Option<Lsm>,
+}
+
+impl Default for AttachedPrograms {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AttachedPrograms {

@@ -11,7 +11,7 @@ use kestrel_ebpf::{EbpfEventType, RawEbpfEvent};
 use kestrel_event::Event;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 /// Helper to create a test event bus
 async fn create_test_event_bus() -> (EventBus, mpsc::Receiver<Vec<Event>>) {
@@ -113,7 +113,7 @@ mod end_to_end_tests {
 
     #[tokio::test]
     async fn test_event_bus_integration() {
-        let (_bus, mut rx) = create_test_event_bus().await;
+        let (_bus, _rx) = create_test_event_bus().await;
 
         // Send a test event
         let event = Event::builder()

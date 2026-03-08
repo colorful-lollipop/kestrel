@@ -6,10 +6,10 @@
 //! - Memory allocation patterns
 //! - Multi-threaded scalability
 
-use std::time::Instant;
 use kestrel_ebpf::{EbpfEventType, InterestPushdown, RawEbpfEvent};
 use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Helper to create mock raw event
 fn create_mock_raw_event(event_type: u32, pid: u32, ts: u64) -> RawEbpfEvent {
@@ -176,10 +176,7 @@ mod pushdown_benchmarks {
     #[test]
     fn benchmark_is_event_type_interesting() {
         let pushdown = InterestPushdown::new();
-        pushdown.update_event_types(vec![
-            EbpfEventType::ProcessExec,
-            EbpfEventType::ProcessExit,
-        ]);
+        pushdown.update_event_types(vec![EbpfEventType::ProcessExec, EbpfEventType::ProcessExit]);
 
         let start = Instant::now();
         let iterations = 1_000_000;

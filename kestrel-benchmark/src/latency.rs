@@ -14,7 +14,7 @@ pub fn run_latency_benchmarks() {
 
     let config = EngineConfig::default();
 
-    let mut engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
+    let engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
 
     let event = create_single_test_event();
 
@@ -25,10 +25,7 @@ pub fn run_latency_benchmarks() {
         });
     }
 
-    println!(
-        "  Measuring latency distribution ({} samples)...\n",
-        LATENCY_SAMPLE_COUNT
-    );
+    println!("  Measuring latency distribution ({} samples)...\n", LATENCY_SAMPLE_COUNT);
 
     let mut latencies = Vec::with_capacity(LATENCY_SAMPLE_COUNT);
 
@@ -46,10 +43,7 @@ pub fn run_latency_benchmarks() {
     println!("    P50: {}", format_duration(p50));
     println!("    P90: {}", format_duration(p90));
     println!("    P99: {}", format_duration(p99));
-    println!(
-        "    Max: {}",
-        format_duration(*latencies.iter().max().unwrap())
-    );
+    println!("    Max: {}", format_duration(*latencies.iter().max().unwrap()));
 
     let sum: Duration = latencies.iter().sum();
     let avg = sum / latencies.len() as u32;
@@ -66,8 +60,9 @@ pub fn run_nfa_latency_benchmarks() {
 
     struct NoOpPredicateEvaluator;
 
-    impl PredicateEvaluator for NoOpPredicateEvaluator {
-        fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
+    #[async_trait::async_trait]
+impl PredicateEvaluator for NoOpPredicateEvaluator {
+        async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
             Ok(true)
         }
 
@@ -108,7 +103,7 @@ pub fn run_nfa_latency_benchmarks() {
         rule_name: "Test Rule".to_string(),
     };
 
-    nfa_engine.load_sequence(sequence);
+    let _ = nfa_engine.load_sequence(sequence);
 
     let entity_key = 0x123456789abcdefu128;
 
@@ -151,7 +146,7 @@ pub fn run_nfa_latency_benchmarks() {
 
     println!("  Warming up...");
     for event in &events[..100] {
-        let _ = nfa_engine.process_event(event);
+        let _ = nfa_engine.process_event_blocking(event);
     }
 
     let mut latencies = Vec::with_capacity(2000);
@@ -159,7 +154,7 @@ pub fn run_nfa_latency_benchmarks() {
     println!("  Measuring NFA processing latency (2000 events)...");
     for event in &events[100..1200] {
         let start = std::time::Instant::now();
-        let _ = nfa_engine.process_event(event);
+        let _ = nfa_engine.process_event_blocking(event);
         latencies.push(start.elapsed());
     }
 

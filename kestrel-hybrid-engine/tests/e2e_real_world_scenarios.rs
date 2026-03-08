@@ -2,21 +2,15 @@
 //!
 //! 测试真实场景的事件检测，验证Kestrel引擎能否正确识别威胁
 
-use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig, RuleStrategy};
-use kestrel_nfa::{
-    CompiledSequence, NfaEngineConfig, NfaSequence, PredicateEvaluator, SeqStep,
-};
+use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
+use kestrel_nfa::{CompiledSequence, NfaSequence, PredicateEvaluator, SeqStep};
 use std::sync::Arc;
 use std::time::Instant;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 /// 包含在examples中的事件模拟器
 mod event_simulator {
     use kestrel_event::{Event, EventBuilder};
     use kestrel_schema::TypedValue;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
 
     pub struct EventSimulator {
         next_event_id: u64,
@@ -94,7 +88,7 @@ mod event_simulator {
                 .unwrap()
         }
 
-        pub fn network_connect(&mut self, pid: u32, dest_ip: &str, dest_port: u16) -> Event {
+        pub fn network_connect(&mut self, pid: u32, dest_ip: &str, _dest_port: u16) -> Event {
             EventBuilder::default()
                 .event_id(self.next_id())
                 .event_type(6)
@@ -110,31 +104,29 @@ mod event_simulator {
         // 场景1: 可疑PowerShell执行
         pub fn scenario_powershell_suspicious(&mut self) -> Vec<Event> {
             self.start_scenario(1234); // 设置场景entity_key
-            let mut events = Vec::new();
-            events.push(self.process_start(1234, 100, "powershell.exe", "ps -c xyz"));
-            events.push(self.file_create(1234, "/tmp/script.ps1"));
-            events.push(self.file_modify(1234, "/tmp/script.ps1"));
-            events.push(self.network_connect(1234, "192.168.1.100", 4444));
-            events
+            vec![
+                self.process_start(1234, 100, "powershell.exe", "ps -c xyz"),
+                self.file_create(1234, "/tmp/script.ps1"),
+                self.file_modify(1234, "/tmp/script.ps1"),
+                self.network_connect(1234, "192.168.1.100", 4444),
+            ]
         }
 
         // 场景2: 文件篡改
         pub fn scenario_file_tampering(&mut self) -> Vec<Event> {
             self.start_scenario(5678); // 设置场景entity_key
-            let mut events = Vec::new();
-            events.push(self.process_start(5678, 100, "vim", "vim /etc/passwd"));
-            events.push(self.file_create(5678, "/etc/passwd"));
-            events.push(self.file_modify(5678, "/etc/passwd"));
-            events.push(self.file_modify(5678, "/etc/passwd"));
-            events
+            vec![
+                self.process_start(5678, 100, "vim", "vim /etc/passwd"),
+                self.file_create(5678, "/etc/passwd"),
+                self.file_modify(5678, "/etc/passwd"),
+                self.file_modify(5678, "/etc/passwd"),
+            ]
         }
 
         // 场景3: 正常进程（不应告警）
         pub fn scenario_normal(&mut self) -> Vec<Event> {
             self.start_scenario(9999); // 设置场景entity_key
-            let mut events = Vec::new();
-            events.push(self.process_start(9999, 100, "bash", "bash"));
-            events
+            vec![self.process_start(9999, 100, "bash", "bash")]
         }
     }
 
@@ -148,8 +140,13 @@ mod event_simulator {
 /// Mock evaluator for testing
 struct MockEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -170,7 +167,11 @@ fn create_test_engine() -> HybridEngine {
 }
 
 /// 创建简单的测试序列
-fn create_test_sequence(id: &str, steps: Vec<(u16, &str)>, maxspan: Option<u64>) -> CompiledSequence {
+fn create_test_sequence(
+    id: &str,
+    steps: Vec<(u16, &str)>,
+    maxspan: Option<u64>,
+) -> CompiledSequence {
     let seq_steps: Vec<_> = steps
         .iter()
         .enumerate()
@@ -203,11 +204,7 @@ fn test_scenario_powershell_suspicious() {
     let mut simulator = event_simulator::EventSimulator::new();
 
     // 创建规则：单步 - 检测任何进程启动
-    let simple_sequence = create_test_sequence(
-        "process-start",
-        vec![(1, "p1")],
-        None,
-    );
+    let simple_sequence = create_test_sequence("process-start", vec![(1, "p1")], None);
 
     engine.load_sequence(simple_sequence).unwrap();
     // engine.build_ac_matcher().unwrap(); // Optional for NFA-based testing
@@ -230,7 +227,7 @@ fn test_scenario_powershell_suspicious() {
         println!("Alert {}: rule={}, sequence={}", i, alert.rule_id, alert.sequence_id);
     }
 
-    assert!(all_alerts.len() >= 1, "Expected at least 1 alert, got {}", all_alerts.len());
+    assert!(!all_alerts.is_empty(), "Expected at least 1 alert, got {}", all_alerts.len());
 
     let alert = &all_alerts[0];
     assert_eq!(alert.rule_id, "process-start");
@@ -361,12 +358,7 @@ fn test_multiple_scenarios_mixed() {
     }
 
     // 验证：应该有2个告警（1个PowerShell + 1个文件篡改）
-    assert_eq!(
-        all_alerts.len(),
-        2,
-        "Expected 2 alerts, got {}",
-        all_alerts.len()
-    );
+    assert_eq!(all_alerts.len(), 2, "Expected 2 alerts, got {}", all_alerts.len());
 
     // 验证告警类型
     let rule_ids: Vec<_> = all_alerts.iter().map(|a| a.rule_id.as_str()).collect();

@@ -2,6 +2,8 @@
 //!
 //! Tests the complete detection pipeline with real event streams
 
+#![allow(clippy::useless_vec)]
+
 use kestrel_event::Event;
 use kestrel_nfa::{
     CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, PredicateEvaluator, SeqStep,
@@ -12,8 +14,9 @@ use std::sync::Arc;
 // Simple predicate evaluator that matches everything
 struct TestPredicateEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
         Ok(true) // Match everything for this test
     }
 
@@ -33,7 +36,7 @@ impl PredicateEvaluator for TestPredicateEvaluator {
 #[tokio::test]
 async fn test_e2e_linux_privilege_escalation() {
     // Setup schema with real fields
-    let mut schema = SchemaRegistry::new();
+    let schema = SchemaRegistry::new();
 
     let pid_field = schema
         .register_field(FieldDef {
@@ -59,7 +62,7 @@ async fn test_e2e_linux_privilege_escalation() {
         })
         .unwrap();
 
-    let schema = Arc::new(schema);
+    let _schema = Arc::new(schema);
 
     // Create NFA engine with test evaluator
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
@@ -110,7 +113,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts1 = nfa.process_event(&event1).unwrap();
+    let alerts1 = nfa.process_event_blocking(&event1).unwrap();
     println!("Event 1: sudo execution (PID 54321)");
     println!("  Timestamp: {} ns", event1.ts_mono_ns);
     println!("  Process: sudo");
@@ -133,7 +136,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts2 = nfa.process_event(&event2).unwrap();
+    let alerts2 = nfa.process_event_blocking(&event2).unwrap();
     println!("Event 2: chmod execution (PID 54321, +1s)");
     println!("  Timestamp: {} ns", event2.ts_mono_ns);
     println!("  Process: chmod");
@@ -156,7 +159,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts3 = nfa.process_event(&event3).unwrap();
+    let alerts3 = nfa.process_event_blocking(&event3).unwrap();
     println!("Event 3: /etc/shadow access (PID 54321, +4s)");
     println!("  Timestamp: {} ns", event3.ts_mono_ns);
     println!("  File: /etc/shadow");
@@ -206,7 +209,7 @@ async fn test_e2e_linux_privilege_escalation() {
 
 #[tokio::test]
 async fn test_e2e_ransomware_detection() {
-    let mut schema = SchemaRegistry::new();
+    let schema = SchemaRegistry::new();
 
     let pid_field = schema
         .register_field(FieldDef {
@@ -232,7 +235,7 @@ async fn test_e2e_ransomware_detection() {
         })
         .unwrap();
 
-    let schema = Arc::new(schema);
+    let _schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -326,13 +329,8 @@ async fn test_e2e_ransomware_detection() {
     // Process attack sequence
     let mut final_alerts = Vec::new();
     for (i, event) in events.iter().enumerate() {
-        let alerts = nfa.process_event(event).unwrap();
-        println!(
-            "Event {}: type={}, alerts={}",
-            i + 1,
-            event.event_type_id,
-            alerts.len()
-        );
+        let alerts = nfa.process_event_blocking(event).unwrap();
+        println!("Event {}: type={}, alerts={}", i + 1, event.event_type_id, alerts.len());
 
         if !alerts.is_empty() {
             final_alerts = alerts;
@@ -362,7 +360,7 @@ async fn test_e2e_ransomware_detection() {
 
 #[tokio::test]
 async fn test_e2e_entity_isolation() {
-    let mut schema = SchemaRegistry::new();
+    let schema = SchemaRegistry::new();
 
     let pid_field = schema
         .register_field(FieldDef {
@@ -380,7 +378,7 @@ async fn test_e2e_entity_isolation() {
         })
         .unwrap();
 
-    let schema = Arc::new(schema);
+    let _schema = Arc::new(schema);
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -419,14 +417,11 @@ async fn test_e2e_entity_isolation() {
         .ts_wall(base_time_ns)
         .entity_key(11111)
         .field(pid_field, kestrel_schema::TypedValue::U64(11111))
-        .field(
-            name_field,
-            kestrel_schema::TypedValue::String("sudo".to_string()),
-        )
+        .field(name_field, kestrel_schema::TypedValue::String("sudo".to_string()))
         .build()
         .unwrap();
 
-    nfa.process_event(&event1).unwrap();
+    nfa.process_event_blocking(&event1).unwrap();
     println!("✓ Event 1: sudo (PID 11111)");
 
     // Process 2: chmod (PID 22222 - DIFFERENT ENTITY)
@@ -437,14 +432,11 @@ async fn test_e2e_entity_isolation() {
         .ts_wall(base_time_ns + 1_000_000_000)
         .entity_key(22222)
         .field(pid_field, kestrel_schema::TypedValue::U64(22222))
-        .field(
-            name_field,
-            kestrel_schema::TypedValue::String("chmod".to_string()),
-        )
+        .field(name_field, kestrel_schema::TypedValue::String("chmod".to_string()))
         .build()
         .unwrap();
 
-    nfa.process_event(&event2).unwrap();
+    nfa.process_event_blocking(&event2).unwrap();
     println!("✓ Event 2: chmod (PID 22222)");
 
     // Process 2: /etc/shadow access (PID 22222)
@@ -458,15 +450,11 @@ async fn test_e2e_entity_isolation() {
         .build()
         .unwrap();
 
-    let alerts = nfa.process_event(&event3).unwrap();
+    let alerts = nfa.process_event_blocking(&event3).unwrap();
     println!("✓ Event 3: /etc/shadow (PID 22222)");
 
     // Should NOT alert because events are from different entities
-    assert_eq!(
-        alerts.len(),
-        0,
-        "Should NOT alert - events from different PIDs"
-    );
+    assert_eq!(alerts.len(), 0, "Should NOT alert - events from different PIDs");
 
     println!("\n  ✅ No false positive - correctly isolated by entity");
     println!("\n{}", "=".repeat(60));

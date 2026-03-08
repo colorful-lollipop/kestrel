@@ -5,7 +5,7 @@ use kestrel_schema::SchemaRegistry;
 use std::sync::Arc;
 
 fn create_test_compiler() -> EqlCompiler {
-    let mut schema = SchemaRegistry::new();
+    let schema = SchemaRegistry::new();
     // Register common event types for testing
     schema
         .register_event_type(kestrel_schema::EventTypeDef {
@@ -44,7 +44,7 @@ fn test_parse_simple_event_query() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "process");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -62,7 +62,7 @@ fn test_parse_event_with_string_condition() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "process");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -84,7 +84,7 @@ fn test_parse_sequence_query() {
             assert_eq!(sq.steps[0].event_type, "process");
             assert_eq!(sq.steps[1].event_type, "file");
             assert!(sq.by.is_some());
-        }
+        },
         _ => panic!("Expected sequence query"),
     }
 }
@@ -104,7 +104,7 @@ fn test_parse_sequence_with_maxspan() {
             assert!(sq.maxspan.is_some());
             let maxspan = sq.maxspan.unwrap();
             assert_eq!(maxspan.value, 5);
-        }
+        },
         _ => panic!("Expected sequence query"),
     }
 }
@@ -124,7 +124,7 @@ fn test_parse_sequence_with_until() {
         kestrel_eql::ast::Query::Sequence(sq) => {
             assert_eq!(sq.steps.len(), 2);
             assert!(sq.until.is_some());
-        }
+        },
         _ => panic!("Expected sequence query"),
     }
 }
@@ -142,7 +142,7 @@ fn test_parse_with_wildcard_function() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "file");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -161,7 +161,7 @@ fn test_parse_with_in_expression() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "process");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -190,7 +190,7 @@ fn test_parse_with_not_operator() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "process");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -208,13 +208,13 @@ fn test_compile_to_wasm_simple() {
             assert!(wat.contains("pred_init"));
             assert!(wat.contains("pred_eval"));
             assert!(wat.contains("event_get_i64"));
-        }
+        },
         Err(kestrel_eql::EqlError::UnknownField { .. }) => {
             // Expected - schema not set up, this is valid behavior
-        }
+        },
         Err(e) => {
             panic!("Unexpected error: {:?}", e);
-        }
+        },
     }
 }
 
@@ -242,16 +242,18 @@ fn test_missing_by_clause() {
             match query {
                 kestrel_eql::ast::Query::Sequence(sq) => {
                     // Sequence without 'by' clause should have None for by field
-                    assert!(sq.by.is_none() || sq.by.as_ref().map(|s| s.is_empty()).unwrap_or(false),
-                        "Sequence without 'by' clause should have empty or no join field");
-                }
+                    assert!(
+                        sq.by.is_none() || sq.by.as_ref().map(|s| s.is_empty()).unwrap_or(false),
+                        "Sequence without 'by' clause should have empty or no join field"
+                    );
+                },
                 _ => panic!("Expected sequence query"),
             }
-        }
+        },
         Err(_) => {
             // Parser rejected the query - this is also valid behavior
             // The important thing is we don't panic
-        }
+        },
     }
 }
 
@@ -274,12 +276,7 @@ fn test_comparison_operators() {
     for op in operators {
         let query = format!("process where process.pid {} 1000", op);
         let result = compiler.parse(&query);
-        assert!(
-            result.is_ok(),
-            "Failed to parse operator {}: {:?}",
-            op,
-            result.err()
-        );
+        assert!(result.is_ok(), "Failed to parse operator {}: {:?}", op, result.err());
     }
 }
 
@@ -314,7 +311,7 @@ fn test_nested_field_references() {
         kestrel_eql::ast::Query::Event(eq) => {
             assert_eq!(eq.event_type, "process");
             assert!(eq.condition.is_some());
-        }
+        },
         _ => panic!("Expected event query"),
     }
 }
@@ -327,17 +324,9 @@ fn test_maxspan_durations() {
     let durations = vec!["5ms", "10s", "2m", "1h"];
 
     for duration in durations {
-        let query = format!(
-            "sequence by process.pid [process] [file] with maxspan={}",
-            duration
-        );
+        let query = format!("sequence by process.pid [process] [file] with maxspan={}", duration);
         let result = compiler.parse(&query);
-        assert!(
-            result.is_ok(),
-            "Failed to parse duration {}: {:?}",
-            duration,
-            result.err()
-        );
+        assert!(result.is_ok(), "Failed to parse duration {}: {:?}", duration, result.err());
     }
 }
 
@@ -358,13 +347,13 @@ fn test_duration_parsing() {
         ("1h", 60 * 60 * 1000),
     ];
 
-    for (duration_str, expected_ms) in test_cases {
+    for (duration_str, _expected_ms) in test_cases {
         let result = compiler.parse(&format!(
             "sequence by process.pid [process] [file] with maxspan={}",
             duration_str
         ));
         assert!(result.is_ok(), "Failed to parse duration {}: {:?}", duration_str, result.err());
-        
+
         let query = result.unwrap();
         match query {
             kestrel_eql::ast::Query::Sequence(sq) => {
@@ -372,7 +361,7 @@ fn test_duration_parsing() {
                 let maxspan = sq.maxspan.unwrap();
                 // Note: The actual unit conversion may vary, but the value should be parsed
                 assert!(maxspan.value > 0, "Duration {} should have positive value", duration_str);
-            }
+            },
             _ => panic!("Expected sequence query for duration {}", duration_str),
         }
     }
@@ -384,10 +373,15 @@ fn test_duration_raw_parsing() {
 
     // Test that different duration formats can be parsed successfully
     let test_cases = vec!["10s", "5ms", "1m", "2h"];
-    
+
     for duration in test_cases {
         let query = format!("sequence by process.pid [process] [file] with maxspan={}", duration);
         let result = parse(&query);
-        assert!(result.is_ok(), "Failed to parse raw query with duration {}: {:?}", duration, result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse raw query with duration {}: {:?}",
+            duration,
+            result.err()
+        );
     }
 }

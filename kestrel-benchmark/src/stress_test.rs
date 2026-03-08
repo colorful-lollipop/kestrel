@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use kestrel_engine::{DetectionEngine, EngineConfig};
@@ -25,7 +25,7 @@ pub fn run_stress_test(duration_secs: u64) {
 
     let config = EngineConfig::default();
 
-    let mut engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
+    let engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
 
     let events_processed = Arc::new(AtomicUsize::new(0));
     let alerts_generated = Arc::new(AtomicUsize::new(0));
@@ -53,17 +53,14 @@ pub fn run_stress_test(duration_secs: u64) {
 
         for event in &batch {
             runtime.block_on(async {
-                match engine.eval_event(event).await {
-                    Ok(alerts) => {
-                        events_processed.fetch_add(1, Ordering::Relaxed);
-                        alerts_generated.fetch_add(alerts.len(), Ordering::Relaxed);
-                    }
-                    Err(_) => {}
+                if let Ok(alerts) = engine.eval_event(event).await {
+                    events_processed.fetch_add(1, Ordering::Relaxed);
+                    alerts_generated.fetch_add(alerts.len(), Ordering::Relaxed);
                 }
             });
         }
 
-        if event_id % 10000 == 0 {
+        if event_id.is_multiple_of(10000) {
             let elapsed = start_time.elapsed();
             let processed = events_processed.load(Ordering::Relaxed);
             let current_memory = get_memory_usage().unwrap_or(start_memory);
@@ -86,15 +83,9 @@ pub fn run_stress_test(duration_secs: u64) {
     println!("    Total time: {:?}", elapsed);
     println!("    Total events processed: {}", processed);
     println!("    Total alerts generated: {}", alerts);
-    println!(
-        "    Throughput: {:.0} events/second",
-        processed as f64 / elapsed.as_secs_f64()
-    );
+    println!("    Throughput: {:.0} events/second", processed as f64 / elapsed.as_secs_f64());
     println!("    End memory: {}", format_bytes(end_memory));
-    println!(
-        "    Memory growth: {}",
-        format_bytes(end_memory.saturating_sub(start_memory))
-    );
+    println!("    Memory growth: {}", format_bytes(end_memory.saturating_sub(start_memory)));
 
     let max_memory = end_memory;
     if max_memory > start_memory * 2 {

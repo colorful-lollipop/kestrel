@@ -2,13 +2,13 @@
 //!
 //! Provides C-compatible API for Kestrel detection engine
 
-use std::ffi::{CStr, CString};
+use parking_lot::RwLock;
+use std::collections::HashMap;
+use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::sync::Arc;
-use std::collections::HashMap;
-use parking_lot::RwLock;
 
-use crate::error::KestrelError;
+use crate::error::{KestrelError, set_last_error};
 use crate::types::*;
 
 use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
@@ -17,8 +17,13 @@ use kestrel_nfa::PredicateEvaluator;
 /// Mock evaluator for MVP
 struct MockEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         Ok(true) // For MVP, accept all predicates
     }
 
@@ -33,22 +38,9 @@ impl PredicateEvaluator for MockEvaluator {
 
 /// Internal engine wrapper with actual hybrid engine
 pub struct EngineWrapper {
-    pub config: kestrel_config_t,
+    _config: kestrel_config_t,
     pub engine: HybridEngine,
     pub loaded_sequences: RwLock<HashMap<String, String>>, // rule_id -> sequence_id mapping
-}
-
-// Thread-local storage for last error message
-thread_local! {
-    static LAST_ERROR: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
-}
-
-/// Get last error message as pointer
-pub fn get_last_error() -> Option<*const c_char> {
-    LAST_ERROR.with(|error| {
-        let error = error.read().unwrap();
-        error.as_ref().and_then(|msg| CString::new(msg.as_str()).ok()).map(|cstr| cstr.as_ptr() as *const c_char)
-    })
 }
 
 /// Create a new Kestrel engine
@@ -62,6 +54,7 @@ pub unsafe extern "C" fn kestrel_engine_new(
     out_engine: *mut *mut kestrel_engine_t,
 ) -> KestrelError {
     if out_engine.is_null() {
+        set_last_error("out_engine must not be null");
         return KestrelError::InvalidArg;
     }
 
@@ -80,12 +73,15 @@ pub unsafe extern "C" fn kestrel_engine_new(
     // Create hybrid engine
     let engine = match HybridEngine::new(hybrid_config, evaluator) {
         Ok(e) => e,
-        Err(_) => return KestrelError::Unknown,
+        Err(error) => {
+            set_last_error(&format!("failed to create engine: {error}"));
+            return KestrelError::Unknown;
+        },
     };
 
     // Create engine wrapper
     let wrapper = Box::new(EngineWrapper {
-        config,
+        _config: config,
         engine,
         loaded_sequences: RwLock::new(HashMap::new()),
     });
@@ -121,6 +117,7 @@ pub unsafe extern "C" fn kestrel_engine_load_rule(
     _error_msg: *mut *const c_char,
 ) -> KestrelError {
     if engine.is_null() || rule_id.is_null() || rule_definition.is_null() {
+        set_last_error("engine, rule_id, and rule_definition must not be null");
         return KestrelError::InvalidArg;
     }
 
@@ -128,20 +125,22 @@ pub unsafe extern "C" fn kestrel_engine_load_rule(
 
     let rule_id_str = match CStr::from_ptr(rule_id).to_str() {
         Ok(s) => s,
-        Err(_) => return KestrelError::InvalidArg,
+        Err(_) => {
+            set_last_error("rule_id must be valid UTF-8");
+            return KestrelError::InvalidArg;
+        },
     };
 
     let rule_def_str = match CStr::from_ptr(rule_definition).to_str() {
         Ok(s) => s,
-        Err(_) => return KestrelError::InvalidArg,
+        Err(_) => {
+            set_last_error("rule_definition must be valid UTF-8");
+            return KestrelError::InvalidArg;
+        },
     };
 
     // For now, just log the rule (actual rule loading to be implemented)
-    tracing::info!(
-        rule_id = rule_id_str,
-        rule = rule_def_str,
-        "Rule load requested"
-    );
+    tracing::info!(rule_id = rule_id_str, rule = rule_def_str, "Rule load requested");
 
     KestrelError::Ok
 }
@@ -157,27 +156,28 @@ pub unsafe extern "C" fn kestrel_engine_unload_rule(
     rule_id: *const c_char,
 ) -> KestrelError {
     if engine.is_null() || rule_id.is_null() {
+        set_last_error("engine and rule_id must not be null");
         return KestrelError::InvalidArg;
     }
 
     let wrapper = &mut *(engine as *mut EngineWrapper);
     let rule_id_str = match CStr::from_ptr(rule_id).to_str() {
         Ok(s) => s,
-        Err(_) => return KestrelError::InvalidArg,
+        Err(_) => {
+            set_last_error("rule_id must be valid UTF-8");
+            return KestrelError::InvalidArg;
+        },
     };
 
     // Remove from loaded sequences mapping
     let sequence_id = wrapper.loaded_sequences.write().remove(rule_id_str);
 
     if let Some(seq_id) = sequence_id {
-        tracing::info!(
-            rule_id = rule_id_str,
-            sequence_id = seq_id,
-            "Rule unloaded"
-        );
+        tracing::info!(rule_id = rule_id_str, sequence_id = seq_id, "Rule unloaded");
         KestrelError::Ok
     } else {
         tracing::warn!(rule_id = rule_id_str, "Rule not found");
+        set_last_error("rule not found");
         KestrelError::Unknown
     }
 }
@@ -191,6 +191,7 @@ pub unsafe extern "C" fn kestrel_engine_unload_all_rules(
     engine: *mut kestrel_engine_t,
 ) -> KestrelError {
     if engine.is_null() {
+        set_last_error("engine must not be null");
         return KestrelError::InvalidArg;
     }
 

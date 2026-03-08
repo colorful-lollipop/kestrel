@@ -3,9 +3,7 @@
 // Tests the complete workflow from hot spot detection
 // through DFA conversion to caching.
 
-use kestrel_lazy_dfa::{
-    DfaCache, HotSpotDetector, LazyDfaConfig, NfaToDfaConverter,
-};
+use kestrel_lazy_dfa::{DfaCache, HotSpotDetector, LazyDfaConfig, NfaToDfaConverter};
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 
 // Helper function to create a test sequence
@@ -160,7 +158,7 @@ fn test_hot_spot_scoring() {
     // The important thing is that both are detected as hot (score > 0)
     assert!(very_hot_score > 0.0, "Very hot sequence should have positive score");
     assert!(moderately_hot_score > 0.0, "Moderately hot sequence should have positive score");
-    
+
     // Very hot should generally have higher score, but in fast test environments
     // timing variations can cause similar scores - so we just verify it's detected
     // as hot rather than strictly comparing scores

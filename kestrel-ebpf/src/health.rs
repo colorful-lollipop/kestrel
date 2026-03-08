@@ -3,8 +3,8 @@
 //! Provides health monitoring and automatic recovery for eBPF components.
 //! Detects ring buffer issues and triggers fallback to alternative event sources.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
@@ -79,10 +79,8 @@ impl HealthMetrics {
     /// Record an event received
     pub fn record_event(&self) {
         self.events_received.fetch_add(1, Ordering::Relaxed);
-        self.last_event_time.store(
-            Instant::now().elapsed().as_secs(),
-            Ordering::Relaxed,
-        );
+        self.last_event_time
+            .store(Instant::now().elapsed().as_secs(), Ordering::Relaxed);
         // Reset consecutive failures on success
         self.consecutive_failures.store(0, Ordering::Relaxed);
     }
@@ -133,7 +131,7 @@ impl EbpfHealthChecker {
     /// Create a new health checker
     pub fn new(config: HealthCheckConfig) -> Self {
         let (status_tx, status_rx) = watch::channel(EbpfHealthStatus::Healthy);
-        
+
         Self {
             config,
             metrics: Arc::new(HealthMetrics::default()),
@@ -168,7 +166,7 @@ impl EbpfHealthChecker {
 
         tokio::spawn(async move {
             info!("eBPF health checker started");
-            
+
             let mut last_check = Instant::now();
             let mut recovery_attempts = 0;
 
@@ -194,15 +192,12 @@ impl EbpfHealthChecker {
                     let _ = status_tx.send(new_status);
 
                     // Trigger recovery if needed
-                    if new_status == EbpfHealthStatus::Unhealthy 
-                        && config.auto_recover 
-                        && recovery_attempts < 3 
+                    if new_status == EbpfHealthStatus::Unhealthy
+                        && config.auto_recover
+                        && recovery_attempts < 3
                     {
                         recovery_attempts += 1;
-                        warn!(
-                            attempt = recovery_attempts,
-                            "Attempting eBPF recovery"
-                        );
+                        warn!(attempt = recovery_attempts, "Attempting eBPF recovery");
                         // Recovery action will be triggered by collector
                     }
                 }
@@ -230,7 +225,7 @@ impl EbpfHealthChecker {
 
         // Check event flow
         let time_since_last_event = Instant::now().duration_since(last_check);
-        
+
         if metrics.events_received == 0 && time_since_last_event > config.max_event_gap {
             // No events received for a while - might be unhealthy
             if metrics.consecutive_failures > 0 {
@@ -290,16 +285,16 @@ mod tests {
     #[test]
     fn test_health_metrics() {
         let metrics = HealthMetrics::default();
-        
+
         metrics.record_event();
         assert_eq!(metrics.events_received.load(Ordering::Relaxed), 1);
-        
+
         metrics.record_dropped();
         assert_eq!(metrics.events_dropped.load(Ordering::Relaxed), 1);
-        
+
         metrics.record_failure();
         assert_eq!(metrics.consecutive_failures.load(Ordering::Relaxed), 1);
-        
+
         // Recording event should reset failures
         metrics.record_event();
         assert_eq!(metrics.consecutive_failures.load(Ordering::Relaxed), 0);
@@ -309,7 +304,7 @@ mod tests {
     fn test_health_checker_new() {
         let config = HealthCheckConfig::default();
         let checker = EbpfHealthChecker::new(config);
-        
+
         assert_eq!(checker.status(), EbpfHealthStatus::Healthy);
     }
 
@@ -317,8 +312,8 @@ mod tests {
     async fn test_health_subscription() {
         let config = HealthCheckConfig::default();
         let checker = EbpfHealthChecker::new(config);
-        
-        let mut rx = checker.subscribe();
+
+        let rx = checker.subscribe();
         assert_eq!(*rx.borrow(), EbpfHealthStatus::Healthy);
     }
 }

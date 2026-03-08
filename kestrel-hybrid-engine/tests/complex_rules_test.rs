@@ -8,10 +8,10 @@
 // - Multiple predicates
 // - Mixed complexity
 
-use kestrel_hybrid_engine::{
-    analyze_rule, HybridEngine, HybridEngineConfig, MatchingStrategy, RuleComplexityAnalyzer, RuleStrategy,
-};
 use kestrel_eql::ir::*;
+use kestrel_hybrid_engine::{
+    HybridEngine, HybridEngineConfig, MatchingStrategy, RuleStrategy, analyze_rule,
+};
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,8 +19,10 @@ use std::time::Instant;
 // Mock predicate evaluator for testing
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(
+    async fn evaluate(
         &self,
         _predicate_id: &str,
         _event: &kestrel_event::Event,
@@ -38,11 +40,7 @@ impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
 }
 
 // Helper to create complex sequence
-fn create_complex_sequence(
-    id: &str,
-    steps: usize,
-    has_until: bool,
-) -> CompiledSequence {
+fn create_complex_sequence(id: &str, steps: usize, has_until: bool) -> CompiledSequence {
     let seq_steps: Vec<_> = (0..steps)
         .map(|i| SeqStep::new(i as u16, format!("pred{}", i), (i + 1) as u16))
         .collect();
@@ -109,8 +107,10 @@ fn test_regex_rule_analysis() {
     assert_eq!(recommendation.strategy, MatchingStrategy::HybridAcNfa);
     assert!(recommendation.complexity.has_regex);
     // Note: score may vary based on analyzer implementation
-    println!("Regex rule analysis: score={}, strategy={:?}",
-             recommendation.complexity.score, recommendation.strategy);
+    println!(
+        "Regex rule analysis: score={}, strategy={:?}",
+        recommendation.complexity.score, recommendation.strategy
+    );
 }
 
 #[test]
@@ -207,8 +207,10 @@ fn test_glob_rule_analysis() {
     // Should detect glob pattern
     assert!(recommendation.complexity.has_glob);
     // Strategy depends on overall complexity
-    println!("Glob rule analysis: score={}, strategy={:?}",
-             recommendation.complexity.score, recommendation.strategy);
+    println!(
+        "Glob rule analysis: score={}, strategy={:?}",
+        recommendation.complexity.score, recommendation.strategy
+    );
 }
 
 // ============================================================================
@@ -262,10 +264,12 @@ fn test_long_sequence_analysis() {
     assert!(recommendation.complexity.sequence_steps == 10);
     assert!(recommendation.complexity.score > 30);
 
-    println!("Long sequence analysis: score={}, steps={}, strategy={:?}",
-             recommendation.complexity.score,
-             recommendation.complexity.sequence_steps,
-             recommendation.strategy);
+    println!(
+        "Long sequence analysis: score={}, steps={}, strategy={:?}",
+        recommendation.complexity.score,
+        recommendation.complexity.sequence_steps,
+        recommendation.strategy
+    );
 }
 
 #[test]
@@ -355,10 +359,12 @@ fn test_until_condition_analysis() {
     assert!(recommendation.complexity.has_until);
     assert!(recommendation.complexity.score > 40);
 
-    println!("Until condition analysis: score={}, has_until={}, strategy={:?}",
-             recommendation.complexity.score,
-             recommendation.complexity.has_until,
-             recommendation.strategy);
+    println!(
+        "Until condition analysis: score={}, has_until={}, strategy={:?}",
+        recommendation.complexity.score,
+        recommendation.complexity.has_until,
+        recommendation.strategy
+    );
 }
 
 #[test]
@@ -670,7 +676,11 @@ fn test_strategy_selection_accuracy() {
         rule.sequence = Some(IrSequence {
             maxspan_ms: Some(5000),
             by_field_id: 100,
-            until: if has_until { Some(format!("pred{}", steps - 1)) } else { None },
+            until: if has_until {
+                Some(format!("pred{}", steps - 1))
+            } else {
+                None
+            },
             steps: steps_vec,
         });
 
@@ -724,13 +734,18 @@ fn test_strategy_selection_accuracy() {
 
         let recommendation = analyze_rule(&rule).unwrap();
 
-        println!("{}: score={}, strategy={:?}, expected range={:?}",
-                 name, recommendation.complexity.score,
-                 recommendation.strategy, expected_score);
+        println!(
+            "{}: score={}, strategy={:?}, expected range={:?}",
+            name, recommendation.complexity.score, recommendation.strategy, expected_score
+        );
 
         // Verify score is in expected range
-        assert!(expected_score.contains(&recommendation.complexity.score),
-                "Score {} for {} should be in range {:?}",
-                recommendation.complexity.score, name, expected_score);
+        assert!(
+            expected_score.contains(&recommendation.complexity.score),
+            "Score {} for {} should be in range {:?}",
+            recommendation.complexity.score,
+            name,
+            expected_score
+        );
     }
 }

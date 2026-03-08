@@ -368,7 +368,11 @@ mod tests {
         assert!(!platform.has_capability(PlatformCapability::InlineBlocking));
 
         // Probe capability
-        assert!(platform.probe_capability(PlatformCapability::ProcessTracing).unwrap());
+        assert!(
+            platform
+                .probe_capability(PlatformCapability::ProcessTracing)
+                .unwrap()
+        );
 
         // Shutdown
         platform.shutdown().unwrap();

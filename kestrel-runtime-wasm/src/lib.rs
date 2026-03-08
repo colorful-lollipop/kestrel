@@ -3,8 +3,8 @@
 //! This module provides Wasm runtime support for predicate execution using Wasmtime.
 //! Implements Host API v1 for event field access, regex/glob matching, and alert emission.
 
-use anyhow::Result;
 use ahash::AHashMap;
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -17,14 +17,14 @@ use wasmtime::{
 
 use kestrel_event::Event;
 use kestrel_schema::{
-    AlertRecord, EvalResult, FieldId, GlobId, RegexId, RuleCapabilities, RuleManifest, RuleMetadata,
-    RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
+    AlertRecord, EvalResult, FieldId, GlobId, RegexId, RuleCapabilities, RuleManifest,
+    RuleMetadata, RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
 };
 
 // Re-export types from kestrel-schema for backward compatibility
 pub use kestrel_schema::{
-    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle,
-    FieldId as HostFieldId, GlobId as HostGlobId, RegexId as HostRegexId,
+    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle, FieldId as HostFieldId,
+    GlobId as HostGlobId, RegexId as HostRegexId,
 };
 
 /// Wasm runtime configuration
@@ -80,14 +80,13 @@ impl RuntimeConfig for WasmConfig {
 /// - pred_init(ctx) -> i32 (0 = success, < 0 = error)
 /// - pred_eval(event_handle, ctx) -> i32 (1 = match, 0 = no match, < 0 = error)
 /// - pred_capture(event_handle, ctx) -> captures_ptr (optional)
-
 pub struct WasmEngine {
     pub engine: Engine,
     pub linker: Linker<WasmContext>,
     pub config: WasmConfig,
     pub schema: Arc<SchemaRegistry>,
-    pub modules: Arc<RwLock<AHashMap<String, CompiledModule>>>,
-    pub instance_pool: Arc<RwLock<AHashMap<String, InstancePool>>>,
+    modules: Arc<RwLock<AHashMap<String, CompiledModule>>>,
+    instance_pool: Arc<RwLock<AHashMap<String, Arc<InstancePool>>>>,
     pub regex_cache: Arc<RwLock<AHashMap<RegexId, regex::Regex>>>,
     pub glob_cache: Arc<RwLock<AHashMap<GlobId, glob::Pattern>>>,
     pub next_regex_id: Arc<std::sync::atomic::AtomicU32>,
@@ -128,9 +127,12 @@ impl PoolMetrics {
     }
 
     pub fn record_acquire(&self, wait_ns: u64) {
-        self.total_acquires.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.active_instances.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.total_wait_ns.fetch_add(wait_ns, std::sync::atomic::Ordering::Relaxed);
+        self.total_acquires
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.active_instances
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_wait_ns
+            .fetch_add(wait_ns, std::sync::atomic::Ordering::Relaxed);
 
         // Update peak wait time
         loop {
@@ -140,7 +142,12 @@ impl PoolMetrics {
             }
             if self
                 .peak_wait_ns
-                .compare_exchange_weak(peak, wait_ns, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed)
+                .compare_exchange_weak(
+                    peak,
+                    wait_ns,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
                 .is_ok()
             {
                 break;
@@ -149,22 +156,28 @@ impl PoolMetrics {
     }
 
     pub fn record_release(&self) {
-        self.total_releases.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.active_instances.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_releases
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.active_instances
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn record_miss(&self) {
-        self.pool_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.pool_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn set_pool_size(&self, size: usize) {
-        self.pool_size.store(size, std::sync::atomic::Ordering::Relaxed);
+        self.pool_size
+            .store(size, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Get pool utilization percentage (0-100)
     pub fn utilization_pct(&self) -> f64 {
         let pool_size = self.pool_size.load(std::sync::atomic::Ordering::Relaxed);
-        let active = self.active_instances.load(std::sync::atomic::Ordering::Relaxed);
+        let active = self
+            .active_instances
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         if pool_size > 0 {
             (active as f64 / pool_size as f64) * 100.0
@@ -175,8 +188,12 @@ impl PoolMetrics {
 
     /// Get average wait time in nanoseconds
     pub fn avg_wait_ns(&self) -> u64 {
-        let acquires = self.total_acquires.load(std::sync::atomic::Ordering::Relaxed);
-        let total_wait = self.total_wait_ns.load(std::sync::atomic::Ordering::Relaxed);
+        let acquires = self
+            .total_acquires
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total_wait = self
+            .total_wait_ns
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         if acquires > 0 {
             total_wait / acquires
@@ -187,7 +204,9 @@ impl PoolMetrics {
 
     /// Get cache hit rate percentage (0-100)
     pub fn cache_hit_rate_pct(&self) -> f64 {
-        let acquires = self.total_acquires.load(std::sync::atomic::Ordering::Relaxed);
+        let acquires = self
+            .total_acquires
+            .load(std::sync::atomic::Ordering::Relaxed);
         let misses = self.pool_misses.load(std::sync::atomic::Ordering::Relaxed);
 
         if acquires > 0 {
@@ -201,7 +220,7 @@ impl PoolMetrics {
 
 /// Instance pool for a specific module
 struct InstancePool {
-    instances: Vec<PooledInstance>,
+    instances: tokio::sync::Mutex<Vec<PooledInstance>>,
     semaphore: Arc<Semaphore>,
 }
 
@@ -209,7 +228,6 @@ struct InstancePool {
 struct PooledInstance {
     store: Store<WasmContext>,
     instance: Instance,
-    in_use: bool,
 }
 
 /// Wasm context (per-store)
@@ -226,7 +244,6 @@ pub struct WasmContext {
 /// Wasm predicate
 pub struct WasmPredicate {
     rule_id: String,
-    module_name: String,
     engine: Arc<WasmEngine>,
 }
 
@@ -392,7 +409,7 @@ impl WasmEngine {
                             } else {
                                 *v as i64
                             }
-                        }
+                        },
                         _ => 0,
                     }
                 },
@@ -424,7 +441,7 @@ impl WasmEngine {
                             } else {
                                 *v as u64
                             }
-                        }
+                        },
                         _ => 0,
                     }
                 },
@@ -442,40 +459,37 @@ impl WasmEngine {
                  ptr: u32,
                  len: u32|
                  -> u32 {
-                    // Get event data first
-                    let (event, has_event) = {
+                    let string_value = {
                         let ctx = caller.data();
-                        (ctx.event.clone(), ctx.event.is_some())
+                        let event = match ctx.event.as_ref() {
+                            Some(e) => e,
+                            None => return 0,
+                        };
+
+                        match event.get_field(field_id) {
+                            Some(TypedValue::String(s)) => Some(s.clone()),
+                            _ => None,
+                        }
                     };
 
-                    if !has_event {
-                        return 0;
-                    }
-
-                    let event = match event.as_ref() {
-                        Some(e) => e,
+                    let s = match string_value {
+                        Some(value) => value,
                         None => return 0,
                     };
 
-                    // Get memory
                     let mem = match caller.get_export("memory") {
                         Some(Extern::Memory(m)) => m,
                         _ => return 0,
                     };
 
-                    let value = event.get_field(field_id);
-                    if let Some(TypedValue::String(s)) = value {
-                        let bytes_to_write = std::cmp::min(len as usize, s.len());
-                        if let Err(_) = mem.write(
-                            &mut caller,
-                            ptr as usize,
-                            s.as_bytes()[..bytes_to_write].as_ref(),
-                        ) {
-                            return 0;
-                        }
-                        return bytes_to_write as u32;
+                    let bytes_to_write = std::cmp::min(len as usize, s.len());
+                    if mem
+                        .write(&mut caller, ptr as usize, s.as_bytes()[..bytes_to_write].as_ref())
+                        .is_err()
+                    {
+                        return 0;
                     }
-                    0
+                    bytes_to_write as u32
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -500,21 +514,21 @@ impl WasmEngine {
                             } else {
                                 0
                             }
-                        }
+                        },
                         Some(TypedValue::I64(v)) => {
                             if *v != 0 {
                                 1
                             } else {
                                 0
                             }
-                        }
+                        },
                         Some(TypedValue::U64(v)) => {
                             if *v != 0 {
                                 1
                             } else {
                                 0
                             }
-                        }
+                        },
                         _ => 0,
                     }
                 },
@@ -536,7 +550,7 @@ impl WasmEngine {
                     let cache = ctx.regex_cache.clone();
 
                     let mut data = vec![0u8; len as usize];
-                    if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
+                    if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
                         return 0;
                     }
 
@@ -545,9 +559,10 @@ impl WasmEngine {
                         Err(_) => return 0,
                     };
 
-                    let cache_guard = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(cache.read())
-                    });
+                    let cache_guard = match cache.try_read() {
+                        Ok(guard) => guard,
+                        Err(_) => return 0,
+                    };
 
                     if let Some(re) = cache_guard.get(&re_id) {
                         if re.is_match(s) {
@@ -574,7 +589,7 @@ impl WasmEngine {
                     let cache = ctx.glob_cache.clone();
 
                     let mut data = vec![0u8; len as usize];
-                    if let Err(_) = mem.read(&mut caller, ptr as usize, &mut data) {
+                    if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
                         return 0;
                     }
 
@@ -612,7 +627,7 @@ impl WasmEngine {
                         None => {
                             error!("No event in context for alert_emit");
                             return -1; // Error
-                        }
+                        },
                     };
 
                     // Capture all event fields into the alert
@@ -656,7 +671,7 @@ impl WasmEngine {
                         None => {
                             error!("No event in context for capture_field");
                             return -1; // Error
-                        }
+                        },
                     };
 
                     // Get the field value
@@ -709,13 +724,12 @@ impl WasmEngine {
         // In a full implementation, this would extract metadata from the Wasm module
         let metadata = RuleMetadata::new(rule_id, format!("Rule {}", rule_id));
 
-        let manifest = RuleManifest::new(metadata)
-            .with_capabilities(RuleCapabilities {
-                supports_inline: true,
-                requires_alert: true,
-                requires_block: false,
-                max_span_ms: None,
-            });
+        let manifest = RuleManifest::new(metadata).with_capabilities(RuleCapabilities {
+            supports_inline: true,
+            requires_alert: true,
+            requires_block: false,
+            max_span_ms: None,
+        });
 
         // Load the module with the generated manifest
         self.load_module(manifest, wasm_bytes).await?;
@@ -780,17 +794,13 @@ impl WasmEngine {
                 .instantiate(&mut store)
                 .map_err(|e| WasmRuntimeError::InstantiationError(e.to_string()))?;
 
-            instances.push(PooledInstance {
-                store,
-                instance,
-                in_use: false,
-            });
+            instances.push(PooledInstance { store, instance });
         }
 
-        let pool = InstancePool {
-            instances,
+        let pool = Arc::new(InstancePool {
+            instances: tokio::sync::Mutex::new(instances),
             semaphore: Arc::new(Semaphore::new(pool_size)),
-        };
+        });
 
         // Set pool size in metrics
         self.pool_metrics.set_pool_size(pool_size);
@@ -803,6 +813,56 @@ impl WasmEngine {
 
         info!(rule_id = %rule_id, pool_size, "Wasm module loaded successfully with instance pool");
         Ok(rule_id)
+    }
+
+    /// Evaluate a predicate from an already loaded module using the instance pool.
+    pub async fn eval_loaded_predicate(
+        &self,
+        rule_id: &str,
+        predicate_index: u32,
+        event: &Event,
+    ) -> Result<bool, WasmRuntimeError> {
+        let pool = {
+            let pools = self.instance_pool.read().await;
+            pools.get(rule_id).cloned().ok_or_else(|| {
+                WasmRuntimeError::CompilationError(format!("Module not found: {}", rule_id))
+            })?
+        };
+
+        let _permit = pool
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
+
+        let mut instance = {
+            let mut instances = pool.instances.lock().await;
+            instances.pop().ok_or_else(|| {
+                WasmRuntimeError::ExecutionError("No available instances in pool".to_string())
+            })?
+        };
+
+        instance.store.data_mut().event = Some(event.clone());
+        let result = {
+            let pred_eval = instance
+                .instance
+                .get_typed_func::<(u32,), i32>(&mut instance.store, "pred_eval")
+                .map_err(|_| WasmRuntimeError::FunctionNotFound("pred_eval".to_string()))?;
+
+            pred_eval
+                .call(&mut instance.store, (predicate_index,))
+                .map(|value| value == 1)
+                .map_err(|e: wasmtime::Error| WasmRuntimeError::ExecutionError(e.to_string()))
+        };
+        instance.store.data_mut().event = None;
+
+        {
+            let mut instances = pool.instances.lock().await;
+            instances.push(instance);
+        }
+        self.pool_metrics.record_release();
+
+        result
     }
 
     /// Compile and run an ad-hoc Wasm predicate
@@ -846,7 +906,6 @@ impl WasmEngine {
     pub fn create_predicate(&self, rule_id: &str) -> Result<WasmPredicate, WasmRuntimeError> {
         Ok(WasmPredicate {
             rule_id: rule_id.to_string(),
-            module_name: rule_id.to_string(),
             engine: Arc::new(self.clone()),
         })
     }
@@ -924,16 +983,17 @@ impl Clone for WasmEngine {
 ///
 /// This allows the Wasm runtime to be used as a predicate evaluator
 /// for the NFA sequence engine.
+#[async_trait::async_trait]
 impl kestrel_nfa::PredicateEvaluator for WasmEngine {
     /// Evaluate a predicate against an event
     ///
     /// The predicate_id should be in the format "rule_id:predicate_id" where:
     /// - rule_id is the Wasm module identifier
     /// - predicate_id is the index of the predicate within the module
-    fn evaluate(
+    async fn evaluate(
         &self,
         predicate_id: &str,
-        _event: &kestrel_event::Event,
+        event: &kestrel_event::Event,
     ) -> kestrel_nfa::NfaResult<bool> {
         // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
@@ -949,78 +1009,14 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
             kestrel_nfa::NfaError::PredicateError(format!("Invalid predicate index: {}", parts[1]))
         })?;
 
-        // Run async evaluation in blocking context
-        let engine = self.clone();
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                // Record wait time start
-                let wait_start = std::time::Instant::now();
-
-                // Get the instance pool for this rule (write access from the start)
-                let mut pools = engine.instance_pool.write().await;
-                let pool = pools.get_mut(rule_id).ok_or_else(|| {
-                    kestrel_nfa::NfaError::PredicateError(format!(
-                        "Instance pool not found for rule: {}",
-                        rule_id
-                    ))
-                })?;
-
-                // Acquire a permit from the semaphore (limits concurrent access)
-                let _permit = pool.semaphore.acquire().await.map_err(|e| {
-                    kestrel_nfa::NfaError::PredicateError(format!(
-                        "Failed to acquire semaphore: {}",
-                        e
-                    ))
-                })?;
-
-                // Record wait time and acquire
-                let wait_ns = wait_start.elapsed().as_nanos() as u64;
-                engine.pool_metrics.record_acquire(wait_ns);
-
-                // Find an available instance
-                let instance_idx = pool
-                    .instances
-                    .iter()
-                    .position(|inst| !inst.in_use)
-                    .ok_or_else(|| {
-                        engine.pool_metrics.record_miss();
-                        kestrel_nfa::NfaError::PredicateError(
-                            "No available instances in pool".to_string(),
-                        )
-                    })?;
-
-                // Execute using the instance - use split to avoid borrow issues
-                let instance_ref = &mut pool.instances[instance_idx];
-                instance_ref.in_use = true;
-                
-                // Get the pred_eval function
-                let pred_eval = instance_ref
-                    .instance
-                    .get_typed_func::<(u32,), i32>(&mut instance_ref.store, "pred_eval")
-                    .map_err(|_| {
-                        kestrel_nfa::NfaError::PredicateError(
-                            "pred_eval function not found".to_string(),
-                        )
-                    })?;
-
-                // Call the predicate with the event handle
-                let result = pred_eval.call(&mut instance_ref.store, (predicate_index,)).map_err(|e| {
-                    kestrel_nfa::NfaError::PredicateError(format!(
-                        "Predicate evaluation failed: {}",
-                        e
-                    ))
-                })?;
-
-                // Mark instance as not in use
-                instance_ref.in_use = false;
-                engine.pool_metrics.record_release();
-
-                // Return the result
-                Ok(result == 1)
-            })
-        });
-
-        result
+        let wait_start = std::time::Instant::now();
+        let result = self
+            .eval_loaded_predicate(rule_id, predicate_index, event)
+            .await
+            .map_err(|e| kestrel_nfa::NfaError::PredicateError(e.to_string()))?;
+        let wait_ns = wait_start.elapsed().as_nanos() as u64;
+        self.pool_metrics.record_acquire(wait_ns);
+        Ok(result)
     }
 
     fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
@@ -1050,7 +1046,6 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_schema::SchemaRegistry;
 
     #[test]
     fn test_wasm_config_defaults() {
@@ -1068,17 +1063,53 @@ mod tests {
         assert_eq!(config.instruction_limit(), Some(1_000_000));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_async_predicate_evaluator_accepts_loaded_module_ids() {
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = WasmEngine::new(WasmConfig::default(), schema).unwrap();
+
+        let wasm_bytes = wat::parse_str(
+            r#"
+            (module
+                (func $pred_eval (export "pred_eval") (result i32)
+                    (i32.const 1)
+                )
+                (memory (export "memory") 1)
+            )
+        "#,
+        )
+        .unwrap();
+
+        engine.compile_rule("async-predicate", wasm_bytes).await.unwrap();
+
+        assert!(kestrel_nfa::PredicateEvaluator::has_predicate(&engine, "async-predicate:0"));
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(1_000)
+            .ts_wall(1_000)
+            .entity_key(7)
+            .build()
+            .unwrap();
+
+        let result = kestrel_nfa::PredicateEvaluator::evaluate(&engine, "invalid", &event).await;
+        assert!(matches!(
+            result,
+            Err(kestrel_nfa::NfaError::PredicateError(message)) if message.contains("Invalid predicate_id format")
+        ));
+    }
+
     #[test]
     fn test_pool_metrics() {
         let metrics = PoolMetrics::new();
         metrics.set_pool_size(10);
-        
+
         metrics.record_acquire(100);
         assert_eq!(metrics.utilization_pct(), 10.0);
-        
+
         metrics.record_release();
         assert_eq!(metrics.utilization_pct(), 0.0);
-        
+
         metrics.record_miss();
         assert_eq!(metrics.cache_hit_rate_pct(), 0.0); // 0 hits out of 1 acquire
     }

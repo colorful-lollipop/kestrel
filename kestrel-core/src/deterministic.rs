@@ -10,6 +10,9 @@ use tracing::{error, info};
 use crate::alert::Alert;
 use crate::replay::BinaryLog;
 
+/// Recorded replay results: list of (event_id, alerts) pairs
+type RecordedResults = Arc<Mutex<Vec<(u64, Vec<Alert>)>>>;
+
 pub struct DeterministicVerifier {
     /// Schema registry for type information (reserved for future use)
     #[allow(dead_code)]
@@ -89,15 +92,13 @@ impl DeterministicVerifier {
             total_alerts.push(result.len());
             results.push(result.clone());
 
-            if i > 0 {
-                if result.len() != results[0].len() {
-                    mismatches.push(format!(
-                        "Run {} has different alert count: {} vs {}",
-                        i + 1,
-                        result.len(),
-                        results[0].len()
-                    ));
-                }
+            if i > 0 && result.len() != results[0].len() {
+                mismatches.push(format!(
+                    "Run {} has different alert count: {} vs {}",
+                    i + 1,
+                    result.len(),
+                    results[0].len()
+                ));
             }
         }
 
@@ -239,7 +240,7 @@ pub struct ReplaySource {
     current_index: usize,
     pub verification_enabled: bool,
     pub expected_results: Option<HashMap<u64, Vec<Alert>>>,
-    recorded_results: Arc<Mutex<Vec<(u64, Vec<Alert>)>>>,
+    recorded_results: RecordedResults,
 }
 
 impl ReplaySource {
@@ -332,7 +333,7 @@ impl ReplaySource {
         self.current_index = 0;
     }
 
-    pub fn get_recorded_results(&self) -> &Arc<Mutex<Vec<(u64, Vec<Alert>)>>> {
+    pub fn get_recorded_results(&self) -> &RecordedResults {
         &self.recorded_results
     }
 }
@@ -394,7 +395,7 @@ impl DeterministicTestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TimeManager;
+
     use kestrel_event::Event;
 
     fn create_test_events(count: usize) -> Vec<Event> {
@@ -447,17 +448,11 @@ mod tests {
         let verifier = DeterministicVerifier::new(schema);
 
         let events = create_test_events(20);
-        let result = verifier
-            .verify_determinism(&events, |events| run_detection(events))
-            .await;
+        let result = verifier.verify_determinism(&events, run_detection).await;
 
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert!(
-            result.consistent,
-            "Results should be deterministic: {:?}",
-            result.mismatches
-        );
+        assert!(result.consistent, "Results should be deterministic: {:?}", result.mismatches);
         assert_eq!(result.total_runs, 5);
     }
 
@@ -493,7 +488,7 @@ mod tests {
         let events = create_test_events(10);
         let result = runner
             .run_deterministic_test("test_basic", &events, |events| {
-                let count = events
+                let _count = events
                     .iter()
                     .filter(|e| {
                         if let Some(TypedValue::I64(n)) = e.get_field(1) {

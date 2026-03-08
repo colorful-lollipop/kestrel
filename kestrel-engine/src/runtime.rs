@@ -7,7 +7,8 @@
 use kestrel_event::Event;
 use kestrel_schema::{
     FieldId, RuleCapabilities, RuleManifest, RuleMetadata,
-    RuntimeCapabilities as SchemaRuntimeCapabilities, RuntimeType as SchemaRuntimeType, SchemaRegistry,
+    RuntimeCapabilities as SchemaRuntimeCapabilities, RuntimeType as SchemaRuntimeType,
+    SchemaRegistry,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -112,7 +113,7 @@ pub struct RuntimeManager {
     /// Available runtimes by type
     runtimes: std::collections::HashMap<RuntimeType, Arc<dyn Runtime>>,
     /// Schema registry
-    schema: Arc<SchemaRegistry>,
+    _schema: Arc<SchemaRegistry>,
 }
 
 impl RuntimeManager {
@@ -120,7 +121,7 @@ impl RuntimeManager {
     pub fn new(schema: Arc<SchemaRegistry>) -> Self {
         Self {
             runtimes: std::collections::HashMap::new(),
-            schema,
+            _schema: schema,
         }
     }
 
@@ -157,11 +158,7 @@ impl RuntimeManager {
     }
 
     /// Evaluate a predicate using the best available runtime
-    pub async fn evaluate(
-        &self,
-        predicate_id: &str,
-        event: &Event,
-    ) -> RuntimeResult<EvalResult> {
+    pub async fn evaluate(&self, predicate_id: &str, event: &Event) -> RuntimeResult<EvalResult> {
         // Try each runtime in priority order
         for runtime_type in [RuntimeType::Wasm, RuntimeType::Lua, RuntimeType::Native] {
             if let Some(runtime) = self.get_runtime(runtime_type) {
@@ -220,20 +217,20 @@ impl Runtime for WasmRuntimeAdapter {
 
     async fn load_predicate(&self, predicate_id: &str, bytes: &[u8]) -> RuntimeResult<()> {
         let manifest = RuleManifest::new(
-            RuleMetadata::new(predicate_id, predicate_id)
-                .with_severity("medium")
-        ).with_capabilities(RuleCapabilities {
+            RuleMetadata::new(predicate_id, predicate_id).with_severity("medium"),
+        )
+        .with_capabilities(RuleCapabilities {
             supports_inline: false,
             requires_alert: true,
             requires_block: false,
             max_span_ms: None,
         });
-        
+
         self.inner
             .load_module(manifest, bytes.to_vec())
             .await
             .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
-        
+
         Ok(())
     }
 
@@ -276,9 +273,7 @@ impl Runtime for LuaRuntimeAdapter {
 
     async fn evaluate_adhoc(&self, _bytes: &[u8], _event: &Event) -> RuntimeResult<EvalResult> {
         // Lua runtime doesn't support ad-hoc evaluation yet
-        Err(RuntimeError::NotAvailable(
-            "Lua ad-hoc evaluation not supported".to_string(),
-        ))
+        Err(RuntimeError::NotAvailable("Lua ad-hoc evaluation not supported".to_string()))
     }
 
     fn required_fields(&self, _predicate_id: &str) -> RuntimeResult<Vec<FieldId>> {
@@ -293,22 +288,22 @@ impl Runtime for LuaRuntimeAdapter {
     async fn load_predicate(&self, predicate_id: &str, bytes: &[u8]) -> RuntimeResult<()> {
         let script = String::from_utf8(bytes.to_vec())
             .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
-        
+
         let manifest = RuleManifest::new(
-            RuleMetadata::new(predicate_id, predicate_id)
-                .with_severity("medium")
-        ).with_capabilities(RuleCapabilities {
+            RuleMetadata::new(predicate_id, predicate_id).with_severity("medium"),
+        )
+        .with_capabilities(RuleCapabilities {
             supports_inline: false,
             requires_alert: true,
             requires_block: false,
             max_span_ms: None,
         });
-        
+
         self.inner
             .load_predicate(manifest, script)
             .await
             .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
-        
+
         Ok(())
     }
 

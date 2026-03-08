@@ -19,11 +19,11 @@ pub fn run_wasm_benchmarks() {
     match engine {
         Ok(wasm_engine) => {
             run_wasm_evaluation_benchmark(&wasm_engine);
-        }
+        },
         Err(e) => {
             println!("  Warning: WasmEngine creation failed: {:?}", e);
             println!("  Skipping Wasm benchmarks.");
-        }
+        },
     }
 }
 
@@ -53,7 +53,6 @@ fn run_wasm_evaluation_benchmark(_engine: &WasmEngine) {
             .await;
         if let Err(e) = result {
             println!("    Warning: Failed to compile Wasm predicate: {:?}", e);
-            return;
         }
     });
 
@@ -67,10 +66,7 @@ fn run_wasm_evaluation_benchmark(_engine: &WasmEngine) {
         });
     }
 
-    println!(
-        "  Measuring Wasm evaluation ({} samples)...\n",
-        WASM_EVAL_SAMPLES
-    );
+    println!("  Measuring Wasm evaluation ({} samples)...\n", WASM_EVAL_SAMPLES);
 
     let mut latencies = Vec::with_capacity(WASM_EVAL_SAMPLES);
 

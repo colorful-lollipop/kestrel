@@ -49,7 +49,7 @@ impl NfaToDfaConverter {
                     // Transition on this event type
                     transitions
                         .entry(step.event_type_id)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(nfa_state + 1); // Move to next NFA state
                 }
             }
@@ -121,10 +121,7 @@ impl NfaToDfaConverter {
 
         // Check for captures (may be OK, but adds complexity)
         if !sequence.captures.is_empty() {
-            tracing::warn!(
-                "Sequence {} has captures, DFA may not preserve semantics",
-                sequence.id
-            );
+            tracing::warn!("Sequence {} has captures, DFA may not preserve semantics", sequence.id);
         }
 
         Ok(())
@@ -208,16 +205,10 @@ mod tests {
 
         // Create a sequence that will exceed the state limit
         let steps: Vec<_> = (0..10)
-            .map(|i| SeqStep::new(i, format!("pred{}", i), (i + 1) as u16))
+            .map(|i| SeqStep::new(i, format!("pred{}", i), i + 1))
             .collect();
 
-        let sequence = NfaSequence::new(
-            "test-seq".to_string(),
-            100,
-            steps,
-            Some(5000),
-            None,
-        );
+        let sequence = NfaSequence::new("test-seq".to_string(), 100, steps, Some(5000), None);
 
         let compiled = CompiledSequence {
             id: "test-seq".to_string(),

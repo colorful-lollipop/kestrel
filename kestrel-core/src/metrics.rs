@@ -6,8 +6,8 @@
 use crate::eventbus::EventBusMetricsSnapshot;
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 /// Per-rule metrics tracking
@@ -64,7 +64,7 @@ impl RuleMetrics {
             }
         }
 
-        if count % 1000 == 0 {
+        if count.is_multiple_of(1000) {
             self.update_percentiles(count, total);
         }
     }
@@ -76,19 +76,15 @@ impl RuleMetrics {
     fn update_percentiles(&self, count: u64, total_ns: u64) {
         let avg = if count > 0 { total_ns / count } else { 0 };
 
-        let _ = self.p50_eval_time_ns.store(avg, Ordering::Relaxed);
-        let _ = self.p95_eval_time_ns.store(avg, Ordering::Relaxed);
-        let _ = self.p99_eval_time_ns.store(avg, Ordering::Relaxed);
+        self.p50_eval_time_ns.store(avg, Ordering::Relaxed);
+        self.p95_eval_time_ns.store(avg, Ordering::Relaxed);
+        self.p99_eval_time_ns.store(avg, Ordering::Relaxed);
     }
 
     pub fn get_avg_eval_time_ns(&self) -> u64 {
         let count = self.evaluation_count.load(Ordering::Relaxed);
         let total = self.total_eval_time_ns.load(Ordering::Relaxed);
-        if count > 0 {
-            total / count
-        } else {
-            0
-        }
+        if count > 0 { total / count } else { 0 }
     }
 
     pub fn get_eval_count(&self) -> u64 {
@@ -138,6 +134,12 @@ pub struct EngineMetrics {
 
     /// Error count
     pub errors: AtomicU64,
+}
+
+impl Default for EngineMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EngineMetrics {
@@ -278,17 +280,11 @@ impl EngineMetrics {
 
         output.push_str("# HELP kestrel_events_received Total events received\n");
         output.push_str("# TYPE kestrel_events_received counter\n");
-        output.push_str(&format!(
-            "kestrel_events_received {}\n",
-            snap.events_received
-        ));
+        output.push_str(&format!("kestrel_events_received {}\n", snap.events_received));
 
         output.push_str("# HELP kestrel_events_processed Total events processed\n");
         output.push_str("# TYPE kestrel_events_processed counter\n");
-        output.push_str(&format!(
-            "kestrel_events_processed {}\n",
-            snap.events_processed
-        ));
+        output.push_str(&format!("kestrel_events_processed {}\n", snap.events_processed));
 
         output.push_str("# HELP kestrel_events_dropped Total events dropped\n");
         output.push_str("# TYPE kestrel_events_dropped counter\n");
@@ -296,52 +292,32 @@ impl EngineMetrics {
 
         output.push_str("# HELP kestrel_alerts_generated Total alerts generated\n");
         output.push_str("# TYPE kestrel_alerts_generated counter\n");
-        output.push_str(&format!(
-            "kestrel_alerts_generated {}\n",
-            snap.alerts_generated
-        ));
+        output.push_str(&format!("kestrel_alerts_generated {}\n", snap.alerts_generated));
 
         output.push_str("# HELP kestrel_current_events_per_second Current events per second\n");
         output.push_str("# TYPE kestrel_current_events_per_second gauge\n");
-        output.push_str(&format!(
-            "kestrel_current_events_per_second {}\n",
-            snap.current_eps
-        ));
+        output.push_str(&format!("kestrel_current_events_per_second {}\n", snap.current_eps));
 
         output.push_str("# HELP kestrel_peak_events_per_second Peak events per second observed\n");
         output.push_str("# TYPE kestrel_peak_events_per_second gauge\n");
-        output.push_str(&format!(
-            "kestrel_peak_events_per_second {}\n",
-            snap.peak_eps
-        ));
+        output.push_str(&format!("kestrel_peak_events_per_second {}\n", snap.peak_eps));
 
         output.push_str("# HELP kestrel_drop_rate_percent Drop rate percentage\n");
         output.push_str("# TYPE kestrel_drop_rate_percent gauge\n");
-        output.push_str(&format!(
-            "kestrel_drop_rate_percent {:.2}\n",
-            snap.drop_rate_pct
-        ));
+        output.push_str(&format!("kestrel_drop_rate_percent {:.2}\n", snap.drop_rate_pct));
 
         output.push_str("# HELP kestrel_nfa_active_states Current NFA active states\n");
         output.push_str("# TYPE kestrel_nfa_active_states gauge\n");
-        output.push_str(&format!(
-            "kestrel_nfa_active_states {}\n",
-            snap.nfa_active_states
-        ));
+        output.push_str(&format!("kestrel_nfa_active_states {}\n", snap.nfa_active_states));
 
         output.push_str("# HELP kestrel_peak_nfa_active_states Peak NFA active states\n");
         output.push_str("# TYPE kestrel_peak_nfa_active_states gauge\n");
-        output.push_str(&format!(
-            "kestrel_peak_nfa_active_states {}\n",
-            snap.peak_nfa_active_states
-        ));
+        output
+            .push_str(&format!("kestrel_peak_nfa_active_states {}\n", snap.peak_nfa_active_states));
 
         output.push_str("# HELP kestrel_backpressure_events Total backpressure events\n");
         output.push_str("# TYPE kestrel_backpressure_events counter\n");
-        output.push_str(&format!(
-            "kestrel_backpressure_events {}\n",
-            snap.backpressure_events
-        ));
+        output.push_str(&format!("kestrel_backpressure_events {}\n", snap.backpressure_events));
 
         output.push_str("# HELP kestrel_errors Total errors\n");
         output.push_str("# TYPE kestrel_errors counter\n");
@@ -609,31 +585,31 @@ impl UnifiedMetrics {
             output.push_str("# HELP kestrel_pool_size Total pool size\n");
             output.push_str("# TYPE kestrel_pool_size gauge\n");
             output.push_str(&format!("kestrel_pool_size {}\n", pool.pool_size));
-            
+
             output.push_str("# HELP kestrel_pool_active_instances Currently active instances\n");
             output.push_str("# TYPE kestrel_pool_active_instances gauge\n");
             output.push_str(&format!("kestrel_pool_active_instances {}\n", pool.active_instances));
-            
+
             output.push_str("# HELP kestrel_pool_acquires_total Total pool acquires\n");
             output.push_str("# TYPE kestrel_pool_acquires_total counter\n");
             output.push_str(&format!("kestrel_pool_acquires_total {}\n", pool.total_acquires));
-            
+
             output.push_str("# HELP kestrel_pool_releases_total Total pool releases\n");
             output.push_str("# TYPE kestrel_pool_releases_total counter\n");
             output.push_str(&format!("kestrel_pool_releases_total {}\n", pool.total_releases));
-            
+
             output.push_str("# HELP kestrel_pool_misses_total Total pool misses\n");
             output.push_str("# TYPE kestrel_pool_misses_total counter\n");
             output.push_str(&format!("kestrel_pool_misses_total {}\n", pool.pool_misses));
-            
+
             output.push_str("# HELP kestrel_pool_wait_time_total Total wait time (ns)\n");
             output.push_str("# TYPE kestrel_pool_wait_time_total counter\n");
             output.push_str(&format!("kestrel_pool_wait_time_total {}\n", pool.total_wait_ns));
-            
+
             output.push_str("# HELP kestrel_pool_peak_wait_time Peak wait time (ns)\n");
             output.push_str("# TYPE kestrel_pool_peak_wait_time gauge\n");
             output.push_str(&format!("kestrel_pool_peak_wait_time {}\n", pool.peak_wait_ns));
-            
+
             // Calculate hit rate
             let total_requests = pool.total_acquires + pool.pool_misses;
             let hit_rate = if total_requests > 0 {
@@ -710,7 +686,7 @@ mod unified_metrics_tests {
     #[test]
     fn test_pool_metrics_prometheus_export() {
         let mut unified = UnifiedMetrics::new();
-        
+
         // Add pool metrics
         let pool = PoolMetricsSnapshot {
             pool_size: 10,
@@ -722,10 +698,10 @@ mod unified_metrics_tests {
             peak_wait_ns: 50_000,
         };
         unified = unified.with_pool(pool);
-        
+
         // Export to Prometheus format
         let output = unified.export_prometheus();
-        
+
         // Verify pool metrics are included
         assert!(output.contains("kestrel_pool_size 10"));
         assert!(output.contains("kestrel_pool_active_instances 3"));
@@ -734,7 +710,7 @@ mod unified_metrics_tests {
         assert!(output.contains("kestrel_pool_misses_total 5"));
         assert!(output.contains("kestrel_pool_wait_time_total 1000000"));
         assert!(output.contains("kestrel_pool_peak_wait_time 50000"));
-        
+
         // Verify hit rate calculation (100 / (100 + 5) * 100 = 95.24)
         assert!(output.contains("kestrel_pool_hit_rate 95.24"));
     }
@@ -742,7 +718,7 @@ mod unified_metrics_tests {
     #[test]
     fn test_pool_metrics_json_export() {
         let mut unified = UnifiedMetrics::new();
-        
+
         let pool = PoolMetricsSnapshot {
             pool_size: 10,
             active_instances: 3,
@@ -753,9 +729,9 @@ mod unified_metrics_tests {
             peak_wait_ns: 50_000,
         };
         unified = unified.with_pool(pool);
-        
+
         let json = unified.export_json();
-        
+
         assert_eq!(json["pool"]["size"], 10);
         assert_eq!(json["pool"]["active_instances"], 3);
         assert_eq!(json["pool"]["total_acquires"], 100);

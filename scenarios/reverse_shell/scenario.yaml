@@ -1,0 +1,48 @@
+id: reverse-shell-minimal
+name: Reverse Shell Simulation
+category: command-and-control
+severity: critical
+status: draft
+summary: >-
+  Simulates a minimal reverse-shell style behavior chain for validating process
+  execution and outbound network connect detections in an isolated lab.
+
+objectives:
+  - validate reverse shell detection rules
+  - validate process + network correlation paths
+  - produce a repeatable scenario for replay and battle-lab regression
+
+safe_defaults:
+  execute_by_default: false
+  requires_isolation: true
+  requires_loopback_only: true
+  notes:
+    - By default the script only prints commands and sleeps briefly.
+    - Set KESTREL_LAB_EXECUTE=1 to actually execute the simulated commands.
+    - The default endpoint is 127.0.0.1 on a configurable local port.
+
+telemetry_expectations:
+  categories:
+    - process
+    - network
+  important_fields:
+    - process.executable
+    - process.command_line
+    - process.operation
+    - network.destination
+    - network.dest_port
+    - network.operation
+
+recommended_rules:
+  - revshell-001
+
+success_criteria:
+  expected_alerts_min: 1
+  required_rule_ids:
+    - revshell-001
+
+execution:
+  entrypoint: attack.sh
+  env:
+    DEFAULT_HOST: 127.0.0.1
+    DEFAULT_PORT: 4444

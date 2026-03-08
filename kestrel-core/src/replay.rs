@@ -146,11 +146,11 @@ impl From<kestrel_schema::TypedValue> for SerializedValue {
             kestrel_schema::TypedValue::Array(v) => {
                 // Serialize array as JSON string for compatibility
                 Self::String(serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string()))
-            }
+            },
             kestrel_schema::TypedValue::Null => {
                 // Represent null as empty string
                 Self::String(String::new())
-            }
+            },
         }
     }
 }
@@ -172,7 +172,12 @@ impl BinaryLog {
     }
 
     /// Write events to log file
-    pub fn write_events(&self, path: PathBuf, events: &[Event], rule_pack_hash: String) -> Result<(), ReplayError> {
+    pub fn write_events(
+        &self,
+        path: PathBuf,
+        events: &[Event],
+        rule_pack_hash: String,
+    ) -> Result<(), ReplayError> {
         if events.is_empty() {
             // Create empty file with header only
             let file = File::create(&path)?;
@@ -185,7 +190,7 @@ impl BinaryLog {
                 serde_json::to_string_pretty(&header)
                     .map_err(|e| ReplayError::Serialization(e.to_string()))?
             )
-            .map_err(|e| ReplayError::Io(e))?;
+            .map_err(ReplayError::Io)?;
 
             writer.flush()?;
             if let Ok(file) = writer.into_inner() {
@@ -209,7 +214,7 @@ impl BinaryLog {
             serde_json::to_string(&header)
                 .map_err(|e| ReplayError::Serialization(e.to_string()))?
         )
-        .map_err(|e| ReplayError::Io(e))?;
+        .map_err(ReplayError::Io)?;
 
         // Write events
         for event in events {
@@ -233,12 +238,12 @@ impl BinaryLog {
                 serde_json::to_string(&serialized)
                     .map_err(|e| ReplayError::Serialization(e.to_string()))?
             )
-            .map_err(|e| ReplayError::Io(e))?;
+            .map_err(ReplayError::Io)?;
         }
 
         // Flush and sync to ensure data is written to disk
         writer.flush()?;
-        if let Some(file) = writer.into_inner().ok() {
+        if let Ok(file) = writer.into_inner() {
             file.sync_all()?;
         }
 
@@ -261,9 +266,7 @@ impl BinaryLog {
             .map_err(|e| ReplayError::Serialization(e.to_string()))?;
 
         if !header.is_valid() {
-            return Err(ReplayError::InvalidFormat(
-                "Invalid magic bytes or version".to_string(),
-            ));
+            return Err(ReplayError::InvalidFormat("Invalid magic bytes or version".to_string()));
         }
 
         // Validate schema version
@@ -277,7 +280,7 @@ impl BinaryLog {
         // Read events (one per line)
         let mut events = Vec::new();
         for line in reader.lines() {
-            let line = line.map_err(|e| ReplayError::Io(e))?;
+            let line = line.map_err(ReplayError::Io)?;
             if line.is_empty() {
                 continue;
             }
@@ -512,21 +515,15 @@ impl ReplaySource {
 
             all_results.push(run_results.clone());
 
-            if run > 0 {
-                if run_results != all_results[0] {
-                    mismatches.push(VerificationMismatch {
-                        run_number: run + 1,
-                        first_run_result: format!("{:?}", all_results[0]),
-                        current_run_result: format!("{:?}", run_results),
-                    });
-                }
+            if run > 0 && run_results != all_results[0] {
+                mismatches.push(VerificationMismatch {
+                    run_number: run + 1,
+                    first_run_result: format!("{:?}", all_results[0]),
+                    current_run_result: format!("{:?}", run_results),
+                });
             }
 
-            info!(
-                run = run + 1,
-                events = events.len(),
-                "Verification run completed"
-            );
+            info!(run = run + 1, events = events.len(), "Verification run completed");
         }
 
         Ok(VerificationRunResult::from_results(
@@ -623,7 +620,7 @@ mod tests {
     use crate::{EventBus, EventBusConfig, TimeManager};
     use kestrel_event::Event;
     use kestrel_schema::{SchemaRegistry, TypedValue};
-    use std::fs::remove_file;
+
     use std::time::Duration;
 
     fn create_test_schema() -> Arc<SchemaRegistry> {
@@ -758,10 +755,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let metrics = handle.metrics();
-        assert_eq!(
-            metrics.events_received, 100,
-            "Should have received 100 events"
-        );
+        assert_eq!(metrics.events_received, 100, "Should have received 100 events");
 
         let _ = std::fs::remove_file(log_path);
     }
@@ -776,7 +770,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_replay_consistent.log");
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let mut run_results: Vec<u64> = Vec::new();
 
@@ -831,7 +826,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_mock_time_sync.log");
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager = TimeManager::mock();
         let event_bus = EventBus::new(EventBusConfig::default());
@@ -850,10 +846,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let metrics = handle.metrics();
-        assert_eq!(
-            metrics.events_received, 10,
-            "Should have received 10 events"
-        );
+        assert_eq!(metrics.events_received, 10, "Should have received 10 events");
     }
 
     #[tokio::test]
@@ -876,7 +869,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_event_ordering.log");
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager = TimeManager::mock();
         let event_bus = EventBus::new(EventBusConfig::default());
@@ -895,10 +889,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let metrics = handle.metrics();
-        assert_eq!(
-            metrics.events_processed, 20,
-            "Should have processed 20 events"
-        );
+        assert_eq!(metrics.events_processed, 20, "Should have processed 20 events");
     }
 
     #[tokio::test]
@@ -921,7 +912,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join("test_speed_multiplier.log");
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager_fast = TimeManager::mock();
         let event_bus_fast = EventBus::new(EventBusConfig::default());
@@ -1003,7 +995,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_verification_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager = TimeManager::mock();
 
@@ -1058,7 +1051,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_collect_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager = TimeManager::mock();
         let config = ReplayConfig {
@@ -1104,7 +1098,8 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let log_path = temp_dir.join(format!("test_reset_{}.log", std::process::id()));
 
-        log.write_events(log_path.clone(), &events, "test_hash".to_string()).unwrap();
+        log.write_events(log_path.clone(), &events, "test_hash".to_string())
+            .unwrap();
 
         let time_manager = TimeManager::mock();
         let config = ReplayConfig {

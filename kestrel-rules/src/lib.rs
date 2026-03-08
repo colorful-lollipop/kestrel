@@ -3,6 +3,7 @@
 //! This module handles rule loading, hot-reloading, and lifecycle management.
 
 use anyhow::Result;
+use kestrel_schema::RuleManifest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,8 +14,8 @@ use tracing::{debug, error, info, warn};
 
 pub mod compiler;
 pub use compiler::{
-    CompileResult, CompiledForm, CompiledRule, CompilationError, CompilationManager,
-    IrCondition, IrPredicate, IrRule, IrRuleType, IrSequenceStep, RuleCompiler,
+    CompilationError, CompilationManager, CompileResult, CompiledForm, CompiledRule, IrCondition,
+    IrPredicate, IrRule, IrRuleType, IrSequenceStep, RuleCompiler,
 };
 
 /// Rule manager configuration
@@ -104,10 +105,11 @@ pub struct RuleManager {
 impl RuleManager {
     /// Create a new rule manager
     pub fn new(config: RuleManagerConfig) -> Self {
+        let max_concurrent_loads = config.max_concurrent_loads.max(1);
         Self {
             config,
             rules: Arc::new(RwLock::new(HashMap::new())),
-            load_semaphore: Arc::new(Semaphore::new(4)),
+            load_semaphore: Arc::new(Semaphore::new(max_concurrent_loads)),
         }
     }
 
@@ -117,11 +119,13 @@ impl RuleManager {
 
         let mut stats = LoadStats::default();
 
+        {
+            let mut rules = self.rules.write().await;
+            rules.clear();
+        }
+
         if !self.config.rules_dir.exists() {
-            warn!(
-                "Rules directory does not exist: {}",
-                self.config.rules_dir.display()
-            );
+            warn!("Rules directory does not exist: {}", self.config.rules_dir.display());
             return Ok(stats);
         }
 
@@ -133,33 +137,37 @@ impl RuleManager {
                 entry.map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
             let path = entry.path();
 
-            if path.is_dir() {
-                continue;
-            }
+            let load_result = if path.is_dir() {
+                self.load_rule_package(&path).await
+            } else {
+                self.load_rule_file(&path).await
+            };
 
-            match self.load_rule_file(&path).await {
+            match load_result {
                 Ok(_) => {
                     stats.loaded += 1;
                     debug!(path = %path.display(), "Loaded rule");
-                }
+                },
                 Err(e) => {
                     stats.failed += 1;
                     error!(path = %path.display(), error = %e, "Failed to load rule");
-                }
+                },
             }
         }
 
-        info!(
-            loaded = stats.loaded,
-            failed = stats.failed,
-            "Rule loading complete"
-        );
+        info!(loaded = stats.loaded, failed = stats.failed, "Rule loading complete");
 
         Ok(stats)
     }
 
     /// Load a single rule file
     async fn load_rule_file(&self, path: &Path) -> Result<(), RuleManagerError> {
+        let _permit = self
+            .load_semaphore
+            .acquire()
+            .await
+            .map_err(|_| RuleManagerError::LoadLimitExceeded)?;
+
         let extension = path
             .extension()
             .and_then(|e| e.to_str())
@@ -171,6 +179,70 @@ impl RuleManager {
             "eql" => self.load_eql_rule(path).await,
             _ => Err(RuleManagerError::InvalidRuleFormat(path.to_path_buf())),
         }
+    }
+
+    /// Load a directory-based rule package.
+    async fn load_rule_package(&self, path: &Path) -> Result<(), RuleManagerError> {
+        let _permit = self
+            .load_semaphore
+            .acquire()
+            .await
+            .map_err(|_| RuleManagerError::LoadLimitExceeded)?;
+
+        let manifest_path = path.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(RuleManagerError::InvalidRuleFormat(path.to_path_buf()));
+        }
+
+        let manifest_content = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| RuleManagerError::IoError(manifest_path.clone(), e))?;
+        let manifest: RuleManifest = serde_json::from_str(&manifest_content)
+            .map_err(|e| RuleManagerError::ParseError(manifest_path.clone(), e.to_string()))?;
+
+        let metadata = RuleMetadata::try_from(manifest)
+            .map_err(|e| RuleManagerError::ParseError(manifest_path.clone(), e))?;
+
+        let definition = self.load_rule_package_definition(path)?;
+        self.insert_rule(Rule {
+            metadata,
+            definition,
+        })
+        .await
+    }
+
+    fn load_rule_package_definition(
+        &self,
+        path: &Path,
+    ) -> Result<RuleDefinition, RuleManagerError> {
+        let eql_path = path.join("rule.eql");
+        if eql_path.exists() {
+            let content = std::fs::read_to_string(&eql_path)
+                .map_err(|e| RuleManagerError::IoError(eql_path.clone(), e))?;
+            return Ok(RuleDefinition::Eql(content));
+        }
+
+        let lua_path = path.join("predicate.lua");
+        if lua_path.exists() {
+            let content = std::fs::read_to_string(&lua_path)
+                .map_err(|e| RuleManagerError::IoError(lua_path.clone(), e))?;
+            return Ok(RuleDefinition::Lua(content));
+        }
+
+        let wasm_path = path.join("rule.wasm");
+        if wasm_path.exists() {
+            let content = std::fs::read(&wasm_path)
+                .map_err(|e| RuleManagerError::IoError(wasm_path.clone(), e))?;
+            return Ok(RuleDefinition::Wasm(content));
+        }
+
+        let wat_path = path.join("rule.wat");
+        if wat_path.exists() {
+            let content = std::fs::read_to_string(&wat_path)
+                .map_err(|e| RuleManagerError::IoError(wat_path.clone(), e))?;
+            return Ok(RuleDefinition::Wasm(content.into_bytes()));
+        }
+
+        Err(RuleManagerError::InvalidRuleFormat(path.to_path_buf()))
     }
 
     /// Load a JSON rule file
@@ -186,10 +258,7 @@ impl RuleManager {
             definition: RuleDefinition::Eql(content),
         };
 
-        let mut rules = self.rules.write().await;
-        rules.insert(metadata.id.clone(), rule);
-
-        Ok(())
+        self.insert_rule(rule).await
     }
 
     /// Load a YAML rule file
@@ -205,10 +274,7 @@ impl RuleManager {
             definition: RuleDefinition::Eql(content),
         };
 
-        let mut rules = self.rules.write().await;
-        rules.insert(metadata.id.clone(), rule);
-
-        Ok(())
+        self.insert_rule(rule).await
     }
 
     /// Load an EQL rule file
@@ -238,8 +304,17 @@ impl RuleManager {
             definition: RuleDefinition::Eql(content),
         };
 
+        self.insert_rule(rule).await
+    }
+
+    async fn insert_rule(&self, rule: Rule) -> Result<(), RuleManagerError> {
         let mut rules = self.rules.write().await;
-        rules.insert(id, rule);
+        let rule_id = rule.metadata.id.clone();
+        if rules.contains_key(&rule_id) {
+            return Err(RuleManagerError::DuplicateRuleId(rule_id));
+        }
+
+        rules.insert(rule_id, rule);
 
         Ok(())
     }
@@ -279,8 +354,38 @@ pub enum RuleManagerError {
     #[error("Parse error in {0:?}: {1}")]
     ParseError(PathBuf, String),
 
+    #[error("Duplicate rule ID: {0}")]
+    DuplicateRuleId(String),
+
     #[error("Rule load limit exceeded")]
     LoadLimitExceeded,
+}
+
+impl TryFrom<RuleManifest> for RuleMetadata {
+    type Error = String;
+
+    fn try_from(manifest: RuleManifest) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            id: manifest.metadata.rule_id,
+            name: manifest.metadata.rule_name,
+            description: manifest.metadata.description,
+            version: manifest.metadata.rule_version,
+            author: manifest.metadata.author,
+            tags: manifest.metadata.tags,
+            severity: parse_severity(&manifest.metadata.severity)?,
+        })
+    }
+}
+
+fn parse_severity(severity: &str) -> std::result::Result<Severity, String> {
+    match severity.to_ascii_lowercase().as_str() {
+        "informational" | "info" => Ok(Severity::Informational),
+        "low" => Ok(Severity::Low),
+        "medium" => Ok(Severity::Medium),
+        "high" => Ok(Severity::High),
+        "critical" => Ok(Severity::Critical),
+        _ => Err(format!("unsupported severity: {severity}")),
+    }
 }
 
 #[cfg(test)]
@@ -325,5 +430,98 @@ mod tests {
         let rule = manager.get_rule("test-001").await;
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().metadata.name, "Test Rule");
+    }
+
+    #[tokio::test]
+    async fn test_rule_load_directory_package_prefers_eql() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let package_dir = temp_dir.path().join("rule_pkg");
+        std::fs::create_dir(&package_dir).unwrap();
+
+        std::fs::write(
+            package_dir.join("manifest.json"),
+            r#"{
+                "format_version": "1.0",
+                "metadata": {
+                    "rule_id": "pkg-001",
+                    "rule_name": "Package Rule",
+                    "rule_version": "1.0.0",
+                    "author": "Test Author",
+                    "description": "Package based rule",
+                    "tags": ["package"],
+                    "severity": "High",
+                    "schema_version": "1.0"
+                },
+                "capabilities": {
+                    "supports_inline": false,
+                    "requires_alert": true,
+                    "requires_block": false,
+                    "max_span_ms": null
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(package_dir.join("rule.eql"), "process where true").unwrap();
+        std::fs::write(package_dir.join("predicate.lua"), "function pred_eval() return true end")
+            .unwrap();
+
+        let manager = RuleManager::new(RuleManagerConfig {
+            rules_dir: temp_dir.path().to_path_buf(),
+            ..Default::default()
+        });
+        let stats = manager.load_all().await.unwrap();
+
+        assert_eq!(stats.loaded, 1);
+        let rule = manager.get_rule("pkg-001").await.unwrap();
+        assert_eq!(rule.metadata.severity, Severity::High);
+        match rule.definition {
+            RuleDefinition::Eql(definition) => assert_eq!(definition, "process where true"),
+            other => panic!("expected EQL definition, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rule_load_directory_package_lua_fallback() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let package_dir = temp_dir.path().join("rule_pkg");
+        std::fs::create_dir(&package_dir).unwrap();
+
+        std::fs::write(
+            package_dir.join("manifest.json"),
+            r#"{
+                "format_version": "1.0",
+                "metadata": {
+                    "rule_id": "pkg-lua-001",
+                    "rule_name": "Lua Package Rule",
+                    "rule_version": "1.0.0",
+                    "author": null,
+                    "description": null,
+                    "tags": [],
+                    "severity": "Low",
+                    "schema_version": "1.0"
+                },
+                "capabilities": {
+                    "supports_inline": false,
+                    "requires_alert": true,
+                    "requires_block": false,
+                    "max_span_ms": null
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(package_dir.join("predicate.lua"), "return true").unwrap();
+
+        let manager = RuleManager::new(RuleManagerConfig {
+            rules_dir: temp_dir.path().to_path_buf(),
+            ..Default::default()
+        });
+        let stats = manager.load_all().await.unwrap();
+
+        assert_eq!(stats.loaded, 1);
+        let rule = manager.get_rule("pkg-lua-001").await.unwrap();
+        match rule.definition {
+            RuleDefinition::Lua(script) => assert_eq!(script, "return true"),
+            other => panic!("expected Lua definition, got {other:?}"),
+        }
     }
 }

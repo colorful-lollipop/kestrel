@@ -60,7 +60,7 @@ fn main() {
             wasm_runtime::run();
             println!();
             stress_test::run();
-        }
+        },
         "--throughput" => throughput::run(),
         "--latency" => latency::run(),
         "--memory" => memory::run(),
@@ -70,12 +70,12 @@ fn main() {
         "--help" | "-h" | "help" => {
             print_usage();
             return;
-        }
+        },
         _ => {
             println!("Unknown option: {}", benchmark_type);
             print_usage();
             return;
-        }
+        },
     }
 
     let elapsed = start.elapsed();

@@ -7,16 +7,17 @@ use crate::BackpressureConfig;
 use kestrel_event::Event;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::{debug, error, info};
 
 /// Partition strategy for distributing events across workers
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PartitionStrategy {
     /// Partition by entity key only (simple modulo)
+    #[default]
     EntityKey,
     /// Partition by event type only
     EventType,
@@ -24,12 +25,6 @@ pub enum PartitionStrategy {
     Combined,
     /// Consistent hashing for better distribution
     ConsistentHash,
-}
-
-impl Default for PartitionStrategy {
-    fn default() -> Self {
-        PartitionStrategy::EntityKey
-    }
 }
 
 /// Partitioner trait for pluggable partitioning logic
@@ -59,17 +54,17 @@ impl Partitioner for DefaultPartitioner {
             PartitionStrategy::EntityKey => {
                 // Simple modulo on entity_key
                 (event.entity_key % partition_count as u128) as usize
-            }
+            },
             PartitionStrategy::EventType => {
                 // Use event_type_id for partition
                 (event.event_type_id as usize) % partition_count
-            }
+            },
             PartitionStrategy::Combined => {
                 // Combine event_type and entity_key
                 // This ensures events of the same type from the same entity go to the same partition
                 let combined = ((event.event_type_id as u128) << 64) | event.entity_key;
                 (combined % partition_count as u128) as usize
-            }
+            },
             PartitionStrategy::ConsistentHash => {
                 // Use consistent hashing for better distribution
                 let mut hasher = DefaultHasher::new();
@@ -77,7 +72,7 @@ impl Partitioner for DefaultPartitioner {
                 event.event_type_id.hash(&mut hasher);
                 let hash = hasher.finish();
                 (hash as usize) % partition_count
-            }
+            },
         }
     }
 }
@@ -152,11 +147,11 @@ impl EventBusHandle {
             Ok(()) => {
                 self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
                 Ok(())
-            }
+            },
             Err(_) => {
                 self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
                 Err(PublishError::Closed)
-            }
+            },
         }
     }
 
@@ -178,7 +173,7 @@ impl EventBusHandle {
                     permit.send(event);
                     self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
-                }
+                },
                 _ => return Err(PublishError::BackpressureTimeout),
             }
         }
@@ -197,14 +192,14 @@ impl EventBusHandle {
             Ok(()) => {
                 self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
                 Ok(())
-            }
+            },
             Err(e) => {
                 self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
                 match e {
                     mpsc::error::TrySendError::Full(_) => Err(PublishError::Full),
                     mpsc::error::TrySendError::Closed(_) => Err(PublishError::Closed),
                 }
-            }
+            },
         }
     }
 
@@ -246,7 +241,7 @@ impl EventBus {
 
         let senders = Arc::new(senders);
 
-        let partitioner: Arc<dyn Partitioner> = 
+        let partitioner: Arc<dyn Partitioner> =
             Arc::new(DefaultPartitioner::new(config.partition_strategy));
 
         let handle = EventBusHandle {
@@ -298,12 +293,12 @@ impl EventBus {
     }
 
     /// Create a new event bus with a default consumer that counts processed events
-    /// 
+    ///
     /// This is useful for testing and simple use cases where you don't need a custom sink.
     /// For production use, prefer `new_with_sink()` to connect to a downstream consumer.
     pub fn new(config: EventBusConfig) -> Self {
         let (sink_tx, mut sink_rx) = mpsc::channel(1);
-        
+
         // Spawn a background consumer that simply receives and drops events
         // This ensures events_processed metrics are correctly updated
         tokio::spawn(async move {
@@ -311,7 +306,7 @@ impl EventBus {
                 // Events are consumed and dropped, metrics already updated by worker_partition
             }
         });
-        
+
         Self::new_with_sink(config, sink_tx)
     }
 
@@ -373,7 +368,9 @@ impl EventBus {
                             "Failed to deliver batch on timeout"
                         );
                     } else {
-                        metrics.events_processed.fetch_add(batch_len as u64, Ordering::Relaxed);
+                        metrics
+                            .events_processed
+                            .fetch_add(batch_len as u64, Ordering::Relaxed);
                         debug!(
                             partition = partition_id,
                             batch_size = batch_len,
@@ -383,9 +380,9 @@ impl EventBus {
                     batch = Vec::with_capacity(batch_size);
                     last_send = tokio::time::Instant::now();
                     batch_timeout
-                    } else {
-                        batch_timeout - elapsed
-                    }
+                } else {
+                    batch_timeout - elapsed
+                }
             } else {
                 batch_timeout
             };

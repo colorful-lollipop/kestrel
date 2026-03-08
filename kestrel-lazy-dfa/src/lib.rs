@@ -1,5 +1,5 @@
-// Kestrel Lazy DFA - Hot Sequence Detection and DFA Caching
-//!
+//! Kestrel Lazy DFA - Hot Sequence Detection and DFA Caching
+
 // This crate provides lazy DFA construction and caching for frequently
 // used (hot) sequence patterns, optimizing performance for high-traffic rules.
 

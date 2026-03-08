@@ -16,6 +16,7 @@ tracing = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
 wat = "1.0"
+futures = "0.3"
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-core = { path = "../kestrel-core" }

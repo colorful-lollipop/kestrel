@@ -16,6 +16,7 @@ members = [
     "kestrel-cli",
     "kestrel-benchmark",
     "kestrel-ffi",
+    "kestrel-lab",
 ]
 resolver = "2"
 

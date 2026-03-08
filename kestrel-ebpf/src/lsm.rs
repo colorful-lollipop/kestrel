@@ -109,11 +109,13 @@ impl Default for LsmConfig {
 
 pub struct LsmHooks {
     attached: AttachedLsmPrograms,
+    #[allow(dead_code)]
     config: LsmConfig,
     blocking_rules: Arc<Mutex<StdHashMap<u64, BlockingRule>>>,
     blocked_pids: Arc<Mutex<StdHashMap<u32, BlockingAction>>>,
     blocked_paths: Arc<Mutex<StdHashMap<u64, ()>>>,
     blocked_networks: Arc<Mutex<StdHashMap<u64, ()>>>,
+    #[allow(dead_code)]
     shutdown: Arc<AtomicBool>,
     active: Arc<AtomicBool>,
 }
@@ -391,7 +393,7 @@ impl LsmExecutor {
             ActionType::Quarantine => {
                 warn!("Quarantine not directly supported, treating as block");
                 Ok(BlockingAction::Block)
-            }
+            },
         }
     }
 }
@@ -431,15 +433,15 @@ impl ActionExecutor for LsmExecutor {
                 lsm_hooks.block_pid(pid).map_err(|e| {
                     ActionError::ActionFailed(format!("Failed to block PID: {:?}", e))
                 })?;
-            }
+            },
             BlockingAction::Kill => {
                 lsm_hooks.kill_process(pid).map_err(|e| {
                     ActionError::ActionFailed(format!("Failed to kill process: {:?}", e))
                 })?;
-            }
+            },
             BlockingAction::Allow => {
                 lsm_hooks.unblock_pid(pid).ok();
-            }
+            },
         }
 
         Ok(ActionResult {
@@ -486,8 +488,8 @@ impl ActionExecutor for LsmExecutor {
 pub struct FanotifyFallback {
     fd: RawFd,
     mask: u64,
-    shutdown: Arc<AtomicBool>,
-    event_tx: Option<()>,
+    _shutdown: Arc<AtomicBool>,
+    _event_tx: Option<()>,
 }
 
 impl FanotifyFallback {
@@ -500,16 +502,14 @@ impl FanotifyFallback {
         };
 
         if fd < 0 {
-            return Err(LsmError::FanotifyError(
-                "Failed to initialize fanotify".to_string(),
-            ));
+            return Err(LsmError::FanotifyError("Failed to initialize fanotify".to_string()));
         }
 
         Ok(Self {
             fd,
             mask: mask as u64,
-            shutdown: Arc::new(AtomicBool::new(false)),
-            event_tx: None,
+            _shutdown: Arc::new(AtomicBool::new(false)),
+            _event_tx: None,
         })
     }
 
@@ -517,13 +517,7 @@ impl FanotifyFallback {
         let path_ptr = path.as_ptr() as *const libc::c_char;
 
         let ret = unsafe {
-            libc::fanotify_mark(
-                self.fd,
-                libc::FAN_MARK_ADD,
-                self.mask,
-                libc::AT_FDCWD,
-                path_ptr,
-            )
+            libc::fanotify_mark(self.fd, libc::FAN_MARK_ADD, self.mask, libc::AT_FDCWD, path_ptr)
         };
 
         if ret < 0 {
@@ -541,13 +535,7 @@ impl FanotifyFallback {
         let path_ptr = path.as_ptr() as *const libc::c_char;
 
         let ret = unsafe {
-            libc::fanotify_mark(
-                self.fd,
-                libc::FAN_MARK_REMOVE,
-                self.mask,
-                libc::AT_FDCWD,
-                path_ptr,
-            )
+            libc::fanotify_mark(self.fd, libc::FAN_MARK_REMOVE, self.mask, libc::AT_FDCWD, path_ptr)
         };
 
         if ret < 0 {
@@ -646,22 +634,10 @@ mod tests {
 
     #[test]
     fn test_lsm_executor_convert_action() {
-        assert_eq!(
-            LsmExecutor::convert_action(ActionType::Block).unwrap(),
-            BlockingAction::Block
-        );
-        assert_eq!(
-            LsmExecutor::convert_action(ActionType::Kill).unwrap(),
-            BlockingAction::Kill
-        );
-        assert_eq!(
-            LsmExecutor::convert_action(ActionType::Allow).unwrap(),
-            BlockingAction::Allow
-        );
-        assert_eq!(
-            LsmExecutor::convert_action(ActionType::Alert).unwrap(),
-            BlockingAction::Allow
-        );
+        assert_eq!(LsmExecutor::convert_action(ActionType::Block).unwrap(), BlockingAction::Block);
+        assert_eq!(LsmExecutor::convert_action(ActionType::Kill).unwrap(), BlockingAction::Kill);
+        assert_eq!(LsmExecutor::convert_action(ActionType::Allow).unwrap(), BlockingAction::Allow);
+        assert_eq!(LsmExecutor::convert_action(ActionType::Alert).unwrap(), BlockingAction::Allow);
     }
 
     #[test]
@@ -772,7 +748,8 @@ mod tests {
     #[tokio::test]
     async fn test_lsm_hooks_kernel_support() {
         let supported = LsmHooks::check_kernel_support().unwrap();
-        assert!(supported || !supported);
+        // Just verify check_kernel_support() returns Ok
+        let _ = supported;
     }
 
     #[tokio::test]

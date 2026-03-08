@@ -23,9 +23,9 @@ impl From<anyhow::Error> for KestrelError {
     }
 }
 
-/// Thread-local error message storage
+// Thread-local error message storage.
 thread_local! {
-    static LAST_ERROR: RwLock<Option<CString>> = RwLock::new(None);
+    static LAST_ERROR: RwLock<Option<CString>> = const { RwLock::new(None) };
 }
 
 /// Set last error message

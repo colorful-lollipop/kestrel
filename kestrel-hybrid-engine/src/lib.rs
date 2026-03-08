@@ -10,8 +10,8 @@ mod engine;
 mod release_perf;
 
 pub use analyzer::{
-    analyze_rule, ComplexityWeights, MatchingStrategy, RuleComplexity,
-    RuleComplexityAnalyzer, StrategyRecommendation,
+    ComplexityWeights, MatchingStrategy, RuleComplexity, RuleComplexityAnalyzer,
+    StrategyRecommendation, analyze_rule,
 };
 pub use engine::{HybridEngine, HybridEngineConfig, RuleStrategy};
 
@@ -171,15 +171,15 @@ mod tests {
 
     #[test]
     fn test_hybrid_engine_error_variants() {
-        let analysis_err = HybridEngineError::AnalysisError(
-            AnalysisError::UnsupportedOperation("test".to_string())
-        );
+        let analysis_err = HybridEngineError::AnalysisError(AnalysisError::UnsupportedOperation(
+            "test".to_string(),
+        ));
         assert!(analysis_err.is_analysis_error());
         assert!(!analysis_err.is_configuration_error());
 
-        let config_err = HybridEngineError::ConfigurationError(
-            ConfigurationError::InvalidWeight("negative".to_string())
-        );
+        let config_err = HybridEngineError::ConfigurationError(ConfigurationError::InvalidWeight(
+            "negative".to_string(),
+        ));
         assert!(config_err.is_configuration_error());
         assert!(!config_err.is_analysis_error());
     }

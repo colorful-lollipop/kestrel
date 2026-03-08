@@ -35,9 +35,7 @@ impl MatchPattern {
         rule_id: String,
     ) -> AcDfaResult<Self> {
         if pattern.is_empty() {
-            return Err(AcDfaError::InvalidPattern(
-                "Pattern cannot be empty".to_string(),
-            ));
+            return Err(AcDfaError::InvalidPattern("Pattern cannot be empty".to_string()));
         }
 
         // Generate a unique pattern ID
@@ -63,11 +61,7 @@ impl MatchPattern {
     }
 
     /// Create a pattern for prefix matching
-    pub fn starts_with(
-        pattern: String,
-        field_id: u32,
-        rule_id: String,
-    ) -> AcDfaResult<Self> {
+    pub fn starts_with(pattern: String, field_id: u32, rule_id: String) -> AcDfaResult<Self> {
         Self::new(pattern, field_id, PatternKind::StartsWith, rule_id)
     }
 

@@ -1,0 +1,15 @@
+{
+  "scenario_id": "lateral-movement-minimal",
+  "expected_rules": [
+    {
+      "rule_id": "latmove-001",
+      "min_hits": 1,
+      "reason": "Remote-access style process execution and loopback connection should exercise the lateral movement detection path."
+    }
+  ],
+  "unexpected_rules": [],
+  "notes": [
+    "This scenario is intended for isolated lab execution only.",
+    "Loopback-only behavior keeps the first version deterministic and safe for replay-driven rule iteration."
+  ]
+}

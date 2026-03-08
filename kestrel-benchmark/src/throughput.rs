@@ -6,6 +6,7 @@ use super::{format_duration, generate_test_events};
 
 const THROUGHPUT_EVENT_COUNTS: &[usize] = &[1000, 5000, 10000, 20000];
 
+#[allow(dead_code)]
 pub fn run_throughput_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("throughput");
 
@@ -16,7 +17,7 @@ pub fn run_throughput_benchmarks(c: &mut Criterion) {
 
                 let config = EngineConfig::default();
 
-                let mut engine =
+                let engine =
                     runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
 
                 let events = generate_test_events(count);
@@ -60,7 +61,7 @@ pub fn run_throughput_report() {
 
     let config = EngineConfig::default();
 
-    let mut engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
+    let engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
 
     for &count in THROUGHPUT_EVENT_COUNTS {
         let events = generate_test_events(count);

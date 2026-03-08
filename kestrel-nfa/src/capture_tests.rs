@@ -89,7 +89,7 @@ mod capture_tests {
     struct TestPredicateEvaluator;
 
     impl crate::PredicateEvaluator for TestPredicateEvaluator {
-        fn evaluate(&self, _predicate_id: &str, _event: &Event) -> NfaResult<bool> {
+        async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> NfaResult<bool> {
             Ok(true)
         }
 

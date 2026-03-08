@@ -21,10 +21,7 @@ pub fn generate_test_events(count: usize) -> Vec<Event> {
             .ts_mono(ts)
             .ts_wall(ts)
             .entity_key(entity_key)
-            .field(
-                1,
-                TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10))),
-            )
+            .field(1, TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10))))
             .field(2, TypedValue::I64(rng.gen()))
             .field(3, TypedValue::U64(rng.gen()))
             .field(4, TypedValue::Bool(rng.gen()))
@@ -122,18 +119,14 @@ pub fn create_single_test_event() -> Event {
 }
 
 pub fn calculate_percentiles(
-    values: &mut Vec<std::time::Duration>,
-) -> (
-    std::time::Duration,
-    std::time::Duration,
-    std::time::Duration,
-) {
+    values: &mut [std::time::Duration],
+) -> (std::time::Duration, std::time::Duration, std::time::Duration) {
     values.sort();
     let len = values.len();
 
-    let p50 = values[len / 2].clone();
-    let p90 = values[(len * 90) / 100].clone();
-    let p99 = values[(len * 99) / 100].clone();
+    let p50 = values[len / 2];
+    let p90 = values[(len * 90) / 100];
+    let p99 = values[(len * 99) / 100];
 
     (p50, p90, p99)
 }

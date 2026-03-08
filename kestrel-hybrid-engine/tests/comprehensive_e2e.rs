@@ -2,15 +2,16 @@
 //!
 //! 完整的端到端测试套件，验证NFA引擎的各种场景
 
+use kestrel_event::Event;
 use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
 use kestrel_nfa::{CompiledSequence, NfaSequence, PredicateEvaluator, SeqStep};
-use kestrel_event::Event;
 use std::sync::Arc;
 
 struct SimpleEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for SimpleEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -30,7 +31,11 @@ fn create_engine() -> HybridEngine {
 }
 
 /// 创建测试序列：SeqStep::new(state_id, predicate_id, event_type_id)
-fn create_sequence(id: &str, steps: Vec<(u16, &str, u16)>, maxspan: Option<u64>) -> CompiledSequence {
+fn create_sequence(
+    id: &str,
+    steps: Vec<(u16, &str, u16)>,
+    maxspan: Option<u64>,
+) -> CompiledSequence {
     let seq_steps: Vec<_> = steps
         .iter()
         .map(|(state_id, pred_id, event_type)| {
@@ -38,13 +43,7 @@ fn create_sequence(id: &str, steps: Vec<(u16, &str, u16)>, maxspan: Option<u64>)
         })
         .collect();
 
-    let sequence = NfaSequence::new(
-        id.to_string(),
-        100,
-        seq_steps,
-        maxspan,
-        None,
-    );
+    let sequence = NfaSequence::new(id.to_string(), 100, seq_steps, maxspan, None);
 
     CompiledSequence {
         id: id.to_string(),
@@ -59,11 +58,7 @@ fn test_two_step_sequence() {
     let mut engine = create_engine();
 
     // 2步序列：event_type 1 -> event_type 2
-    let sequence = create_sequence(
-        "two-step",
-        vec![(0, "p1", 1), (1, "p2", 2)],
-        Some(5000),
-    );
+    let sequence = create_sequence("two-step", vec![(0, "p1", 1), (1, "p2", 2)], Some(5000));
 
     engine.load_sequence(sequence).unwrap();
 
@@ -100,17 +95,32 @@ fn test_three_step_sequence() {
     let mut engine = create_engine();
 
     // 3步序列
-    let sequence = create_sequence(
-        "three-step",
-        vec![(0, "p1", 1), (1, "p2", 2), (2, "p3", 3)],
-        Some(10000),
-    );
+    let sequence =
+        create_sequence("three-step", vec![(0, "p1", 1), (1, "p2", 2), (2, "p3", 3)], Some(10000));
 
     engine.load_sequence(sequence).unwrap();
 
-    let e1 = Event::builder().event_type(1).ts_mono(1000).ts_wall(1000).entity_key(456).build().unwrap();
-    let e2 = Event::builder().event_type(2).ts_mono(2000).ts_wall(2000).entity_key(456).build().unwrap();
-    let e3 = Event::builder().event_type(3).ts_mono(3000).ts_wall(3000).entity_key(456).build().unwrap();
+    let e1 = Event::builder()
+        .event_type(1)
+        .ts_mono(1000)
+        .ts_wall(1000)
+        .entity_key(456)
+        .build()
+        .unwrap();
+    let e2 = Event::builder()
+        .event_type(2)
+        .ts_mono(2000)
+        .ts_wall(2000)
+        .entity_key(456)
+        .build()
+        .unwrap();
+    let e3 = Event::builder()
+        .event_type(3)
+        .ts_mono(3000)
+        .ts_wall(3000)
+        .entity_key(456)
+        .build()
+        .unwrap();
 
     engine.process_event(&e1).unwrap();
     engine.process_event(&e2).unwrap();
@@ -135,10 +145,34 @@ fn test_four_step_sequence() {
 
     engine.load_sequence(sequence).unwrap();
 
-    let e1 = Event::builder().event_type(1).ts_mono(1000).ts_wall(1000).entity_key(789).build().unwrap();
-    let e2 = Event::builder().event_type(3).ts_mono(2000).ts_wall(2000).entity_key(789).build().unwrap();
-    let e3 = Event::builder().event_type(4).ts_mono(3000).ts_wall(3000).entity_key(789).build().unwrap();
-    let e4 = Event::builder().event_type(6).ts_mono(4000).ts_wall(4000).entity_key(789).build().unwrap();
+    let e1 = Event::builder()
+        .event_type(1)
+        .ts_mono(1000)
+        .ts_wall(1000)
+        .entity_key(789)
+        .build()
+        .unwrap();
+    let e2 = Event::builder()
+        .event_type(3)
+        .ts_mono(2000)
+        .ts_wall(2000)
+        .entity_key(789)
+        .build()
+        .unwrap();
+    let e3 = Event::builder()
+        .event_type(4)
+        .ts_mono(3000)
+        .ts_wall(3000)
+        .entity_key(789)
+        .build()
+        .unwrap();
+    let e4 = Event::builder()
+        .event_type(6)
+        .ts_mono(4000)
+        .ts_wall(4000)
+        .entity_key(789)
+        .build()
+        .unwrap();
 
     engine.process_event(&e1).unwrap();
     engine.process_event(&e2).unwrap();
@@ -156,21 +190,41 @@ fn test_different_entities_separate_matches() {
     let mut engine = create_engine();
 
     // 2步序列
-    let sequence = create_sequence(
-        "multi-entity",
-        vec![(0, "p1", 1), (1, "p2", 2)],
-        Some(5000),
-    );
+    let sequence = create_sequence("multi-entity", vec![(0, "p1", 1), (1, "p2", 2)], Some(5000));
 
     engine.load_sequence(sequence).unwrap();
 
     // 实体A的两个事件
-    let e1a = Event::builder().event_type(1).ts_mono(1000).ts_wall(1000).entity_key(111).build().unwrap();
-    let e2a = Event::builder().event_type(2).ts_mono(2000).ts_wall(2000).entity_key(111).build().unwrap();
+    let e1a = Event::builder()
+        .event_type(1)
+        .ts_mono(1000)
+        .ts_wall(1000)
+        .entity_key(111)
+        .build()
+        .unwrap();
+    let e2a = Event::builder()
+        .event_type(2)
+        .ts_mono(2000)
+        .ts_wall(2000)
+        .entity_key(111)
+        .build()
+        .unwrap();
 
     // 实体B的两个事件
-    let e1b = Event::builder().event_type(1).ts_mono(3000).ts_wall(3000).entity_key(222).build().unwrap();
-    let e2b = Event::builder().event_type(2).ts_mono(4000).ts_wall(4000).entity_key(222).build().unwrap();
+    let e1b = Event::builder()
+        .event_type(1)
+        .ts_mono(3000)
+        .ts_wall(3000)
+        .entity_key(222)
+        .build()
+        .unwrap();
+    let e2b = Event::builder()
+        .event_type(2)
+        .ts_mono(4000)
+        .ts_wall(4000)
+        .entity_key(222)
+        .build()
+        .unwrap();
 
     engine.process_event(&e1a).unwrap();
     let alerts_a = engine.process_event(&e2a).unwrap();
@@ -199,10 +253,22 @@ fn test_maxspan_timeout() {
 
     engine.load_sequence(sequence).unwrap();
 
-    let e1 = Event::builder().event_type(1).ts_mono(1_000_000_000).ts_wall(1_000_000_000).entity_key(999).build().unwrap();
+    let e1 = Event::builder()
+        .event_type(1)
+        .ts_mono(1_000_000_000)
+        .ts_wall(1_000_000_000)
+        .entity_key(999)
+        .build()
+        .unwrap();
 
     // 第二个事件在500ms后（超过maxspan）
-    let e2 = Event::builder().event_type(2).ts_mono(1_500_000_000).ts_wall(1_500_000_000).entity_key(999).build().unwrap();
+    let e2 = Event::builder()
+        .event_type(2)
+        .ts_mono(1_500_000_000)
+        .ts_wall(1_500_000_000)
+        .entity_key(999)
+        .build()
+        .unwrap();
 
     engine.process_event(&e1).unwrap();
     let alerts = engine.process_event(&e2).unwrap();
@@ -217,11 +283,7 @@ fn test_performance_1000_events() {
     let mut engine = create_engine();
 
     // 单步序列
-    let sequence = create_sequence(
-        "perf-test",
-        vec![(0, "p1", 1)],
-        None,
-    );
+    let sequence = create_sequence("perf-test", vec![(0, "p1", 1)], None);
 
     engine.load_sequence(sequence).unwrap();
 
@@ -270,11 +332,23 @@ fn test_multiple_rules_same_event() {
     engine.load_sequence(seq3).unwrap();
 
     // 事件type=1应该匹配rule1和rule2
-    let event1 = Event::builder().event_type(1).ts_mono(1000).ts_wall(1000).entity_key(1).build().unwrap();
+    let event1 = Event::builder()
+        .event_type(1)
+        .ts_mono(1000)
+        .ts_wall(1000)
+        .entity_key(1)
+        .build()
+        .unwrap();
     let alerts1 = engine.process_event(&event1).unwrap();
 
     // 事件type=2应该匹配rule3
-    let event2 = Event::builder().event_type(2).ts_mono(2000).ts_wall(2000).entity_key(1).build().unwrap();
+    let event2 = Event::builder()
+        .event_type(2)
+        .ts_mono(2000)
+        .ts_wall(2000)
+        .entity_key(1)
+        .build()
+        .unwrap();
     let alerts2 = engine.process_event(&event2).unwrap();
 
     assert_eq!(alerts1.len(), 2, "Event type 1 should match 2 rules");
@@ -295,10 +369,34 @@ fn test_interleaved_sequences() {
     engine.load_sequence(seq_b).unwrap();
 
     // 交错事件：type=1 (seq-a step 0), type=3 (seq-b step 0), type=2 (seq-a step 1), type=4 (seq-b step 1)
-    let e1 = Event::builder().event_type(1).ts_mono(1000).ts_wall(1000).entity_key(777).build().unwrap();
-    let e2 = Event::builder().event_type(3).ts_mono(2000).ts_wall(2000).entity_key(777).build().unwrap();
-    let e3 = Event::builder().event_type(2).ts_mono(3000).ts_wall(3000).entity_key(777).build().unwrap();
-    let e4 = Event::builder().event_type(4).ts_mono(4000).ts_wall(4000).entity_key(777).build().unwrap();
+    let e1 = Event::builder()
+        .event_type(1)
+        .ts_mono(1000)
+        .ts_wall(1000)
+        .entity_key(777)
+        .build()
+        .unwrap();
+    let e2 = Event::builder()
+        .event_type(3)
+        .ts_mono(2000)
+        .ts_wall(2000)
+        .entity_key(777)
+        .build()
+        .unwrap();
+    let e3 = Event::builder()
+        .event_type(2)
+        .ts_mono(3000)
+        .ts_wall(3000)
+        .entity_key(777)
+        .build()
+        .unwrap();
+    let e4 = Event::builder()
+        .event_type(4)
+        .ts_mono(4000)
+        .ts_wall(4000)
+        .entity_key(777)
+        .build()
+        .unwrap();
 
     engine.process_event(&e1).unwrap();
     engine.process_event(&e2).unwrap();

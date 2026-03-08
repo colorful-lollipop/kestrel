@@ -17,6 +17,7 @@ kestrel-hybrid-engine = { path = "../kestrel-hybrid-engine" }
 kestrel-nfa = { path = "../kestrel-nfa" }
 
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }

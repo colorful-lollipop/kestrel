@@ -31,6 +31,7 @@ typedef __u64 u64;
 typedef int pid_t;
 typedef unsigned int uid_t;
 typedef unsigned int gid_t;
+typedef __u16 sa_family_t;
 
 #ifndef __VMLINUX_H__
 /* Minimal type definitions if vmlinux.h is not available */
@@ -56,12 +57,34 @@ struct linux_binprm {
     int interp_flags;
 };
 
-struct file {
-    const char *f_path;
-};
-
 struct inode {
     u64 i_ino;
+};
+
+struct qstr {
+    union {
+        struct {
+            u32 hash;
+            u32 len;
+        };
+        u64 hash_len;
+    };
+    const unsigned char *name;
+};
+
+struct dentry {
+    struct qstr d_name;
+    struct inode *d_inode;
+    struct dentry *d_parent;
+};
+
+struct path {
+    void *mnt;
+    struct dentry *dentry;
+};
+
+struct file {
+    struct path f_path;
 };
 
 struct trace_event_raw_sys_enter {
@@ -73,10 +96,31 @@ struct trace_event_raw_sys_enter {
     long args[6];
 };
 
+struct bpf_lsm_ctx;
+
 struct sockaddr {
     __u16 sa_family;
     char sa_data[14];
 };
+
+struct sockaddr_in {
+    sa_family_t sin_family;
+    __u16 sin_port;
+    __u32 sin_addr;
+};
+
+struct in6_addr {
+    __u8 s6_addr[16];
+};
+
+struct sockaddr_in6 {
+    sa_family_t sin6_family;
+    __u16 sin6_port;
+    __u32 sin6_flowinfo;
+    struct in6_addr sin6_addr;
+    __u32 sin6_scope_id;
+};
+
 #endif
 
 #define MAX_PATH_LEN 256
@@ -84,17 +128,32 @@ struct sockaddr {
 #define TASK_COMM_LEN 16
 #define MAX_BLOCKED_PIDS 1024
 
+#define EVENT_PROCESS 1
+#define EVENT_FILE 3
+#define EVENT_NETWORK 6
+
+#define PROCESS_OP_EXEC 1
+#define PROCESS_OP_EXIT 2
+#define FILE_OP_OPEN 1
+#define NETWORK_OP_CONNECT 1
+
 /* Event structure shared with userspace */
-struct execve_event {
+struct live_event {
+    u32 event_type;
+    u32 event_size;
     u64 ts_mono_ns;
     u32 pid;
     u32 ppid;
     u32 uid;
     u32 gid;
     u32 entity_key;
+    u32 subtype;
+    u32 aux_u32_1;
+    u32 aux_u32_2;
+    u64 aux_u64_1;
     char comm[TASK_COMM_LEN];
-    char pathname[MAX_PATH_LEN];
-    char args[MAX_ARGS_LEN];
+    char primary[MAX_PATH_LEN];
+    char secondary[MAX_PATH_LEN];
 } __attribute__((packed));
 
 /* Enforcement decision from userspace */
@@ -143,6 +202,24 @@ static __always_inline u32 get_entity_key(void)
 }
 
 /* Check if action should be enforced for current PID */
+static __always_inline void fill_common_event(struct live_event *e)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+
+    e->ts_mono_ns = get_mono_time();
+    e->pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_probe_read_kernel(&e->ppid, sizeof(e->ppid), &task->real_parent->tgid);
+    bpf_probe_read_kernel(&e->uid, sizeof(e->uid), &task->real_cred->uid);
+    bpf_probe_read_kernel(&e->gid, sizeof(e->gid), &task->real_cred->gid);
+    e->entity_key = get_entity_key();
+    bpf_get_current_comm(e->comm, sizeof(e->comm));
+    __builtin_memset(e->primary, 0, sizeof(e->primary));
+    __builtin_memset(e->secondary, 0, sizeof(e->secondary));
+    e->aux_u32_1 = 0;
+    e->aux_u32_2 = 0;
+    e->aux_u64_1 = 0;
+}
+
 static __always_inline int check_enforcement(u32 pid)
 {
     struct enforcement_decision *decision;
@@ -171,7 +248,7 @@ static __always_inline int check_enforcement(u32 pid)
 SEC("lsm/bprm_check_security")
 int lsm_bprm_check_security(struct bpf_lsm_ctx *ctx)
 {
-    struct linux_binprm *bprm = (struct linux_binprm *)ctx;
+    (void)ctx;
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     int action = check_enforcement(pid);
 
@@ -192,14 +269,50 @@ int lsm_file_open(struct bpf_lsm_ctx *ctx, struct file *file)
 {
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     int action = check_enforcement(pid);
+    struct live_event *e;
+    struct dentry *dentry = 0;
+    struct dentry *parent = 0;
+    struct inode *inode = 0;
+    const unsigned char *name_ptr = 0;
+    const unsigned char *parent_name_ptr = 0;
+
+    e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+    if (e) {
+        __builtin_memset(e, 0, sizeof(*e));
+        e->event_type = EVENT_FILE;
+        e->event_size = sizeof(*e);
+        e->subtype = FILE_OP_OPEN;
+        fill_common_event(e);
+
+        if (file) {
+            bpf_probe_read_kernel(&dentry, sizeof(dentry), &file->f_path.dentry);
+            if (dentry) {
+                bpf_probe_read_kernel(&name_ptr, sizeof(name_ptr), &dentry->d_name.name);
+                if (name_ptr)
+                    bpf_probe_read_kernel_str(e->primary, sizeof(e->primary), name_ptr);
+
+                bpf_probe_read_kernel(&parent, sizeof(parent), &dentry->d_parent);
+                if (parent) {
+                    bpf_probe_read_kernel(&parent_name_ptr, sizeof(parent_name_ptr), &parent->d_name.name);
+                    if (parent_name_ptr)
+                        bpf_probe_read_kernel_str(e->secondary, sizeof(e->secondary), parent_name_ptr);
+                }
+
+                bpf_probe_read_kernel(&inode, sizeof(inode), &dentry->d_inode);
+                if (inode)
+                    bpf_probe_read_kernel(&e->aux_u64_1, sizeof(e->aux_u64_1), &inode->i_ino);
+            }
+        }
+
+        bpf_ringbuf_submit(e, 0);
+    }
 
     if (action == 1) {
-        /* Block file operations for this PID */
         bpf_printk("Kestrel: Blocking file open for PID %d\n", pid);
         return -EPERM;
     }
 
-    return 0; /* Allow */
+    return 0;
 }
 
 /* LSM hook: inode_permission - Called before file permission check
@@ -228,14 +341,38 @@ int lsm_socket_connect(struct bpf_lsm_ctx *ctx, struct sockaddr *addr, int addr_
 {
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     int action = check_enforcement(pid);
+    sa_family_t family = 0;
+    struct live_event *e;
+
+    e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+    if (e) {
+        __builtin_memset(e, 0, sizeof(*e));
+        e->event_type = EVENT_NETWORK;
+        e->event_size = sizeof(*e);
+        e->subtype = NETWORK_OP_CONNECT;
+        fill_common_event(e);
+
+        if (addr) {
+            bpf_probe_read_kernel(&family, sizeof(family), &addr->sa_family);
+            e->aux_u32_1 = (u32)family << 16;
+
+            if (family == 2 && addr_len >= sizeof(struct sockaddr_in)) {
+                struct sockaddr_in addr_in = {};
+                bpf_probe_read_kernel(&addr_in, sizeof(addr_in), addr);
+                e->aux_u32_1 = ((u32)family << 16) | ((__u16)__builtin_bswap16(addr_in.sin_port));
+                e->aux_u32_2 = addr_in.sin_addr;
+            }
+        }
+
+        bpf_ringbuf_submit(e, 0);
+    }
 
     if (action == 1) {
-        /* Block network connections for this PID */
         bpf_printk("Kestrel: Blocking socket connect for PID %d\n", pid);
         return -EPERM;
     }
 
-    return 0; /* Allow */
+    return 0;
 }
 
 /* ============================================================================
@@ -246,47 +383,25 @@ int lsm_socket_connect(struct bpf_lsm_ctx *ctx, struct sockaddr *addr, int addr_
 SEC("tp/syscalls/sys_enter_execve")
 int handle_execve(void *ctx)
 {
-    struct task_struct *task;
-    struct execve_event *e;
+    struct live_event *e;
     const char *filename_ptr;
     const char **args_p;
-    u32 pid;
     int i, args_len;
     const char *arg;
 
-    /* Get current task */
-    task = (struct task_struct *)bpf_get_current_task();
-
-    /* Reserve space in ring buffer */
     e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
     if (!e)
-        return 0;  /* Buffer full, skip */
+        return 0;
 
-    /* Get timestamp */
-    e->ts_mono_ns = get_mono_time();
+    __builtin_memset(e, 0, sizeof(*e));
+    e->event_type = EVENT_PROCESS;
+    e->event_size = sizeof(*e);
+    e->subtype = PROCESS_OP_EXEC;
+    fill_common_event(e);
 
-    /* Read process information */
-    pid = bpf_get_current_pid_tgid() >> 32;
-    e->pid = pid;
-
-    /* Read parent PID */
-    bpf_probe_read_kernel(&e->ppid, sizeof(e->ppid), &task->real_parent->tgid);
-
-    /* Read user/group IDs */
-    bpf_probe_read_kernel(&e->uid, sizeof(e->uid), &task->real_cred->uid);
-    bpf_probe_read_kernel(&e->gid, sizeof(e->gid), &task->real_cred->gid);
-
-    /* Generate entity key */
-    e->entity_key = get_entity_key();
-
-    /* Read process name (comm) */
-    bpf_get_current_comm(e->comm, sizeof(e->comm));
-
-    /* Read executable pathname */
     bpf_probe_read_kernel(&filename_ptr, sizeof(filename_ptr), &((void **)ctx)[0]);
-    bpf_probe_read_user_str(e->pathname, sizeof(e->pathname), filename_ptr);
+    bpf_probe_read_user_str(e->primary, sizeof(e->primary), filename_ptr);
 
-    /* Read command line arguments */
     args_p = (const char **)((void **)ctx + 1);
     args_len = 0;
 
@@ -294,22 +409,18 @@ int handle_execve(void *ctx)
         bpf_probe_read_kernel(&arg, sizeof(arg), &args_p[i]);
         if (!arg)
             break;
-
-        if (args_len >= MAX_ARGS_LEN - 1)
+        if (args_len >= MAX_PATH_LEN - 1)
             break;
 
-        long len = bpf_probe_read_user_str(&e->args[args_len],
-                                            MAX_ARGS_LEN - args_len,
+        long len = bpf_probe_read_user_str(&e->secondary[args_len],
+                                            MAX_PATH_LEN - args_len,
                                             arg);
         if (len <= 0)
             break;
-
         args_len += len;
     }
 
-    /* Submit event to ring buffer */
     bpf_ringbuf_submit(e, 0);
-
     return 0;
 }
 

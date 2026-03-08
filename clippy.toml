@@ -27,8 +27,8 @@ cognitive-complexity-threshold = 30
 #     { "serde" = "serde_renamed" },
 # ]
 
-# Missing docs in private items
-missing-docs-in-private-items = false
+# Missing docs in crate items
+# missing-docs-in-crate-items = false
 
 # Too many arguments threshold
 too-many-arguments-threshold = 7
@@ -68,8 +68,7 @@ allow-expect-in-tests = true
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 
-# Suppress lints from dependencies
-suppress-lint-ignore-strings = false
+# (removed: suppress-lint-ignore-strings is not a valid clippy config)
 
 # Standard macro braces
 standard-macro-braces = []
@@ -110,5 +109,4 @@ doc-valid-idents = [
 # Allow private mock tests
 allow-dbg-in-tests = true
 
-# Macro matcher stack size
-macro-max-params-stack-size = 12
+# (removed: macro-max-params-stack-size is not a valid clippy config)

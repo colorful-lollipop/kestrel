@@ -30,17 +30,22 @@ cargo run --bin kestrel -- list --rules ./rules
 
 ### 规则结构
 
-每个规则目录包含：
-- `manifest.json` - 规则元数据和配置
-- `predicate.lua` - Lua 检测逻辑
+每个规则目录通常包含：
+- `manifest.json` - 规则元数据和能力描述
+- `rule.eql` - 推荐的主规则定义（当前装载优先级最高）
+- `predicate.lua` - Lua 谓词实现（用于运行时/实验能力）
+- `rule.wat` / `rule.wasm` - Wasm 规则产物（按需提供）
 
 ```
+当前目录规则包装载顺序为：`rule.eql` → `predicate.lua` → `rule.wasm` → `rule.wat`。
 rules/
 ├── ransomware_detection/
 │   ├── manifest.json
+│   ├── rule.eql
 │   └── predicate.lua
 ├── privilege_escalation/
 │   ├── manifest.json
+│   ├── rule.eql
 │   └── predicate.lua
 └── ...
 ```

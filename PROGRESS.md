@@ -1793,3 +1793,236 @@ Integration E2E tests were missing the required `ts_wall_ns` field in event cons
 *All unit tests passing (132/132)*
 *P0 Tasks: 100% Complete (8/8)*
 *NFA Engine Bug Fixes: 100% Complete (4/4)*
+
+
+---
+
+## 2026-03-06: Live eBPF Event Pipeline Expansion ✅
+
+### What Changed
+- Unified live kernel-to-userspace telemetry into a shared `LiveEvent` envelope in `kestrel-ebpf`
+- Kept `process/exec` live collection, and added minimum viable live paths for:
+  - `file/open`
+  - `network/connect`
+- Normalized live events into category-style engine events:
+  - `process`
+  - `file`
+  - `network`
+- Added subtype fields to preserve operation detail:
+  - `process.operation`
+  - `file.operation`
+  - `network.operation`
+
+### File Telemetry Improvements
+- `file/open` now carries:
+  - basename (`file.name`)
+  - parent directory fragment (`file.directory`)
+  - inode (`file.inode`)
+- `file.path` now composes a best-effort path from directory fragment + basename when available
+
+### Network Telemetry Improvements
+- `network/connect` now carries:
+  - IPv4 destination address (`network.destination`)
+  - destination port (`network.dest_port`)
+
+### Engine / CLI Integration
+- `DetectionEngine` exposes a publisher handle so external collectors can inject events into the main pipeline
+- CLI `run` can bootstrap an eBPF collector with `--ebpf-object`
+- Collector now reports which live event types are truly supported, avoiding false expectations during deployment
+
+### Current Live Support Boundary
+- ✅ `process/exec`
+- ✅ `file/open`
+- ✅ `network/connect`
+- ⏳ `rename/unlink/send` still require dedicated live kernel event payloads
+- ⏳ full file path reconstruction is still partial and currently best-effort
+- ⏳ IPv6 extraction is not yet complete
+
+### Files Updated
+- `kestrel-ebpf/src/bpf/main.bpf.c`
+- `kestrel-ebpf/src/lib.rs`
+- `kestrel-ebpf/src/normalize.rs`
+- `kestrel-engine/src/lib.rs`
+- `kestrel-cli/src/main.rs`
+- `kestrel-schema/src/lib.rs`
+- `README.md`
+
+### Notes
+- Workspace compile recovery is now validated when `TMPDIR` and `CARGO_TARGET_DIR` are pinned to the repository filesystem
+- `rustfmt` config now parses, but stable rustfmt still reports nightly-only option warnings
+
+
+---
+
+## 2026-03-06: Workspace Compile Recovery ✅
+
+### What Was Fixed
+- Corrected the shared schema bootstrap so parent event types are registered with real `EventTypeId` values
+- Fixed `rustfmt.toml` parsing by replacing the invalid `control_brace_style` enum value
+- Fixed `kestrel-ebpf/src/bpf/main.bpf.c` so the C eBPF source passes `clang -fsyntax-only -Wall -Werror`
+- Fixed Rust compile errors in `kestrel-engine` sequence compilation and Wasm predicate evaluation wiring
+
+### Validation
+The workspace now passes:
+```bash
+TMPDIR=$PWD/target_cargo/tmp CARGO_TARGET_DIR=$PWD/target_cargo CARGO_INCREMENTAL=0 cargo check --workspace
+```
+
+### Remaining Notes
+- `rustfmt` now parses config successfully, but stable rustfmt still warns that several options are nightly-only
+- Workspace compile is verified with `cargo check --workspace`, and full `cargo test --workspace` now passes when `TMPDIR` / `CARGO_TARGET_DIR` are pinned to the repository filesystem
+
+
+---
+
+## 2026-03-06: Wasm Hot Path Optimization ✅
+
+### Problem
+Single-event Wasm rules were still evaluated through an ad-hoc path that recompiled / re-instantiated Wasm per event, wasting the module cache and instance pool that already existed in the architecture.
+
+### What Changed
+- `kestrel-engine` now stores Wasm single-event rules as:
+  - loaded module id
+  - predicate index
+  - required fields
+- Single-event rule evaluation now calls the loaded-module execution path instead of `eval_adhoc_predicate`
+- `kestrel-runtime-wasm` instance pools were reshaped from a globally write-locked map of mutable instances into:
+  - per-module pool lookup via read lock
+  - per-pool semaphore
+  - pooled instances moved in/out of a mutex-protected vector
+- This removes full-pool write-lock retention during Wasm execution and aligns runtime behavior with the intended pooled execution model
+
+### Validation
+- `cargo check -p kestrel-runtime-wasm -p kestrel-engine`
+- `cargo test -p kestrel-runtime-wasm --lib`
+- `cargo test -p kestrel-engine --lib`
+
+### Impact
+- Reduces avoidable per-event Wasm work for single-event rules
+- Lowers contention on the runtime's shared pool structures
+- Brings the hottest Wasm rule path closer to production-ready behavior
+
+
+---
+
+## 2026-03-06: Runtime Contention Reduction ✅
+
+### What Changed
+- Reduced `kestrel-runtime-wasm` instance-pool contention by moving from whole-map write-lock retention to:
+  - per-module pool lookup through a shared map read lock
+  - per-pool semaphore
+  - pooled instance checkout / return via a pool-local mutex
+- Split alert emission out of the immediate event evaluation branch in `DetectionEngine::start()` so alert I/O no longer serially blocks the event evaluation loop as directly as before
+- Cleaned a first batch of high-noise warnings in `kestrel-engine` and `kestrel-runtime-wasm`
+
+### Validation
+- `cargo check -p kestrel-runtime-wasm -p kestrel-engine`
+- `cargo test -p kestrel-runtime-wasm --lib`
+- `cargo test -p kestrel-engine --lib`
+- `cargo check --workspace`
+- `cargo test --workspace`
+
+### Product Impact
+- Lowers unnecessary contention in one of the hottest Wasm execution paths
+- Improves architecture fidelity: single-event Wasm rules now benefit from the same loaded-module / pooled-instance model the runtime was designed for
+- Moves the engine closer to a production-capable event processing topology
+
+
+
+### Host API Hot Path Refinement
+- Reduced `event_get_str` overhead by avoiding full event cloning inside the Wasm host callback; it now materializes only the target string payload before writing to guest memory
+- Replaced `block_in_place + block_on(read())` in regex / glob host APIs with non-blocking `try_read()` access, removing an avoidable synchronous runtime stall from hot callbacks
+- These changes make the Wasm host boundary cheaper and safer for real endpoint deployments where small callback costs multiply across large fleets
+
+
+
+### Event Loop Refinement
+- `DetectionEngine` now snapshots single-event rules once per batch and evaluates matching single-event predicates through a batch-local `FuturesUnordered` set
+- This preserves NFA sequence ordering while allowing independent single-event rule evaluations (especially Wasm-backed predicates) to overlap within the batch
+- The event loop is now less exposed to per-event rule lock overhead and better aligned with multi-rule workloads
+
+
+
+### Follow-up Refinement
+- Reduced per-event `RwLock` pressure in `DetectionEngine` by snapshotting compiled single-event rules once per batch / direct evaluation call instead of re-reading the rule store for every event
+- This keeps the event loop closer to a batch-oriented execution model and trims lock overhead without changing semantics
+
+
+---
+
+## 2026-03-06: Productization Planning Assets ✅
+
+### What Was Added
+- `docs/battle_lab.md`
+- `docs/control_plane.md`
+- `docs/ai_architecture.md`
+- `docs/expert_workbench.md`
+- `scenarios/reverse_shell/*`
+- `scenarios/credential_access/*`
+
+### Why It Matters
+These assets convert the roadmap from abstract direction into executable product structure:
+- Battle Lab gives Kestrel a repeatable scenario-driven validation model
+- Control Plane defines device / policy / rollout / rollback governance
+- AI Architecture defines how anomaly detection and embeddings augment, but do not replace, the engine core
+- Expert Workbench defines the GUI surface required for real security expert productivity
+
+### Current Planning Outcome
+Kestrel is now planned as:
+1. endpoint runtime
+2. replay / battle-lab validation system
+3. control plane for fleet + policy governance
+4. AI-assisted detection and rule iteration layer
+5. expert-facing GUI workbench
+
+
+---
+
+## 2026-03-06: Battle Lab Execution Skeleton ✅
+
+### What Was Added
+- New workspace crate: `kestrel-lab`
+- Commands implemented:
+  - `kestrel-lab list`
+  - `kestrel-lab validate`
+  - `kestrel-lab show --scenario <id>`
+  - `kestrel-lab run --scenario <id>`
+- New scenario assets:
+  - `reverse_shell`
+  - `credential_access`
+  - `lateral_movement`
+  - `ransomware_early_stage`
+- New workflow / platform design docs:
+  - `docs/battle_lab.md`
+  - `docs/lab_workflows.md`
+  - `docs/control_plane.md`
+  - `docs/ai_architecture.md`
+  - `docs/expert_workbench.md`
+
+### Validation
+- `cargo check -p kestrel-lab`
+- `cargo test -p kestrel-lab`
+
+### Product Impact
+- Kestrel now has a concrete executable entry point for scenario discovery, validation, and controlled scenario execution
+- The project has moved from abstract Battle Lab planning into a runnable first-stage tool and reusable scenario asset model
+
+
+
+### Battle Lab Runner Refinement
+- `kestrel-lab` now supports:
+  - scenario listing / validation / show
+  - single scenario run
+  - batch scenario run (`run-all`)
+  - alert expectation assertions
+  - result archive directories with stdout / stderr / summary output
+  - optional replay execution through the engine replay path
+- This gives Kestrel a usable first-stage lab harness instead of only static scenario assets
+
+
+
+### `kestrel-lab` Iteration
+- Added scenario assertion support against alert files
+- Added `run-all` for batch scenario execution
+- Added structured JSON/text summaries for scenario runs
+- This moves Battle Lab from simple asset discovery toward a reusable validation harness

@@ -12,7 +12,7 @@ struct EqlParser;
 /// Parse EQL query string into AST
 pub fn parse(input: &str) -> Result<Query> {
     let pairs = EqlParser::parse(Rule::query, input)
-        .map_err(|e| EqlError::syntax("input", &format!("{}", e)))?;
+        .map_err(|e| EqlError::syntax("input", format!("{}", e)))?;
 
     let mut pairs_iter = pairs;
     let pair = pairs_iter
@@ -30,7 +30,7 @@ pub fn parse(input: &str) -> Result<Query> {
                     "Expected event or sequence query",
                 )),
             }
-        }
+        },
         _ => Err(EqlError::syntax(pair.as_span().as_str(), "Expected query")),
     }
 }
@@ -68,11 +68,11 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
     let mut maxspan = None;
     let mut until = None;
 
-    while let Some(pair) = inner.next() {
+    for pair in inner {
         match pair.as_rule() {
             Rule::sequence_step => {
                 steps.push(build_sequence_step(pair)?);
-            }
+            },
             Rule::maxspan_clause => {
                 let mut maxspan_inner = pair.into_inner();
                 // maxspan_clause = "with" ~ "maxspan" ~ "=" ~ duration
@@ -80,7 +80,7 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
                 if let Some(duration_pair) = maxspan_inner.next() {
                     maxspan = Some(build_duration(duration_pair)?);
                 }
-            }
+            },
             Rule::until_clause => {
                 let mut until_inner = pair.into_inner();
                 // until_clause = "until" ~ sequence_step
@@ -88,8 +88,8 @@ fn build_sequence_query(pair: pest::iterators::Pair<Rule>) -> Result<Query> {
                 if let Some(until_step) = until_inner.next() {
                     until = Some(Box::new(build_sequence_step(until_step)?));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -159,7 +159,7 @@ fn build_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::quantifier_expr => build_quantifier_expr(inner),
         _ => Err(EqlError::syntax(
             inner.as_span().as_str(),
-            &format!("Unexpected rule: {:?}", inner.as_rule()),
+            format!("Unexpected rule: {:?}", inner.as_rule()),
         )),
     }
 }
@@ -177,16 +177,16 @@ fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::bool_literal => {
             let value = span.parse::<bool>().unwrap();
             Ok(Expr::BoolLiteral(value))
-        }
+        },
         Rule::int_literal => {
             let value = span.parse::<i64>().unwrap();
             Ok(Expr::IntLiteral(value))
-        }
+        },
         Rule::string_literal => {
             // Remove quotes
             let unescaped = &span[1..span.len() - 1];
             Ok(Expr::StringLiteral(unescaped.to_string()))
-        }
+        },
         Rule::field_ref => Ok(Expr::FieldRef(span.to_string())),
         Rule::function_call => build_function_call(inner),
         Rule::in_expr_atom => build_in_expr(inner),
@@ -204,9 +204,9 @@ fn build_primary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
             }
             Err(EqlError::syntax(
                 span,
-                &format!("Unexpected primary expression: {:?}", inner.as_rule()),
+                format!("Unexpected primary expression: {:?}", inner.as_rule()),
             ))
-        }
+        },
     }
 }
 
@@ -246,7 +246,7 @@ fn build_in_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
 fn build_quantifier_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     let span = pair.as_span().as_str();
     let mut inner = pair.into_inner();
-    
+
     // Determine quantifier type from the span (starts with "any" or "all")
     let quantifier = if span.starts_with("any") {
         QuantifierType::Any
@@ -255,33 +255,33 @@ fn build_quantifier_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
     } else {
         return Err(EqlError::syntax(span, "Expected 'any' or 'all'"));
     };
-    
+
     // First element is the field reference (array field)
     let field_pair = inner
         .next()
         .ok_or_else(|| EqlError::syntax("quantifier", "Expected array field reference"))?;
     let array_field = field_pair.as_str().to_string();
-    
+
     // Second element is the comparison operator
     let op_pair = inner
         .next()
         .ok_or_else(|| EqlError::syntax("quantifier", "Expected comparison operator"))?;
     let op_str = op_pair.as_str();
     let operator = parse_operator_from_str(op_str)?;
-    
+
     // Third element is the value expression
     let value_pair = inner
         .next()
         .ok_or_else(|| EqlError::syntax("quantifier", "Expected value expression"))?;
     let value = build_expr(value_pair)?;
-    
+
     // Build the condition as a binary operation
     let condition = Expr::BinaryOp(Box::new(BinaryOp {
         operator,
         left: Expr::FieldRef(array_field.clone()),
         right: value,
     }));
-    
+
     Ok(Expr::ArrayQuantifier(Box::new(ArrayQuantifier {
         quantifier,
         array_field,
@@ -388,7 +388,7 @@ mod tests {
             Query::Event(eq) => {
                 assert_eq!(eq.event_type, "process");
                 assert!(eq.condition.is_some());
-            }
+            },
             _ => panic!("Expected event query"),
         }
     }
@@ -399,7 +399,7 @@ mod tests {
         match result {
             Query::Sequence(sq) => {
                 assert_eq!(sq.steps.len(), 2);
-            }
+            },
             _ => panic!("Expected sequence query"),
         }
     }
@@ -418,7 +418,7 @@ mod tests {
                 } else {
                     panic!("Expected ArrayQuantifier expression");
                 }
-            }
+            },
             _ => panic!("Expected event query"),
         }
     }
@@ -437,7 +437,7 @@ mod tests {
                 } else {
                     panic!("Expected ArrayQuantifier expression");
                 }
-            }
+            },
             _ => panic!("Expected event query"),
         }
     }

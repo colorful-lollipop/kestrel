@@ -2,12 +2,13 @@
 
 ## Supported Versions
 
-Currently, only the latest version of Kestrel is supported with security updates.
+Currently, only the latest active development branch and the current `0.1.x` line are supported with security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 0.1.x   | :white_check_mark: |
+| > 0.1.x | Development only   |
+| < 0.1   | :x:                |
 
 ## Reporting a Vulnerability
 

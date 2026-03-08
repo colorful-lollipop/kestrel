@@ -2,7 +2,7 @@
 //
 // Simple benchmark to compare AC-DFA and NFA performance in release mode
 
-use kestrel_ac_dfa::{AcMatcher, MatchPattern, AcDfaConfig};
+use kestrel_ac_dfa::{AcDfaConfig, AcMatcher, MatchPattern};
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, SeqStep};
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,8 +10,14 @@ use std::time::Instant;
 // Mock predicate evaluator
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -30,13 +36,7 @@ fn main() {
     // 1. Test AC-DFA performance
     println!("Testing AC-DFA...");
     let patterns: Vec<_> = (0..100)
-        .map(|i| {
-            MatchPattern::equals(
-                format!("string_{}", i),
-                1,
-                format!("rule-{}", i),
-            ).unwrap()
-        })
+        .map(|i| MatchPattern::equals(format!("string_{}", i), 1, format!("rule-{}", i)).unwrap())
         .collect();
 
     let config = AcDfaConfig::default();
@@ -88,13 +88,13 @@ fn main() {
 
     // Warmup
     for _ in 0..10000 {
-        let _ = nfa_engine.process_event(&event);
+        let _ = nfa_engine.process_event_blocking(&event);
     }
 
     // Benchmark NFA
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = nfa_engine.process_event(&event);
+        let _ = nfa_engine.process_event_blocking(&event);
     }
     let nfa_duration = start.elapsed();
     let nfa_ns_per_op = nfa_duration.as_nanos() / iterations;

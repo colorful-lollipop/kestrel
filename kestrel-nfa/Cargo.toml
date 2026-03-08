@@ -13,11 +13,13 @@ kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-eql = { path = "../kestrel-eql" }
 tokio = { workspace = true }
+async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 ahash = { workspace = true }
 smallvec = { workspace = true }
+futures = "0.3"
 
 # Additional dependencies
 parking_lot = "0.12"

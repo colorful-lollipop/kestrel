@@ -61,7 +61,7 @@ pub enum CompiledForm {
     Lua(String),
 
     /// Intermediate representation (for EQL)
-    Ir(crate::IrRule),
+    Ir(Box<crate::IrRule>),
 }
 
 /// Trait for rule compilers
@@ -159,9 +159,7 @@ impl CompilationManager {
             .compilers
             .iter()
             .find(|c| c.can_compile(&rule.definition))
-            .ok_or_else(|| {
-                CompilationError::UnsupportedType(format!("{:?}", rule.definition))
-            })?;
+            .ok_or_else(|| CompilationError::UnsupportedType(format!("{:?}", rule.definition)))?;
 
         // Compile the rule
         tracing::debug!(rule_id = %rule_id, compiler = %compiler.name(), "Compiling rule");
@@ -181,9 +179,7 @@ impl CompilationManager {
             .compilers
             .iter()
             .find(|c| c.can_compile(&rule.definition))
-            .ok_or_else(|| {
-                CompilationError::UnsupportedType(format!("{:?}", rule.definition))
-            })?;
+            .ok_or_else(|| CompilationError::UnsupportedType(format!("{:?}", rule.definition)))?;
 
         compiler.validate(rule)
     }

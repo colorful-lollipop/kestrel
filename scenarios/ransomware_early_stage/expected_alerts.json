@@ -1,0 +1,15 @@
+{
+  "scenario_id": "ransomware-early-stage-minimal",
+  "expected_rules": [
+    {
+      "rule_id": "ransomware-001",
+      "min_hits": 1,
+      "reason": "Repeated file access and rename-style early-stage behavior should exercise the ransomware detection path."
+    }
+  ],
+  "unexpected_rules": [],
+  "notes": [
+    "This scenario intentionally avoids encryption and destructive file content changes.",
+    "All activity is constrained to a disposable temporary directory for Battle Lab and replay use."
+  ]
+}

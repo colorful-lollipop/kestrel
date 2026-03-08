@@ -118,7 +118,7 @@ impl RuntimeConsistencyChecker {
                     Err(e) => {
                         error!("Wasm evaluation error: {}", e);
                         wasm_results.push(false);
-                    }
+                    },
                 }
             }
         }
@@ -132,7 +132,7 @@ impl RuntimeConsistencyChecker {
                     Err(e) => {
                         error!("Lua evaluation error: {}", e);
                         lua_results.push(false);
-                    }
+                    },
                 }
             }
         }
@@ -167,9 +167,7 @@ impl RuntimeConsistencyChecker {
         _eql_rule: &str,
         _events: &[Event],
     ) -> Result<ConsistencyResult, RuntimeComparisonError> {
-        Err(RuntimeComparisonError::WasmNotEnabled(
-            "Wasm feature not enabled".to_string(),
-        ))
+        Err(RuntimeComparisonError::WasmNotEnabled("Wasm feature not enabled".to_string()))
     }
 
     pub async fn verify_predicate_consistency(
@@ -192,7 +190,7 @@ impl RuntimeConsistencyChecker {
                     Err(e) => {
                         error!("Wasm evaluation error: {}", e);
                         wasm_results.push(false);
-                    }
+                    },
                 }
             }
         }
@@ -206,7 +204,7 @@ impl RuntimeConsistencyChecker {
                     Err(e) => {
                         error!("Lua evaluation error: {}", e);
                         lua_results.push(false);
-                    }
+                    },
                 }
             }
         }
@@ -338,6 +336,7 @@ mod tests {
     use kestrel_event::Event;
     use kestrel_schema::TypedValue;
 
+    #[allow(dead_code)]
     fn create_test_events(count: usize) -> Vec<Event> {
         let mut events = Vec::new();
         for i in 0..count {
@@ -382,6 +381,6 @@ mod tests {
         };
 
         assert_eq!(mismatch.event_index, 0);
-        assert!(!mismatch.wasm_result == mismatch.lua_result);
+        assert!(mismatch.wasm_result != mismatch.lua_result);
     }
 }

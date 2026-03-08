@@ -2,18 +2,24 @@
 //
 // Benchmarks for comparing AC-DFA, Lazy DFA, and NFA performance
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use kestrel_ac_dfa::{AcMatcher, MatchPattern, AcDfaConfig};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use kestrel_ac_dfa::{AcMatcher, MatchPattern};
 use kestrel_eql::ir::{IrLiteral, IrNode, IrPredicate};
 use kestrel_lazy_dfa::{HotSpotDetector, LazyDfaConfig};
-use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, SeqStep, NfaSequence};
+use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, SeqStep};
 use std::sync::Arc;
 
 // Mock predicate evaluator for testing
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         // Return true for all predicates
         Ok(true)
     }
@@ -35,11 +41,7 @@ fn bench_ac_dfa_matching(c: &mut Criterion) {
         // Create matcher using AcMatcher directly (since we're benchmarking)
         let patterns: Vec<_> = (0..*pattern_count)
             .map(|i| {
-                MatchPattern::equals(
-                    format!("pattern_{}", i),
-                    1,
-                    format!("rule-{}", i),
-                ).unwrap()
+                MatchPattern::equals(format!("pattern_{}", i), 1, format!("rule-{}", i)).unwrap()
             })
             .collect();
 
@@ -48,15 +50,9 @@ fn bench_ac_dfa_matching(c: &mut Criterion) {
 
         let test_text = "pattern_42";
 
-        group.bench_with_input(
-            BenchmarkId::new("match", pattern_count),
-            &pattern_count,
-            |b, _| {
-                b.iter(|| {
-                    black_box(matcher.matches_field(1, black_box(test_text)))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("match", pattern_count), &pattern_count, |b, _| {
+            b.iter(|| black_box(matcher.matches_field(1, black_box(test_text))));
+        });
     }
 
     group.finish();
@@ -68,22 +64,10 @@ fn bench_nfa_sequence_matching(c: &mut Criterion) {
 
     for sequence_length in [2, 5, 10].iter() {
         let steps: Vec<_> = (0..*sequence_length)
-            .map(|i| {
-                SeqStep::new(
-                    i as u16,
-                    format!("pred{}", i),
-                    (i + 1) as u16,
-                )
-            })
+            .map(|i| SeqStep::new(i as u16, format!("pred{}", i), (i + 1) as u16))
             .collect();
 
-        let sequence = NfaSequence::new(
-            "test-seq".to_string(),
-            100,
-            steps,
-            Some(5000),
-            None,
-        );
+        let sequence = NfaSequence::new("test-seq".to_string(), 100, steps, Some(5000), None);
 
         let compiled = CompiledSequence {
             id: "test-seq".to_string(),
@@ -109,9 +93,7 @@ fn bench_nfa_sequence_matching(c: &mut Criterion) {
             BenchmarkId::new("match", sequence_length),
             &sequence_length,
             |b, _| {
-                b.iter(|| {
-                    black_box(engine.process_event(black_box(&event)))
-                });
+                b.iter(|| black_box(engine.process_event_blocking(black_box(&event))));
             },
         );
     }
@@ -149,8 +131,8 @@ fn bench_hot_spot_detection(c: &mut Criterion) {
 
 /// Benchmark strategy analysis overhead
 fn bench_strategy_analysis(c: &mut Criterion) {
+    use kestrel_eql::ir::{IrBinaryOp, IrRule, IrRuleType};
     use kestrel_hybrid_engine::RuleComplexityAnalyzer;
-    use kestrel_eql::ir::{IrRule, IrRuleType, IrBinaryOp};
 
     let mut group = c.benchmark_group("strategy_analysis");
 
@@ -212,16 +194,14 @@ fn bench_strategy_analysis(c: &mut Criterion) {
         rule
     };
 
+    let analyzer = RuleComplexityAnalyzer::new();
+
     group.bench_function("simple_rule", |b| {
-        b.iter(|| {
-            black_box(RuleComplexityAnalyzer::analyze(&simple_rule))
-        });
+        b.iter(|| black_box(analyzer.analyze(&simple_rule)));
     });
 
     group.bench_function("complex_rule", |b| {
-        b.iter(|| {
-            black_box(RuleComplexityAnalyzer::analyze(&complex_rule))
-        });
+        b.iter(|| black_box(analyzer.analyze(&complex_rule)));
     });
 
     group.finish();
@@ -233,30 +213,16 @@ fn bench_ac_dfa_vs_nfa(c: &mut Criterion) {
 
     // Create AC-DFA matcher
     let patterns: Vec<_> = (0..100)
-        .map(|i| {
-            MatchPattern::equals(
-                format!("string_{}", i),
-                1,
-                "rule-1".to_string(),
-            ).unwrap()
-        })
+        .map(|i| MatchPattern::equals(format!("string_{}", i), 1, "rule-1".to_string()).unwrap())
         .collect();
 
     let config = kestrel_ac_dfa::AcDfaConfig::default();
     let ac_matcher = AcMatcher::new(patterns, config).unwrap();
 
     // Create NFA engine
-    let steps = vec![
-        SeqStep::new(0, "pred1".to_string(), 1),
-    ];
+    let steps = vec![SeqStep::new(0, "pred1".to_string(), 1)];
 
-    let sequence = NfaSequence::new(
-        "test-seq".to_string(),
-        100,
-        steps,
-        Some(5000),
-        None,
-    );
+    let sequence = NfaSequence::new("test-seq".to_string(), 100, steps, Some(5000), None);
 
     let compiled = CompiledSequence {
         id: "test-seq".to_string(),
@@ -279,15 +245,11 @@ fn bench_ac_dfa_vs_nfa(c: &mut Criterion) {
         .unwrap();
 
     group.bench_function("ac_dfa", |b| {
-        b.iter(|| {
-            black_box(ac_matcher.matches_field(1, "string_42"))
-        });
+        b.iter(|| black_box(ac_matcher.matches_field(1, "string_42")));
     });
 
     group.bench_function("nfa", |b| {
-        b.iter(|| {
-            black_box(engine.process_event(&event))
-        });
+        b.iter(|| black_box(engine.process_event_blocking(&event)));
     });
 
     group.finish();

@@ -5,14 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use uuid::Uuid;
 
 /// Get current timestamp in nanoseconds safely
-/// 
+///
 /// Returns 0 if system time is before UNIX_EPOCH (extremely rare edge case)
 pub fn current_timestamp_ns() -> u64 {
     SystemTime::now()
@@ -395,20 +395,20 @@ impl ActionExecutor for BlockActionExecutor {
                 // at the bprm_check_security point
                 self.kill_process(*pid, self.config.kill_signal)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::FileOp { pid, path } => {
                 self.block_file_operation(*pid, path)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::NetworkOp { pid, addr } => {
                 self.block_network_operation(*pid, addr)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::MemoryOp { pid } => {
                 // Memory operations can be blocked by seccomp or LSM
                 self.kill_process(*pid, self.config.kill_signal)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
         };
 
         tracing::info!(
@@ -577,7 +577,7 @@ impl ActionExecutor for QuarantineExecutor {
                     "File quarantined successfully"
                 );
                 Ok(result)
-            }
+            },
             ActionTarget::ProcessExec { pid, executable } => {
                 // For process exec quarantine, we can quarantine the executable
                 let report = self.quarantine_file(*pid, executable)?;
@@ -589,7 +589,7 @@ impl ActionExecutor for QuarantineExecutor {
                     "Executable quarantined"
                 );
                 Ok(result)
-            }
+            },
             _ => Err(ActionError::InvalidAction(
                 "Quarantine not supported for this target type".to_string(),
             )),
@@ -660,19 +660,19 @@ impl ActionExecutor for KillActionExecutor {
             ActionTarget::ProcessExec { pid, .. } => {
                 self.terminate_process(*pid)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::FileOp { pid, .. } => {
                 self.terminate_process(*pid)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::NetworkOp { pid, .. } => {
                 self.terminate_process(*pid)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
             ActionTarget::MemoryOp { pid } => {
                 self.terminate_process(*pid)?;
                 ActionResult::success(decision.id.clone(), decision.action)
-            }
+            },
         };
 
         tracing::info!(
@@ -727,10 +727,7 @@ impl ActionExecutor for AlertActionExecutor {
             "Alert action recorded"
         );
 
-        Ok(ActionResult::success(
-            decision.id.clone(),
-            ActionType::Alert,
-        ))
+        Ok(ActionResult::success(decision.id.clone(), ActionType::Alert))
     }
 
     fn capabilities(&self) -> ActionCapabilities {
@@ -912,11 +909,8 @@ impl CompositeActionExecutor {
                     target = ?decision.target,
                     "Operation allowed"
                 );
-                Ok(ActionResult::success(
-                    decision.id.clone(),
-                    ActionType::Allow,
-                ))
-            }
+                Ok(ActionResult::success(decision.id.clone(), ActionType::Allow))
+            },
             ActionType::Kill => self.kill_executor.execute(decision),
             ActionType::Quarantine => self.quarantine_executor.execute(decision),
             ActionType::Alert => self.alert_executor.execute(decision),
@@ -935,17 +929,17 @@ impl ActionExecutor for CompositeActionExecutor {
                     "Offline mode: action simulated only"
                 );
                 return Ok(ActionResult::success(decision.id.clone(), decision.action));
-            }
+            },
             (ActionPolicy::Inline, ActionPolicy::Async) => {
                 // Inline executor can handle async actions
-            }
+            },
             (ActionPolicy::Async, ActionPolicy::Inline) => {
                 // Async executor cannot handle inline actions in strict mode
                 return Err(ActionError::NotSupported(
                     "Inline action not supported in async mode".to_string(),
                 ));
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Execute the action
@@ -1122,10 +1116,7 @@ mod tests {
         let evidence = ActionEvidence::new(
             1001,
             1234567890,
-            vec![(
-                "process.executable".to_string(),
-                serde_json::json!("/bin/ls"),
-            )],
+            vec![("process.executable".to_string(), serde_json::json!("/bin/ls"))],
         );
         assert_eq!(evidence.event_type_id, 1001);
         assert_eq!(evidence.timestamp_ns, 1234567890);
@@ -1134,7 +1125,7 @@ mod tests {
 
     #[test]
     fn test_noop_executor() {
-        let executor = NoOpExecutor::default();
+        let executor = NoOpExecutor;
         let decision = ActionDecision::new(
             "rule-001".to_string(),
             ActionType::Block,
@@ -1363,10 +1354,7 @@ mod tests {
     #[test]
     fn test_quarantine_config_default() {
         let config = QuarantineConfig::default();
-        assert_eq!(
-            config.quarantine_dir,
-            std::path::PathBuf::from("/var/lib/kestrel/quarantine")
-        );
+        assert_eq!(config.quarantine_dir, std::path::PathBuf::from("/var/lib/kestrel/quarantine"));
         assert_eq!(config.max_file_size, 100 * 1024 * 1024);
         assert!(config.compute_hash);
     }

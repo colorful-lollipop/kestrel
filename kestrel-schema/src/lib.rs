@@ -36,10 +36,13 @@ pub type GlobId = u32;
 // ============================================================================
 
 /// Severity levels for alerts and rules
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash, Default,
+)]
 pub enum Severity {
     Informational,
     Low,
+    #[default]
     Medium,
     High,
     Critical,
@@ -54,12 +57,6 @@ impl std::fmt::Display for Severity {
             Severity::High => write!(f, "High"),
             Severity::Critical => write!(f, "Critical"),
         }
-    }
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Severity::Medium
     }
 }
 
@@ -249,6 +246,170 @@ impl Default for RuntimeCapabilities {
     }
 }
 
+/// Register the built-in Linux telemetry schema used by the engine and eBPF collector.
+///
+/// The registration order is intentional so that high-level event types align with the
+/// numeric IDs currently emitted by the collector (`process` = 1, `file` = 3, `network` = 6).
+pub fn register_builtin_linux_schema(registry: &SchemaRegistry) -> Result<(), SchemaError> {
+    for event_type in [
+        EventTypeDef {
+            name: "process".to_string(),
+            description: Some("Process activity".to_string()),
+            parent: None,
+        },
+        EventTypeDef {
+            name: "file".to_string(),
+            description: Some("File activity".to_string()),
+            parent: None,
+        },
+        EventTypeDef {
+            name: "network".to_string(),
+            description: Some("Network activity".to_string()),
+            parent: None,
+        },
+    ] {
+        if registry.get_event_type_id(&event_type.name).is_none() {
+            registry.register_event_type(event_type)?;
+        }
+    }
+
+    let process_id = registry
+        .get_event_type_id("process")
+        .ok_or_else(|| SchemaError::EventTypeNotFound("process".to_string()))?;
+    let file_id = registry
+        .get_event_type_id("file")
+        .ok_or_else(|| SchemaError::EventTypeNotFound("file".to_string()))?;
+    let network_id = registry
+        .get_event_type_id("network")
+        .ok_or_else(|| SchemaError::EventTypeNotFound("network".to_string()))?;
+
+    for event_type in [
+        EventTypeDef {
+            name: "process_internal_exit".to_string(),
+            description: Some("Internal process exit subtype".to_string()),
+            parent: Some(process_id),
+        },
+        EventTypeDef {
+            name: "file_internal_rename".to_string(),
+            description: Some("Internal file rename subtype".to_string()),
+            parent: Some(file_id),
+        },
+        EventTypeDef {
+            name: "file_internal_unlink".to_string(),
+            description: Some("Internal file unlink subtype".to_string()),
+            parent: Some(file_id),
+        },
+        EventTypeDef {
+            name: "network_internal_send".to_string(),
+            description: Some("Internal network send subtype".to_string()),
+            parent: Some(network_id),
+        },
+    ] {
+        if registry.get_event_type_id(&event_type.name).is_none() {
+            registry.register_event_type(event_type)?;
+        }
+    }
+
+    for field in [
+        FieldDef {
+            path: "process.pid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Process identifier".to_string()),
+        },
+        FieldDef {
+            path: "process.ppid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Parent process identifier".to_string()),
+        },
+        FieldDef {
+            path: "process.uid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("User identifier".to_string()),
+        },
+        FieldDef {
+            path: "process.gid".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Group identifier".to_string()),
+        },
+        FieldDef {
+            path: "process.name".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Process short name".to_string()),
+        },
+        FieldDef {
+            path: "process.executable".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Executable path".to_string()),
+        },
+        FieldDef {
+            path: "process.command_line".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Command line".to_string()),
+        },
+        FieldDef {
+            path: "process.operation".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Process operation subtype".to_string()),
+        },
+        FieldDef {
+            path: "process.exit_code".to_string(),
+            data_type: FieldDataType::I64,
+            description: Some("Process exit code".to_string()),
+        },
+        FieldDef {
+            path: "process.entity_id".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Stable process entity identifier".to_string()),
+        },
+        FieldDef {
+            path: "file.path".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File path".to_string()),
+        },
+        FieldDef {
+            path: "file.directory".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File parent directory or basename fallback".to_string()),
+        },
+        FieldDef {
+            path: "file.name".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File basename".to_string()),
+        },
+        FieldDef {
+            path: "file.inode".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("File inode number".to_string()),
+        },
+        FieldDef {
+            path: "file.operation".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("File operation subtype".to_string()),
+        },
+        FieldDef {
+            path: "network.destination".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Network destination".to_string()),
+        },
+        FieldDef {
+            path: "network.operation".to_string(),
+            data_type: FieldDataType::String,
+            description: Some("Network operation subtype".to_string()),
+        },
+        FieldDef {
+            path: "network.dest_port".to_string(),
+            data_type: FieldDataType::U64,
+            description: Some("Destination port".to_string()),
+        },
+    ] {
+        if registry.get_field_id(&field.path).is_none() {
+            registry.register_field(field)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Common runtime configuration trait
 pub trait RuntimeConfig: Clone + Send + Sync {
     /// Get maximum memory in MB
@@ -321,7 +482,7 @@ pub struct AlertRecord {
 // ============================================================================
 
 /// Schema registry that maintains field definitions and type information
-/// 
+///
 /// Uses DashMap for concurrent access without locking, providing better
 /// performance under high concurrency.
 #[derive(Debug)]
@@ -349,10 +510,11 @@ impl Clone for SchemaRegistry {
             event_types: self.event_types.clone(),
             event_type_names: self.event_type_names.clone(),
             next_field_id: std::sync::atomic::AtomicU32::new(
-                self.next_field_id.load(std::sync::atomic::Ordering::SeqCst)
+                self.next_field_id.load(std::sync::atomic::Ordering::SeqCst),
             ),
             next_event_type_id: std::sync::atomic::AtomicU16::new(
-                self.next_event_type_id.load(std::sync::atomic::Ordering::SeqCst)
+                self.next_event_type_id
+                    .load(std::sync::atomic::Ordering::SeqCst),
             ),
         }
     }
@@ -385,7 +547,9 @@ impl SchemaRegistry {
         }
 
         // Get next ID atomically
-        let id = self.next_field_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_field_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         // Insert into both maps
         self.field_paths.insert(def.path.clone(), id);
@@ -402,7 +566,9 @@ impl SchemaRegistry {
         }
 
         // Get next ID atomically
-        let id = self.next_event_type_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_event_type_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         // Insert into both maps
         self.event_type_names.insert(def.name.clone(), id);
@@ -515,13 +681,13 @@ impl serde::Serialize for TypedValue {
             TypedValue::Bool(v) => serializer.serialize_newtype_variant("TypedValue", 3, "Bool", v),
             TypedValue::String(v) => {
                 serializer.serialize_newtype_variant("TypedValue", 4, "String", v)
-            }
+            },
             TypedValue::Bytes(v) => {
                 serializer.serialize_newtype_variant("TypedValue", 5, "Bytes", v)
-            }
+            },
             TypedValue::Array(v) => {
                 serializer.serialize_newtype_variant("TypedValue", 6, "Array", v)
-            }
+            },
             TypedValue::Null => serializer.serialize_unit_variant("TypedValue", 7, "Null"),
         }
     }
@@ -571,7 +737,7 @@ impl<'de> serde::Deserialize<'de> for TypedValue {
                     (Field::Null, v) => {
                         v.unit_variant()?;
                         Ok(TypedValue::Null)
-                    }
+                    },
                 }
             }
         }
@@ -752,8 +918,7 @@ mod tests {
         assert!(!error.matched);
         assert_eq!(error.error, Some("test error".to_string()));
 
-        let with_capture = EvalResult::matched()
-            .with_capture("field1", TypedValue::I64(42));
+        let with_capture = EvalResult::matched().with_capture("field1", TypedValue::I64(42));
         assert_eq!(with_capture.captured_fields.get("field1"), Some(&TypedValue::I64(42)));
     }
 }

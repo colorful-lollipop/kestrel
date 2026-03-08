@@ -1,0 +1,15 @@
+{
+  "scenario_id": "credential-access-minimal",
+  "expected_rules": [
+    {
+      "rule_id": "credaccess-001",
+      "min_hits": 1,
+      "reason": "Credential-like file access should exercise the credential access detection path."
+    }
+  ],
+  "unexpected_rules": [],
+  "notes": [
+    "The safe default path uses a temporary fake credential file.",
+    "Real sensitive targets must only be used inside isolated battle-lab environments."
+  ]
+}

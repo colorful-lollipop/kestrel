@@ -84,47 +84,23 @@ impl WasmCodeGenerator {
         writeln!(output, "(module")?;
         writeln!(output, "  ;; Import Host API v1 functions")?;
         writeln!(output, "  (import \"kestrel\" \"event_get_i64\"")?;
-        writeln!(
-            output,
-            "    (func $event_get_i64 (param i32 i32) (result i64)))"
-        )?;
+        writeln!(output, "    (func $event_get_i64 (param i32 i32) (result i64)))")?;
         writeln!(output, "  (import \"kestrel\" \"event_get_u64\"")?;
-        writeln!(
-            output,
-            "    (func $event_get_u64 (param i32 i32) (result i64)))"
-        )?;
+        writeln!(output, "    (func $event_get_u64 (param i32 i32) (result i64)))")?;
         writeln!(output, "  (import \"kestrel\" \"event_get_str\"")?;
-        writeln!(
-            output,
-            "    (func $event_get_str (param i32 i32 i32) (result i32)))"
-        )?;
+        writeln!(output, "    (func $event_get_str (param i32 i32 i32) (result i32)))")?;
         writeln!(output, "  (import \"kestrel\" \"event_get_bool\"")?;
-        writeln!(
-            output,
-            "    (func $event_get_bool (param i32 i32) (result i32)))"
-        )?;
+        writeln!(output, "    (func $event_get_bool (param i32 i32) (result i32)))")?;
         writeln!(output, "  (import \"kestrel\" \"re_match\"")?;
-        writeln!(
-            output,
-            "    (func $re_match (param i32 i32 i32) (result i32)))"
-        )?;
+        writeln!(output, "    (func $re_match (param i32 i32 i32) (result i32)))")?;
         writeln!(output, "  (import \"kestrel\" \"glob_match\"")?;
-        writeln!(
-            output,
-            "    (func $glob_match (param i32 i32 i32) (result i32)))"
-        )?;
+        writeln!(output, "    (func $glob_match (param i32 i32 i32) (result i32)))")?;
         writeln!(output, "  (import \"kestrel\" \"alert_emit\"")?;
-        writeln!(
-            output,
-            "    (func $alert_emit (param i32 i32) (result i32)))"
-        )?;
+        writeln!(output, "    (func $alert_emit (param i32 i32) (result i32)))")?;
         writeln!(output)?;
 
         // Write memory section (for string operations)
-        writeln!(
-            output,
-            "  ;; Memory: 16 pages (1MB) for string literals and buffers"
-        )?;
+        writeln!(output, "  ;; Memory: 16 pages (1MB) for string literals and buffers")?;
         writeln!(output, "  (memory (export \"memory\") 16)")?;
         writeln!(output)?;
 
@@ -169,11 +145,7 @@ impl WasmCodeGenerator {
         for lit in &self.string_literals {
             // Escape special characters for WAT
             let escaped = self.escape_wat_string(&lit.value);
-            writeln!(
-                output,
-                "  (data (i32.const {}) \"{}\")",
-                lit.offset, escaped
-            )?;
+            writeln!(output, "  (data (i32.const {}) \"{}\")", lit.offset, escaped)?;
         }
 
         if self.string_literals.is_empty() {
@@ -200,7 +172,7 @@ impl WasmCodeGenerator {
                     result.push(((c as u8) / 100 + b'0') as char);
                     result.push((((c as u8) / 10) % 10 + b'0') as char);
                     result.push(((c as u8) % 10 + b'0') as char);
-                }
+                },
                 _ => result.push(c),
             }
         }
@@ -210,7 +182,10 @@ impl WasmCodeGenerator {
     /// Generate the pred_eval dispatcher
     fn generate_pred_eval_dispatcher(&self, output: &mut Vec<u8>, rule: &IrRule) -> Result<()> {
         writeln!(output, "  ;; pred_eval: Dispatch to appropriate predicate")?;
-        writeln!(output, "  (func (export \"pred_eval\") (param $predicate_id i32) (param $event_handle i32) (result i32)")?;
+        writeln!(
+            output,
+            "  (func (export \"pred_eval\") (param $predicate_id i32) (param $event_handle i32) (result i32)"
+        )?;
         writeln!(output, "    (local $result i32)")?;
 
         // Generate dispatch logic using if-else chain
@@ -218,11 +193,7 @@ impl WasmCodeGenerator {
         for (pred_id, _) in rule.predicates.iter() {
             let idx = self.predicate_indices.get(pred_id).unwrap();
             if first {
-                write!(
-                    output,
-                    "    (if (i32.eq (local.get $predicate_id) (i32.const {}))",
-                    idx
-                )?;
+                write!(output, "    (if (i32.eq (local.get $predicate_id) (i32.const {}))", idx)?;
                 first = false;
             } else {
                 write!(
@@ -233,11 +204,7 @@ impl WasmCodeGenerator {
             }
             writeln!(output)?;
             writeln!(output, "      (then")?;
-            writeln!(
-                output,
-                "        (call $pred_eval_{} (local.get $event_handle))",
-                idx
-            )?;
+            writeln!(output, "        (call $pred_eval_{} (local.get $event_handle))", idx)?;
             writeln!(output, "        (local.set $result)")?;
             writeln!(output, "      )")?;
         }
@@ -266,16 +233,8 @@ impl WasmCodeGenerator {
         pred_id: &str,
         predicate: &IrPredicate,
     ) -> Result<()> {
-        writeln!(
-            output,
-            "  ;; Internal pred_eval for {}: {}",
-            pred_id, predicate.event_type
-        )?;
-        writeln!(
-            output,
-            "  (func $pred_eval_{} (param $event_handle i32) (result i32)",
-            idx
-        )?;
+        writeln!(output, "  ;; Internal pred_eval for {}: {}", pred_id, predicate.event_type)?;
+        writeln!(output, "  (func $pred_eval_{} (param $event_handle i32) (result i32)", idx)?;
 
         // Generate expression evaluation
         self.generate_node(output, &predicate.root, true)?;
@@ -301,26 +260,28 @@ impl WasmCodeGenerator {
                 self.field_types
                     .entry(*field_id)
                     .or_insert(WasmFieldType::I64);
-            }
+            },
             IrNode::BinaryOp { op: _, left, right } => {
                 self.analyze_node_types(left)?;
                 self.analyze_node_types(right)?;
-            }
+            },
             IrNode::UnaryOp { op: _, operand } => {
                 self.analyze_node_types(operand)?;
-            }
+            },
             IrNode::FunctionCall { func: _, args } => {
                 for arg in args {
                     self.analyze_node_types(arg)?;
                 }
-            }
+            },
             IrNode::In { value, values: _ } => {
                 self.analyze_node_types(value)?;
-            }
-            IrNode::ArrayQuantifier { element_condition, .. } => {
+            },
+            IrNode::ArrayQuantifier {
+                element_condition, ..
+            } => {
                 self.analyze_node_types(element_condition)?;
-            }
-            IrNode::Literal { value: _ } => {}
+            },
+            IrNode::Literal { value: _ } => {},
         }
         Ok(())
     }
@@ -352,20 +313,20 @@ impl WasmCodeGenerator {
                         self.next_offset += s.len() as u32 + 1; // +1 for null terminator
                     }
                 }
-            }
-            IrNode::LoadField { field_id: _ } => {}
+            },
+            IrNode::LoadField { field_id: _ } => {},
             IrNode::BinaryOp { op: _, left, right } => {
                 self.collect_node_literals(left)?;
                 self.collect_node_literals(right)?;
-            }
+            },
             IrNode::UnaryOp { op: _, operand } => {
                 self.collect_node_literals(operand)?;
-            }
+            },
             IrNode::FunctionCall { func: _, args } => {
                 for arg in args {
                     self.collect_node_literals(arg)?;
                 }
-            }
+            },
             IrNode::In { value, values } => {
                 self.collect_node_literals(value)?;
                 for val in values {
@@ -381,10 +342,12 @@ impl WasmCodeGenerator {
                         }
                     }
                 }
-            }
-            IrNode::ArrayQuantifier { element_condition, .. } => {
+            },
+            IrNode::ArrayQuantifier {
+                element_condition, ..
+            } => {
                 self.collect_node_literals(element_condition)?;
-            }
+            },
         }
         Ok(())
     }
@@ -399,10 +362,7 @@ impl WasmCodeGenerator {
 
     /// Generate pred_capture function
     fn generate_pred_capture(&self, output: &mut Vec<u8>, rule: &IrRule) -> Result<()> {
-        writeln!(
-            output,
-            "  ;; pred_capture: Capture fields from matching event"
-        )?;
+        writeln!(output, "  ;; pred_capture: Capture fields from matching event")?;
         writeln!(
             output,
             "  (func (export \"pred_capture\") (param $event_handle i32) (param $capture_ptr i32) (result i32)"
@@ -420,11 +380,7 @@ impl WasmCodeGenerator {
                 let alias_offset_info = self.get_string_literal_info(&capture.alias);
                 let alias_offset = alias_offset_info.map(|(o, _)| o).unwrap_or(0);
 
-                writeln!(
-                    output,
-                    "    ;; Capture {}: field_id={}",
-                    capture.alias, field_id
-                )?;
+                writeln!(output, "    ;; Capture {}: field_id={}", capture.alias, field_id)?;
 
                 // Get field value based on type
                 let field_type = self
@@ -438,30 +394,26 @@ impl WasmCodeGenerator {
                         writeln!(output, "    (local.get $event_handle)")?;
                         writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
                         writeln!(output, "    (call $event_get_i64)")?;
-                    }
+                    },
                     WasmFieldType::String => {
                         writeln!(output, "    (local.get $event_handle)")?;
                         writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
                         writeln!(output, "    (i32.const 0)  ;; buffer ptr")?;
                         writeln!(output, "    (i32.const 256)  ;; buffer size")?;
                         writeln!(output, "    (call $event_get_str)")?;
-                    }
+                    },
                     WasmFieldType::Bool => {
                         writeln!(output, "    (local.get $event_handle)")?;
                         writeln!(output, "    (i32.const {})  ;; field_id", field_id)?;
                         writeln!(output, "    (call $event_get_bool)")?;
                         writeln!(output, "    (i64.extend_i32_u)")?;
-                    }
+                    },
                 }
 
                 // Store in capture buffer: write field_id, alias_offset, value
                 // Format: [field_id (4 bytes)][alias_offset (4 bytes)][value (8 bytes)]
                 let offset = 16 * idx as u32;
-                writeln!(
-                    output,
-                    "    (i32.const {})  ;; capture struct offset",
-                    offset
-                )?;
+                writeln!(output, "    (i32.const {})  ;; capture struct offset", offset)?;
                 writeln!(output, "    (i32.add)")?;
                 writeln!(
                     output,
@@ -470,11 +422,7 @@ impl WasmCodeGenerator {
                 )?;
                 writeln!(output, "    (i32.store)")?;
 
-                writeln!(
-                    output,
-                    "    (i32.const {})  ;; capture struct offset",
-                    offset
-                )?;
+                writeln!(output, "    (i32.const {})  ;; capture struct offset", offset)?;
                 writeln!(output, "    (i32.add)")?;
                 writeln!(output, "    (i32.const 4)  ;; alias_offset offset")?;
                 writeln!(output, "    (i32.add)")?;
@@ -485,11 +433,7 @@ impl WasmCodeGenerator {
             }
 
             // Return number of captures
-            writeln!(
-                output,
-                "    (i32.const {})  ;; return count",
-                rule.captures.len()
-            )?;
+            writeln!(output, "    (i32.const {})  ;; return count", rule.captures.len())?;
         }
 
         writeln!(output, "  )")?;
@@ -503,22 +447,22 @@ impl WasmCodeGenerator {
         match node {
             IrNode::Literal { value } => {
                 self.generate_literal(output, value, is_root)?;
-            }
+            },
             IrNode::LoadField { field_id } => {
                 self.generate_load_field(output, *field_id, is_root)?;
-            }
+            },
             IrNode::BinaryOp { op, left, right } => {
                 self.generate_binary_op(output, op, left, right, is_root)?;
-            }
+            },
             IrNode::UnaryOp { op, operand } => {
                 self.generate_unary_op(output, op, operand, is_root)?;
-            }
+            },
             IrNode::FunctionCall { func, args } => {
                 self.generate_function_call(output, func, args, is_root)?;
-            }
+            },
             IrNode::In { value, values } => {
                 self.generate_in(output, value, values, is_root)?;
-            }
+            },
             IrNode::ArrayQuantifier {
                 quantifier,
                 field_id,
@@ -531,7 +475,7 @@ impl WasmCodeGenerator {
                     element_condition,
                     is_root,
                 )?;
-            }
+            },
         }
 
         Ok(())
@@ -551,10 +495,10 @@ impl WasmCodeGenerator {
                 if !is_root {
                     writeln!(output, "    (i64.extend_i32_u)")?;
                 }
-            }
+            },
             IrLiteral::Int(i) => {
                 writeln!(output, "    (i64.const {})", i)?;
-            }
+            },
             IrLiteral::String(s) => {
                 // String literal: get offset and load from data section
                 if let Some((offset, length)) = self.get_string_literal_info(s) {
@@ -565,19 +509,15 @@ impl WasmCodeGenerator {
                         writeln!(output, "    (i32.const 1)  ;; true (non-empty)")?;
                     }
                 } else {
-                    writeln!(
-                        output,
-                        "    (i32.const 0)  ;; String literal not found: \"{}\"",
-                        s
-                    )?;
+                    writeln!(output, "    (i32.const 0)  ;; String literal not found: \"{}\"", s)?;
                     if is_root {
                         writeln!(output, "    (i32.const 0)")?;
                     }
                 }
-            }
+            },
             IrLiteral::Null => {
                 writeln!(output, "    (i64.const 0)  ;; Null")?;
-            }
+            },
         }
 
         Ok(())
@@ -611,7 +551,7 @@ impl WasmCodeGenerator {
                     writeln!(output, "      (else (i32.const 0))")?;
                     writeln!(output, "    )")?;
                 }
-            }
+            },
             WasmFieldType::U64 => {
                 writeln!(output, "    (local.get $event_handle)")?;
                 writeln!(output, "    (i32.const {})", field_id)?;
@@ -624,7 +564,7 @@ impl WasmCodeGenerator {
                     writeln!(output, "      (else (i32.const 0))")?;
                     writeln!(output, "    )")?;
                 }
-            }
+            },
             WasmFieldType::String => {
                 writeln!(output, "    ;; String field comparison")?;
                 writeln!(output, "    (local.get $event_handle)")?;
@@ -640,7 +580,7 @@ impl WasmCodeGenerator {
                     writeln!(output, "      (else (i32.const 0))")?;
                     writeln!(output, "    )")?;
                 }
-            }
+            },
             WasmFieldType::Bool => {
                 writeln!(output, "    (local.get $event_handle)")?;
                 writeln!(output, "    (i32.const {})", field_id)?;
@@ -651,7 +591,7 @@ impl WasmCodeGenerator {
                     writeln!(output, "    (i32.const 0)")?;
                     writeln!(output, "    (i32.neq)")?;
                 }
-            }
+            },
         }
 
         Ok(())
@@ -671,7 +611,7 @@ impl WasmCodeGenerator {
         match op {
             IrBinaryOp::And | IrBinaryOp::Or => {
                 self.generate_logical_binary_op(output, op, left, right, is_root)?;
-            }
+            },
             IrBinaryOp::Eq
             | IrBinaryOp::NotEq
             | IrBinaryOp::Less
@@ -679,14 +619,14 @@ impl WasmCodeGenerator {
             | IrBinaryOp::Greater
             | IrBinaryOp::GreaterEq => {
                 self.generate_comparison_binary_op(output, op, left, right, is_root)?;
-            }
+            },
             IrBinaryOp::Add
             | IrBinaryOp::Sub
             | IrBinaryOp::Mul
             | IrBinaryOp::Div
             | IrBinaryOp::Mod => {
                 self.generate_arithmetic_binary_op(output, op, left, right, is_root)?;
-            }
+            },
         }
 
         Ok(())
@@ -714,11 +654,11 @@ impl WasmCodeGenerator {
         match op {
             IrBinaryOp::And => {
                 writeln!(output, "    (i64.and)")?;
-            }
+            },
             IrBinaryOp::Or => {
                 writeln!(output, "    (i64.or)")?;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         if is_root {
@@ -749,23 +689,23 @@ impl WasmCodeGenerator {
         match op {
             IrBinaryOp::Eq => {
                 writeln!(output, "    (i64.eq)")?;
-            }
+            },
             IrBinaryOp::NotEq => {
                 writeln!(output, "    (i64.ne)")?;
-            }
+            },
             IrBinaryOp::Less => {
                 writeln!(output, "    (i64.lt_s)")?;
-            }
+            },
             IrBinaryOp::LessEq => {
                 writeln!(output, "    (i64.le_s)")?;
-            }
+            },
             IrBinaryOp::Greater => {
                 writeln!(output, "    (i64.gt_s)")?;
-            }
+            },
             IrBinaryOp::GreaterEq => {
                 writeln!(output, "    (i64.ge_s)")?;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         if is_root {
@@ -796,21 +736,21 @@ impl WasmCodeGenerator {
         match op {
             IrBinaryOp::Add => {
                 writeln!(output, "    (i64.add)")?;
-            }
+            },
             IrBinaryOp::Sub => {
                 writeln!(output, "    (i64.sub)")?;
-            }
+            },
             IrBinaryOp::Mul => {
                 writeln!(output, "    (i64.mul)")?;
-            }
+            },
             IrBinaryOp::Div => {
                 writeln!(output, "    (i64.div_s")?;
                 writeln!(output, "    )")?;
-            }
+            },
             IrBinaryOp::Mod => {
                 writeln!(output, "    (i64.rem_s)")?;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         if is_root {
@@ -847,11 +787,11 @@ impl WasmCodeGenerator {
                     writeln!(output, "      (else (i32.const 0))")?;
                     writeln!(output, "    )")?;
                 }
-            }
+            },
             IrUnaryOp::Neg => {
                 writeln!(output, "    (i64.const 0)")?;
                 writeln!(output, "    (i64.sub)")?;
-            }
+            },
         }
 
         Ok(())
@@ -870,22 +810,22 @@ impl WasmCodeGenerator {
         match func {
             IrFunction::Contains => {
                 self.generate_string_function(output, "contains", args, is_root)?;
-            }
+            },
             IrFunction::StartsWith => {
                 self.generate_string_function(output, "startsWith", args, is_root)?;
-            }
+            },
             IrFunction::EndsWith => {
                 self.generate_string_function(output, "endsWith", args, is_root)?;
-            }
+            },
             IrFunction::Regex => {
                 self.generate_regex_function(output, args, is_root)?;
-            }
+            },
             IrFunction::Wildcard => {
                 self.generate_wildcard_function(output, args, is_root)?;
-            }
+            },
             IrFunction::StringEqualsCi => {
                 self.generate_string_function(output, "stringEqualsCi", args, is_root)?;
-            }
+            },
         }
 
         Ok(())
@@ -1096,11 +1036,7 @@ impl WasmCodeGenerator {
             crate::ir::IrQuantifierType::All => "all",
         };
 
-        writeln!(
-            output,
-            "    ;; Array quantifier: {} on field {}",
-            quantifier_name, field_id
-        )?;
+        writeln!(output, "    ;; Array quantifier: {} on field {}", quantifier_name, field_id)?;
 
         // TODO: Implement proper array iteration via Host API
         // For now, generate a placeholder that evaluates the condition once
@@ -1132,20 +1068,20 @@ impl WasmCodeGenerator {
             IrLiteral::Bool(b) => {
                 writeln!(output, "    (i32.const {})", if *b { 1 } else { 0 })?;
                 writeln!(output, "    (i64.extend_i32_u)")?;
-            }
+            },
             IrLiteral::Int(i) => {
                 writeln!(output, "    (i64.const {})", i)?;
-            }
+            },
             IrLiteral::String(s) => {
                 if let Some((offset, _length)) = self.get_string_literal_info(s) {
                     writeln!(output, "    (i32.const {})", offset)?;
                 } else {
                     writeln!(output, "    (i32.const 0)")?;
                 }
-            }
+            },
             IrLiteral::Null => {
                 writeln!(output, "    (i64.const 0)")?;
-            }
+            },
         }
         Ok(())
     }

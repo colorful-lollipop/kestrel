@@ -10,8 +10,10 @@ use std::time::Instant;
 // Mock predicate evaluator
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -88,13 +90,13 @@ fn main() {
 
     // Warmup
     for _ in 0..10000 {
-        let _ = nfa_engine.process_event(&event);
+        let _ = nfa_engine.process_event_blocking(&event);
     }
 
     // Benchmark NFA
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = nfa_engine.process_event(&event);
+        let _ = nfa_engine.process_event_blocking(&event);
     }
     let nfa_duration = start.elapsed();
     let nfa_ns_per_op = nfa_duration.as_nanos() / iterations;

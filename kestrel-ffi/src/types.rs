@@ -1,6 +1,5 @@
 //! C-compatible type definitions
 
-
 /// Engine configuration
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

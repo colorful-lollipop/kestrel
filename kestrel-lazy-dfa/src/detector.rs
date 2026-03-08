@@ -215,8 +215,7 @@ impl HotSpotDetector {
     /// Calculate hotness score for a sequence
     fn calculate_hotness_score(&self, stats: &SequenceStats) -> f64 {
         // Score = (matches_per_minute / threshold) * success_rate * log(evaluations)
-        let mpm_ratio =
-            stats.matches_per_minute() / self.thresholds.min_matches_per_minute as f64;
+        let mpm_ratio = stats.matches_per_minute() / self.thresholds.min_matches_per_minute as f64;
         let success_rate = stats.success_rate();
         let eval_factor = (stats.evaluations as f64).ln().max(1.0);
 

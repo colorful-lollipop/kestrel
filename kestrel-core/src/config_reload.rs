@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, info, warn};
 
 /// Configuration reload error types
@@ -85,7 +85,7 @@ impl ConfigManager {
     /// Create a new configuration manager
     pub fn new() -> Self {
         let (change_tx, _) = broadcast::channel(16);
-        
+
         Self {
             version: Arc::new(RwLock::new(ConfigVersion::new(0, "init".to_string()))),
             change_tx,
@@ -105,9 +105,7 @@ impl ConfigManager {
     /// Start file watcher for hot reload
     pub fn start_file_watcher(&mut self) -> Result<()> {
         if self.config_path.is_none() {
-            return Err(ConfigReloadError::Validation(
-                "Config path not set".to_string()
-            ));
+            return Err(ConfigReloadError::Validation("Config path not set".to_string()));
         }
 
         let path = self.config_path.clone().unwrap();
@@ -117,17 +115,17 @@ impl ConfigManager {
 
         let handle = tokio::spawn(async move {
             info!(path = %path.display(), "Starting config file watcher");
-            
+
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Check if file has changed
                 match Self::check_file_changed(&path, &last_hash).await {
                     Ok(true) => {
                         info!("Configuration file changed, triggering reload");
-                        
+
                         // Update version
                         let new_version = {
                             let mut v = version.write().await;
@@ -135,18 +133,18 @@ impl ConfigManager {
                             v.timestamp = std::time::SystemTime::now();
                             v.version
                         };
-                        
+
                         // Notify subscribers
                         let _ = change_tx.send(ConfigChange::FullReload);
-                        
+
                         info!(version = new_version, "Configuration reload triggered");
-                    }
+                    },
                     Ok(false) => {
                         debug!("Configuration file unchanged");
-                    }
+                    },
                     Err(e) => {
                         warn!(error = %e, "Failed to check config file");
-                    }
+                    },
                 }
             }
         });
@@ -156,13 +154,10 @@ impl ConfigManager {
     }
 
     /// Check if configuration file has changed
-    async fn check_file_changed(
-        path: &Path,
-        last_hash: &Arc<RwLock<String>>,
-    ) -> Result<bool> {
+    async fn check_file_changed(path: &Path, last_hash: &Arc<RwLock<String>>) -> Result<bool> {
         let content = tokio::fs::read_to_string(path).await?;
         let hash = Self::compute_hash(&content);
-        
+
         let last = last_hash.read().await;
         Ok(*last != hash)
     }
@@ -171,7 +166,7 @@ impl ConfigManager {
     fn compute_hash(content: &str) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         content.hash(&mut hasher);
         format!("{:x}", hasher.finish())
@@ -190,7 +185,7 @@ impl ConfigManager {
     /// Trigger manual configuration reload
     pub async fn reload(&self) -> Result<()> {
         info!("Manual configuration reload requested");
-        
+
         // Check if config has actually changed
         if let Some(ref path) = self.config_path {
             match Self::check_file_changed(path, &self.last_hash).await? {
@@ -202,17 +197,17 @@ impl ConfigManager {
                         v.timestamp = std::time::SystemTime::now();
                         v.version
                     };
-                    
+
                     // Notify subscribers
                     let _ = self.change_tx.send(ConfigChange::FullReload);
-                    
+
                     info!(version = new_version, "Configuration reloaded successfully");
                     Ok(())
-                }
+                },
                 false => {
                     warn!("Configuration unchanged, skipping reload");
                     Err(ConfigReloadError::Unchanged)
-                }
+                },
             }
         } else {
             // No file path, just increment version
@@ -222,7 +217,7 @@ impl ConfigManager {
                 v.timestamp = std::time::SystemTime::now();
                 v.version
             };
-            
+
             let _ = self.change_tx.send(ConfigChange::FullReload);
             info!(version = new_version, "Configuration reloaded (no file)");
             Ok(())
@@ -335,18 +330,18 @@ mod tests {
     #[tokio::test]
     async fn test_config_reload_manual() {
         let manager = ConfigManager::new();
-        
+
         // Subscribe to changes
         let mut rx = manager.subscribe();
-        
+
         // Trigger reload (without file, should always succeed)
         let result = manager.reload().await;
         assert!(result.is_ok());
-        
+
         // Verify version incremented
         let version = manager.current_version().await;
         assert_eq!(version.version, 1);
-        
+
         // Verify notification sent
         let change = rx.try_recv();
         assert!(change.is_ok());

@@ -162,7 +162,8 @@ impl RuleComplexity {
 
         // String literals reduce relative complexity (they're simple)
         if self.string_literals > 0 {
-            let reduction = (self.string_literals as u16) * (weights.string_literal_reduction as u16);
+            let reduction =
+                (self.string_literals as u16) * (weights.string_literal_reduction as u16);
             score = score.saturating_sub(reduction);
         }
 
@@ -357,13 +358,13 @@ impl RuleComplexityAnalyzer {
                     complexity.string_literals += 1;
                 }
                 Ok(())
-            }
+            },
 
             // Binary operations
             IrNode::BinaryOp { left, right, .. } => {
                 Self::analyze_node(left, complexity)?;
                 Self::analyze_node(right, complexity)
-            }
+            },
 
             // Function calls
             IrNode::FunctionCall { func, args } => {
@@ -371,14 +372,14 @@ impl RuleComplexityAnalyzer {
                 match func {
                     IrFunction::Regex => complexity.has_regex = true,
                     IrFunction::Wildcard => complexity.has_glob = true,
-                    _ => {}
+                    _ => {},
                 }
                 // Analyze function arguments
                 for arg in args {
                     Self::analyze_node(arg, complexity)?;
                 }
                 Ok(())
-            }
+            },
 
             // In operation (string sets)
             IrNode::In { values, .. } => {
@@ -388,7 +389,7 @@ impl RuleComplexityAnalyzer {
                     }
                 }
                 Ok(())
-            }
+            },
 
             // Unary operations
             IrNode::UnaryOp { operand, .. } => Self::analyze_node(operand, complexity),
@@ -400,22 +401,26 @@ impl RuleComplexityAnalyzer {
 
     /// Recommend a matching strategy based on complexity
     fn recommend_strategy(&self, complexity: &RuleComplexity) -> StrategyRecommendation {
-        if complexity.has_string_literals() && complexity.is_simple_with_threshold(self.weights.simple_threshold) {
+        if complexity.has_string_literals()
+            && complexity.is_simple_with_threshold(self.weights.simple_threshold)
+        {
             // Simple rule with string literals -> AC-DFA
             StrategyRecommendation::new(
                 MatchingStrategy::AcDfa,
-                complexity.clone(),
+                *complexity,
                 format!(
                     "Simple rule ({} literals, complexity {})",
                     complexity.string_literals, complexity.score
                 ),
                 0.9,
             )
-        } else if complexity.is_simple_with_threshold(self.weights.simple_threshold) && complexity.sequence_steps > 0 {
+        } else if complexity.is_simple_with_threshold(self.weights.simple_threshold)
+            && complexity.sequence_steps > 0
+        {
             // Simple sequence -> Lazy DFA (will be hot-spot detected)
             StrategyRecommendation::new(
                 MatchingStrategy::LazyDfa,
-                complexity.clone(),
+                *complexity,
                 format!(
                     "Simple sequence ({} steps, complexity {})",
                     complexity.sequence_steps, complexity.score
@@ -426,7 +431,7 @@ impl RuleComplexityAnalyzer {
             // String literals but complex -> Hybrid AC-DFA + NFA
             StrategyRecommendation::new(
                 MatchingStrategy::HybridAcNfa,
-                complexity.clone(),
+                *complexity,
                 format!(
                     "Complex rule with {} string literals (complexity {})",
                     complexity.string_literals, complexity.score
@@ -437,7 +442,7 @@ impl RuleComplexityAnalyzer {
             // Complex rule -> NFA
             StrategyRecommendation::new(
                 MatchingStrategy::Nfa,
-                complexity.clone(),
+                *complexity,
                 format!(
                     "Complex rule (complexity {}, regex={}, glob={})",
                     complexity.score, complexity.has_regex, complexity.has_glob
@@ -599,10 +604,7 @@ mod tests {
 
         // Should recommend HybridAcNfa due to regex + string literals
         // (regex function has a string argument, so it's complex but has string literals)
-        assert!(matches!(
-            recommendation.strategy,
-            MatchingStrategy::HybridAcNfa
-        ));
+        assert!(matches!(recommendation.strategy, MatchingStrategy::HybridAcNfa));
     }
 
     #[test]
@@ -647,13 +649,9 @@ mod tests {
     #[test]
     fn test_strategy_recommendation_new() {
         let complexity = RuleComplexity::new();
-        let rec = StrategyRecommendation::new(
-            MatchingStrategy::AcDfa,
-            complexity,
-            "Test reason",
-            0.85,
-        );
-        
+        let rec =
+            StrategyRecommendation::new(MatchingStrategy::AcDfa, complexity, "Test reason", 0.85);
+
         assert_eq!(rec.strategy, MatchingStrategy::AcDfa);
         assert_eq!(rec.reason, "Test reason");
         assert!((rec.confidence - 0.85).abs() < f64::EPSILON);
@@ -662,23 +660,13 @@ mod tests {
     #[test]
     fn test_confidence_clamping() {
         let complexity = RuleComplexity::new();
-        
+
         // Test upper bound
-        let rec = StrategyRecommendation::new(
-            MatchingStrategy::Nfa,
-            complexity,
-            "test",
-            1.5,
-        );
+        let rec = StrategyRecommendation::new(MatchingStrategy::Nfa, complexity, "test", 1.5);
         assert!((rec.confidence - 1.0).abs() < f64::EPSILON);
 
         // Test lower bound
-        let rec = StrategyRecommendation::new(
-            MatchingStrategy::Nfa,
-            complexity,
-            "test",
-            -0.5,
-        );
+        let rec = StrategyRecommendation::new(MatchingStrategy::Nfa, complexity, "test", -0.5);
         assert!((rec.confidence - 0.0).abs() < f64::EPSILON);
     }
 }

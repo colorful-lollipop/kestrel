@@ -247,7 +247,7 @@ impl SemanticAnalyzer {
             Expr::FieldRef(path) => {
                 let field_id = self.resolve_field(path)?;
                 Ok(IrNode::LoadField { field_id })
-            }
+            },
             Expr::BinaryOp(op) => self.analyze_binary_op(op),
             Expr::UnaryOp(op) => self.analyze_unary_op(op),
             Expr::FunctionCall(fc) => self.analyze_function_call(fc),
@@ -271,14 +271,14 @@ impl SemanticAnalyzer {
                         kestrel_schema::FieldDataType::Bool => Ok(Type::Bool),
                         kestrel_schema::FieldDataType::I64 | kestrel_schema::FieldDataType::U64 => {
                             Ok(Type::Int)
-                        }
+                        },
                         kestrel_schema::FieldDataType::String => Ok(Type::String),
                         _ => Ok(Type::Unknown),
                     }
                 } else {
                     Ok(Type::Unknown)
                 }
-            }
+            },
             _ => Ok(Type::Unknown),
         }
     }
@@ -312,7 +312,7 @@ impl SemanticAnalyzer {
                         location: format!("{:?}", right_expr),
                     });
                 }
-            }
+            },
 
             // Comparison operators: operands must have compatible types
             BinaryOperator::Eq
@@ -328,7 +328,7 @@ impl SemanticAnalyzer {
                         location: format!("{:?}", right_expr),
                     });
                 }
-            }
+            },
 
             // Arithmetic operators: operands should be numeric
             BinaryOperator::Add
@@ -350,7 +350,7 @@ impl SemanticAnalyzer {
                         location: format!("{:?}", right_expr),
                     });
                 }
-            }
+            },
         }
 
         Ok(())
@@ -443,19 +443,19 @@ impl SemanticAnalyzer {
 
     fn analyze_array_quantifier(&mut self, aq: &ArrayQuantifier) -> Result<IrNode> {
         use crate::ir::IrQuantifierType;
-        
+
         // Resolve the array field
         let field_id = self.resolve_field(&aq.array_field)?;
-        
+
         // Convert quantifier type
         let quantifier = match aq.quantifier {
             QuantifierType::Any => IrQuantifierType::Any,
             QuantifierType::All => IrQuantifierType::All,
         };
-        
+
         // Analyze the element condition
         let element_condition = Box::new(self.analyze_expr(&aq.condition)?);
-        
+
         Ok(IrNode::ArrayQuantifier {
             quantifier,
             field_id,
@@ -474,7 +474,7 @@ impl SemanticAnalyzer {
                 capture
                     .field_path
                     .split('.')
-                    .last()
+                    .next_back()
                     .unwrap_or(&capture.field_path)
                     .to_string()
             }),
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn test_type_checking() {
-        let mut analyzer = SemanticAnalyzer::new(Arc::new(SchemaRegistry::new()));
+        let analyzer = SemanticAnalyzer::new(Arc::new(SchemaRegistry::new()));
 
         // Test compatible types for comparison
         let left = IrNode::Literal {
@@ -666,7 +666,7 @@ mod tests {
         use crate::ast::{EventQuery, Query, SequenceQuery, SequenceStep};
         use kestrel_schema::EventTypeDef;
 
-        let mut schema = SchemaRegistry::new();
+        let schema = SchemaRegistry::new();
         // Register "process" and "file" event types
         schema
             .register_event_type(EventTypeDef {
@@ -707,7 +707,7 @@ mod tests {
         match result.unwrap_err() {
             EqlError::UnknownEventType { event_type } => {
                 assert_eq!(event_type, "invalid_event");
-            }
+            },
             _ => panic!("Expected UnknownEventType error"),
         }
 
@@ -732,10 +732,7 @@ mod tests {
         }));
 
         let result = analyzer.analyze(&query);
-        assert!(
-            result.is_ok(),
-            "Valid sequence event types should pass validation"
-        );
+        assert!(result.is_ok(), "Valid sequence event types should pass validation");
 
         // Test sequence query with invalid event type
         let query = Query::Sequence(Box::new(SequenceQuery {
@@ -758,14 +755,11 @@ mod tests {
         }));
 
         let result = analyzer.analyze(&query);
-        assert!(
-            result.is_err(),
-            "Invalid sequence event type should fail validation"
-        );
+        assert!(result.is_err(), "Invalid sequence event type should fail validation");
         match result.unwrap_err() {
             EqlError::UnknownEventType { event_type } => {
                 assert_eq!(event_type, "invalid_event");
-            }
+            },
             _ => panic!("Expected UnknownEventType error"),
         }
     }

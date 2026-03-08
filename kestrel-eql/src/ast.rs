@@ -196,7 +196,7 @@ impl Query {
                     types.push(until.event_type.clone());
                 }
                 types
-            }
+            },
         }
     }
 
@@ -209,7 +209,7 @@ impl Query {
                     refs.extend(extract_field_refs(cond));
                 }
                 refs.extend(eq.captures.iter().map(|c| c.field_path.clone()));
-            }
+            },
             Query::Sequence(sq) => {
                 for step in &sq.steps {
                     if let Some(cond) = &step.condition {
@@ -225,7 +225,7 @@ impl Query {
                 if let Some(by) = &sq.by {
                     refs.push(by.clone());
                 }
-            }
+            },
         }
         refs
     }
@@ -239,22 +239,22 @@ fn extract_field_refs(expr: &Expr) -> Vec<String> {
         Expr::BinaryOp(op) => {
             refs.extend(extract_field_refs(&op.left));
             refs.extend(extract_field_refs(&op.right));
-        }
+        },
         Expr::UnaryOp(op) => {
             refs.extend(extract_field_refs(&op.operand));
-        }
+        },
         Expr::FunctionCall(fc) => {
             for arg in &fc.args {
                 refs.extend(extract_field_refs(arg));
             }
-        }
+        },
         Expr::In(in_expr) => {
             refs.extend(extract_field_refs(&in_expr.value));
             for val in &in_expr.values {
                 refs.extend(extract_field_refs(val));
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
     refs
 }

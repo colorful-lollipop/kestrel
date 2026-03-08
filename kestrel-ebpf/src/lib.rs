@@ -14,8 +14,8 @@ pub mod platform;
 
 pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
 pub use health::{
-    EbpfHealthChecker, EbpfHealthStatus, HealthCheckConfig, HealthCheckError,
-    HealthMetrics, HealthMetricsSnapshot,
+    EbpfHealthChecker, EbpfHealthStatus, HealthCheckConfig, HealthCheckError, HealthMetrics,
+    HealthMetricsSnapshot,
 };
 pub use lsm::{
     BlockingAction, BlockingRule, EnforcementEvent, FanotifyFallback, LsmConfig, LsmError,
@@ -30,10 +30,11 @@ pub use platform::{
     PlatformManager,
 };
 
-use aya::maps::HashMap;
 use aya::Ebpf;
 use aya::Pod;
+use aya::maps::HashMap;
 use kestrel_event::Event;
+use kestrel_schema::{SchemaRegistry, register_builtin_linux_schema};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -117,6 +118,7 @@ pub struct RawEbpfEvent {
     pub exit_code: i32,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone)]
 pub struct ExecveEvent {
     pub ts_mono_ns: u64,
@@ -130,6 +132,26 @@ pub struct ExecveEvent {
     pub args: [u8; 512],
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct LiveEvent {
+    pub event_type: u32,
+    pub event_size: u32,
+    pub ts_mono_ns: u64,
+    pub pid: u32,
+    pub ppid: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub entity_key: u32,
+    pub subtype: u32,
+    pub aux_u32_1: u32,
+    pub aux_u32_2: u32,
+    pub aux_u64_1: u64,
+    pub comm: [u8; 16],
+    pub primary: [u8; 256],
+    pub secondary: [u8; 256],
+}
+
 pub struct EbpfCollector {
     ebpf: Arc<Mutex<Ebpf>>,
     attached: AttachedPrograms,
@@ -140,17 +162,15 @@ pub struct EbpfCollector {
     next_event_id: Arc<AtomicU64>,
     _polling_handle: Option<tokio::task::JoinHandle<()>>,
     /// Health checker for monitoring eBPF status
-    health_checker: Option<Arc<health::EbpfHealthChecker>>,
+    _health_checker: Option<Arc<health::EbpfHealthChecker>>,
     /// Health metrics reference
     health_metrics: Option<Arc<health::HealthMetrics>>,
 }
 
 impl EbpfCollector {
     pub fn new(event_tx: mpsc::Sender<Event>, ebpf: Ebpf) -> Self {
-        use kestrel_schema::SchemaRegistry;
-
-        // Create schema registry for normalizer
         let schema = Arc::new(SchemaRegistry::new());
+        let _ = register_builtin_linux_schema(schema.as_ref());
 
         Self {
             ebpf: Arc::new(Mutex::new(ebpf)),
@@ -161,7 +181,7 @@ impl EbpfCollector {
             normalizer: normalize::EventNormalizer::new(schema),
             next_event_id: Arc::new(AtomicU64::new(1)),
             _polling_handle: None,
-            health_checker: None,
+            _health_checker: None,
             health_metrics: None,
         }
     }
@@ -172,10 +192,8 @@ impl EbpfCollector {
         ebpf: Ebpf,
         health_config: health::HealthCheckConfig,
     ) -> (Self, Arc<health::EbpfHealthChecker>) {
-        use kestrel_schema::SchemaRegistry;
-
-        // Create schema registry for normalizer
         let schema = Arc::new(SchemaRegistry::new());
+        let _ = register_builtin_linux_schema(schema.as_ref());
 
         // Create health checker
         let health_checker = Arc::new(health::EbpfHealthChecker::new(health_config));
@@ -190,11 +208,25 @@ impl EbpfCollector {
             normalizer: normalize::EventNormalizer::new(schema),
             next_event_id: Arc::new(AtomicU64::new(1)),
             _polling_handle: None,
-            health_checker: Some(health_checker.clone()),
+            _health_checker: Some(health_checker.clone()),
             health_metrics: Some(health_metrics),
         };
 
         (collector, health_checker)
+    }
+
+    /// Event types that are currently produced by the live ring buffer collector.
+    pub fn supported_live_event_types() -> &'static [EbpfEventType] {
+        &[
+            EbpfEventType::ProcessExec,
+            EbpfEventType::FileOpen,
+            EbpfEventType::NetworkConnect,
+        ]
+    }
+
+    /// Whether a given event type is produced by the current live collector implementation.
+    pub fn supports_live_event_type(event_type: EbpfEventType) -> bool {
+        Self::supported_live_event_types().contains(&event_type)
     }
 
     /// Get health metrics if health checking is enabled
@@ -216,6 +248,21 @@ impl EbpfCollector {
 
     pub async fn start(&mut self) -> Result<(), EbpfError> {
         info!("Starting eBPF collector");
+
+        let unsupported_interests: Vec<_> = self
+            .interests
+            .read()
+            .unwrap()
+            .iter()
+            .copied()
+            .filter(|event_type| !Self::supports_live_event_type(*event_type))
+            .collect();
+        if !unsupported_interests.is_empty() {
+            warn!(
+                ?unsupported_interests,
+                "Requested live eBPF event types are not yet emitted by the current collector; they will remain inactive"
+            );
+        }
 
         let mut programs = ProgramManager::new(self.ebpf.clone());
         programs.attach_process_programs()?;
@@ -260,14 +307,13 @@ impl EbpfCollector {
                     break;
                 }
 
-                // Check if process events are interesting
                 let should_collect = interests
                     .read()
                     .unwrap()
-                    .contains(&EbpfEventType::ProcessExec);
+                    .iter()
+                    .any(|event_type| EbpfCollector::supports_live_event_type(*event_type));
 
                 if !should_collect {
-                    // Sleep briefly if not interested
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     continue;
                 }
@@ -288,12 +334,12 @@ impl EbpfCollector {
                     match ringbuf_result {
                         Ok(mut ringbuf) => {
                             ringbuf_error_logged = false; // Reset on success
-                                                          // Try to read next event
+                            // Try to read next event
                             ringbuf.next().map(|item| {
                                 let bytes: &[u8] = &item;
                                 bytes.to_vec() // Copy data to release lock
                             })
-                        }
+                        },
                         Err(e) => {
                             // Log error only once
                             if !ringbuf_error_logged {
@@ -302,13 +348,13 @@ impl EbpfCollector {
                                 ringbuf_error_logged = true;
                             }
                             None
-                        }
+                        },
                     }
                 }; // Lock released here
 
                 // Process event (without lock)
                 if let Some(bytes) = event_data {
-                    let expected_size = size_of::<ExecveEvent>();
+                    let expected_size = size_of::<LiveEvent>();
 
                     if bytes.len() != expected_size {
                         warn!(
@@ -319,21 +365,19 @@ impl EbpfCollector {
                         continue;
                     }
 
-                    // Parse ExecveEvent from bytes
-                    let exec_event: ExecveEvent =
-                        unsafe { std::ptr::read(bytes.as_ptr() as *const ExecveEvent) };
+                    let live_event: LiveEvent =
+                        unsafe { std::ptr::read(bytes.as_ptr() as *const LiveEvent) };
 
                     debug!(
-                        pid = exec_event.pid,
-                        comm = ?std::str::from_utf8(&exec_event.comm),
-                        "Received execve event from ring buffer"
+                        pid = live_event.pid,
+                        event_type = live_event.event_type,
+                        subtype = live_event.subtype,
+                        "Received live event from ring buffer"
                     );
 
-                    // Assign event ID
                     let event_id = next_event_id.fetch_add(1, Ordering::Relaxed);
 
-                    // Normalize event
-                    match normalizer.normalize_execve_event(&exec_event, event_id) {
+                    match normalizer.normalize_live_event(&live_event, event_id) {
                         Ok(kestrel_event) => {
                             // Send to EventBus
                             if let Err(e) = event_tx.try_send(kestrel_event) {
@@ -347,7 +391,7 @@ impl EbpfCollector {
                                             metrics.record_failure();
                                         }
                                         break;
-                                    }
+                                    },
                                     TrySendError::Full(_) => {
                                         // Channel full - log metric but don't block eBPF
                                         warn!(
@@ -357,12 +401,12 @@ impl EbpfCollector {
                                         if let Some(ref metrics) = health_metrics {
                                             metrics.record_dropped();
                                         }
-                                    }
+                                    },
                                 }
                             } else {
                                 debug!(
                                     event_id = event_id,
-                                    pid = exec_event.pid,
+                                    pid = live_event.pid,
                                     "Event sent to EventBus successfully"
                                 );
                                 // Record successful event
@@ -370,18 +414,18 @@ impl EbpfCollector {
                                     metrics.record_event();
                                 }
                             }
-                        }
+                        },
                         Err(e) => {
                             warn!(
                                 error = %e,
-                                pid = exec_event.pid,
+                                pid = live_event.pid,
                                 "Failed to normalize execve event"
                             );
                             // Record failure in health metrics
                             if let Some(ref metrics) = health_metrics {
                                 metrics.record_failure();
                             }
-                        }
+                        },
                     }
                 } else {
                     // No events available, sleep briefly to avoid busy-wait
@@ -407,13 +451,13 @@ impl EbpfCollector {
             match tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await {
                 Ok(Ok(())) => {
                     info!("Ring buffer polling task stopped gracefully");
-                }
+                },
                 Ok(Err(e)) => {
                     warn!("Ring buffer polling task stopped with error: {:?}", e);
-                }
+                },
                 Err(_) => {
                     warn!("Ring buffer polling task did not stop within timeout, continuing");
-                }
+                },
             }
         }
 
@@ -441,7 +485,7 @@ impl EbpfCollector {
             .try_into()
             .map_err(|e| EbpfError::MapError(format!("{:?}", e)))?;
 
-        hash_map.insert(&decision.pid, decision, 0).map_err(|e| {
+        hash_map.insert(decision.pid, decision, 0).map_err(|e| {
             EbpfError::MapError(format!("Failed to insert into enforcement_map: {}", e))
         })?;
 
@@ -498,5 +542,12 @@ mod tests {
         let mut attached = AttachedPrograms::new();
         attached.detach_all();
         assert!(attached.execve_tracepoint.is_none());
+    }
+
+    #[test]
+    fn test_live_event_support_is_explicit() {
+        assert!(EbpfCollector::supports_live_event_type(EbpfEventType::ProcessExec));
+        assert!(EbpfCollector::supports_live_event_type(EbpfEventType::FileOpen));
+        assert!(EbpfCollector::supports_live_event_type(EbpfEventType::NetworkConnect));
     }
 }

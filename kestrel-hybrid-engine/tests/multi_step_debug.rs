@@ -1,16 +1,19 @@
 //! Debug test for multi-step sequences
 
+use kestrel_event::Event;
 use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
 use kestrel_nfa::{CompiledSequence, NfaSequence, PredicateEvaluator, SeqStep};
-use kestrel_event::Event;
 use std::sync::Arc;
 
 struct SimpleEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for SimpleEvaluator {
-    fn evaluate(&self, predicate_id: &str, event: &Event) -> kestrel_nfa::NfaResult<bool> {
-        println!("    [Evaluator] predicate={}, event_type={}, entity_key={}",
-                 predicate_id, event.event_type_id, event.entity_key);
+    async fn evaluate(&self, predicate_id: &str, event: &Event) -> kestrel_nfa::NfaResult<bool> {
+        println!(
+            "    [Evaluator] predicate={}, event_type={}, entity_key={}",
+            predicate_id, event.event_type_id, event.entity_key
+        );
         Ok(true)
     }
 
@@ -35,17 +38,17 @@ fn debug_four_step_sequence() {
     // state_id: 0, 1, 2, 3
     // event_type: 1, 3, 4, 6
     let seq_steps = vec![
-        SeqStep::new(0, "pred1".to_string(), 1),  // event_type 1, state_id 0
-        SeqStep::new(1, "pred2".to_string(), 3),  // event_type 3, state_id 1
-        SeqStep::new(2, "pred3".to_string(), 4),  // event_type 4, state_id 2
-        SeqStep::new(3, "pred4".to_string(), 6),  // event_type 6, state_id 3
+        SeqStep::new(0, "pred1".to_string(), 1), // event_type 1, state_id 0
+        SeqStep::new(1, "pred2".to_string(), 3), // event_type 3, state_id 1
+        SeqStep::new(2, "pred3".to_string(), 4), // event_type 4, state_id 2
+        SeqStep::new(3, "pred4".to_string(), 6), // event_type 6, state_id 3
     ];
 
     let sequence = NfaSequence::new(
         "four-step".to_string(),
         100,
         seq_steps,
-        Some(10000),  // 10 second maxspan
+        Some(10000), // 10 second maxspan
         None,
     );
 
@@ -125,7 +128,7 @@ fn debug_four_step_sequence() {
 
     println!("\n[Result] Total alerts after all events: {}", alerts4.len());
 
-    if alerts4.len() > 0 {
+    if !alerts4.is_empty() {
         println!("\n✅ SUCCESS: Four-step sequence works!");
         for (i, alert) in alerts4.iter().enumerate() {
             println!("  Alert {}:", i);

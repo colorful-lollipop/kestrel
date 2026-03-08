@@ -79,16 +79,15 @@ impl AcMatcher {
 
         // Build the Aho-Corasick automaton
         let mut builder = AhoCorasickBuilder::new();
-        builder
-            .match_kind(aho_corasick::MatchKind::Standard); // Standard matching (leftmost-longest)
+        builder.match_kind(aho_corasick::MatchKind::Standard); // Standard matching (leftmost-longest)
 
         if config.case_insensitive {
             builder.ascii_case_insensitive(true);
         }
 
-        let automaton = builder.build(&ac_patterns).map_err(|e| {
-            AcDfaError::InvalidPattern(format!("Failed to build automaton: {}", e))
-        })?;
+        let automaton = builder
+            .build(&ac_patterns)
+            .map_err(|e| AcDfaError::InvalidPattern(format!("Failed to build automaton: {}", e)))?;
 
         // Build pattern mapping
         let mut pattern_map = AHashMap::default();
@@ -151,11 +150,11 @@ impl AcMatcher {
                 } else {
                     None
                 }
-            }
+            },
             PatternKind::Contains => {
                 // Contains is always valid for any match
                 Some(MatchType::Contains)
-            }
+            },
             PatternKind::StartsWith => {
                 // For starts with, the match must start at position 0
                 if ac_match.start() == 0 {
@@ -163,7 +162,7 @@ impl AcMatcher {
                 } else {
                     None
                 }
-            }
+            },
             PatternKind::EndsWith => {
                 // For ends with, the match must end at the text length
                 if ac_match.end() == text.len() {
@@ -171,7 +170,7 @@ impl AcMatcher {
                 } else {
                     None
                 }
-            }
+            },
         }
     }
 
@@ -230,9 +229,8 @@ mod tests {
 
     #[test]
     fn test_matcher_creation() {
-        let patterns = vec![
-            MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap(),
-        ];
+        let patterns =
+            vec![MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap()];
 
         let matcher = AcMatcher::new(patterns, AcDfaConfig::default()).unwrap();
         assert_eq!(matcher.pattern_count(), 1);
@@ -246,9 +244,8 @@ mod tests {
 
     #[test]
     fn test_exact_match() {
-        let patterns = vec![
-            MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap(),
-        ];
+        let patterns =
+            vec![MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap()];
 
         let matcher = AcMatcher::new(patterns, AcDfaConfig::default()).unwrap();
         let matches = matcher.matches_field(1, "bash");
@@ -259,9 +256,8 @@ mod tests {
 
     #[test]
     fn test_contains_match() {
-        let patterns = vec![
-            MatchPattern::contains("ssh".to_string(), 1, "rule-1".to_string()).unwrap(),
-        ];
+        let patterns =
+            vec![MatchPattern::contains("ssh".to_string(), 1, "rule-1".to_string()).unwrap()];
 
         let matcher = AcMatcher::new(patterns, AcDfaConfig::default()).unwrap();
         let matches = matcher.matches_field(1, "/usr/bin/ssh-server");
@@ -285,9 +281,8 @@ mod tests {
 
     #[test]
     fn test_suffix_match() {
-        let patterns = vec![
-            MatchPattern::ends_with(".exe".to_string(), 1, "rule-1".to_string()).unwrap(),
-        ];
+        let patterns =
+            vec![MatchPattern::ends_with(".exe".to_string(), 1, "rule-1".to_string()).unwrap()];
 
         let matcher = AcMatcher::new(patterns, AcDfaConfig::default()).unwrap();
         let matches = matcher.matches_field(1, "malware.exe");
@@ -298,9 +293,8 @@ mod tests {
 
     #[test]
     fn test_no_match_wrong_field() {
-        let patterns = vec![
-            MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap(),
-        ];
+        let patterns =
+            vec![MatchPattern::equals("bash".to_string(), 1, "rule-1".to_string()).unwrap()];
 
         let matcher = AcMatcher::new(patterns, AcDfaConfig::default()).unwrap();
         let matches = matcher.matches_field(2, "bash");
@@ -315,10 +309,7 @@ mod tests {
             MatchPattern::contains("ssh".to_string(), 2, "rule-1".to_string()).unwrap(),
         ];
 
-        let matcher = AcMatcher::builder()
-            .add_patterns(patterns)
-            .build()
-            .unwrap();
+        let matcher = AcMatcher::builder().add_patterns(patterns).build().unwrap();
 
         assert_eq!(matcher.pattern_count(), 2);
     }

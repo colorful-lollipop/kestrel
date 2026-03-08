@@ -10,6 +10,7 @@ name = "kestrel"
 path = "src/main.rs"
 
 [dependencies]
+aya = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,3 +22,5 @@ kestrel-engine = { path = "../kestrel-engine", features = ["wasm", "lua"] }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-rules = { path = "../kestrel-rules" }
+kestrel-ebpf = { path = "../kestrel-ebpf" }
+kestrel-core = { path = "../kestrel-core" }

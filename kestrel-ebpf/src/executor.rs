@@ -13,8 +13,8 @@
 //! - **Metrics Collection**: Detailed performance and decision metrics
 
 use kestrel_core::{
-    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionPolicy,
-    ActionResult, ActionTarget, ActionType, Alert, Severity,
+    ActionCapabilities, ActionDecision, ActionError, ActionExecutor, ActionPolicy, ActionResult,
+    ActionTarget, ActionType, Alert, Severity,
 };
 use kestrel_event::Event;
 use kestrel_nfa::SequenceAlert;
@@ -74,6 +74,7 @@ pub enum EbpfExecutorError {
 pub struct DecisionCacheEntry {
     pub decision: ActionDecision,
     pub expires_at_ns: u64,
+    #[allow(dead_code)]
     pub hit_count: u32,
 }
 
@@ -117,6 +118,7 @@ impl RateLimiter {
 }
 
 /// Audit record for enforcement decisions
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EnforcementAuditRecord {
     pub timestamp_ns: u64,
@@ -153,13 +155,13 @@ impl EbpfExecutorMetrics {
         match action_type {
             ActionType::Block | ActionType::Kill => {
                 self.decisions_blocked.fetch_add(1, Ordering::Relaxed);
-            }
+            },
             ActionType::Allow | ActionType::Alert => {
                 self.decisions_allowed.fetch_add(1, Ordering::Relaxed);
-            }
+            },
             ActionType::Quarantine => {
                 self.decisions_blocked.fetch_add(1, Ordering::Relaxed);
-            }
+            },
         }
         if cached {
             self.decisions_cached.fetch_add(1, Ordering::Relaxed);
@@ -354,11 +356,7 @@ impl EbpfExecutor {
             action_type,
             self.config.policy,
             target,
-            format!(
-                "Alert: {} - {}",
-                alert.title,
-                alert.description.clone().unwrap_or_default()
-            ),
+            format!("Alert: {} - {}", alert.title, alert.description.clone().unwrap_or_default()),
             vec![],
         );
 
@@ -403,11 +401,7 @@ impl EbpfExecutor {
             matched_rules.iter().fold(
                 Severity::Low,
                 |acc, (_, severity)| {
-                    if *severity > acc {
-                        *severity
-                    } else {
-                        acc
-                    }
+                    if *severity > acc { *severity } else { acc }
                 },
             );
 
@@ -441,10 +435,7 @@ impl EbpfExecutor {
     /// Check if an entity should be blocked (fast path for LSM hooks)
     pub fn should_block(&self, entity_key: u128) -> bool {
         if let Some(cached) = self.check_cache(entity_key) {
-            matches!(
-                cached.action,
-                ActionType::Block | ActionType::Kill | ActionType::Quarantine
-            )
+            matches!(cached.action, ActionType::Block | ActionType::Kill | ActionType::Quarantine)
         } else {
             false
         }
@@ -552,10 +543,7 @@ impl EbpfExecutor {
             action_type,
             self.config.policy,
             target,
-            format!(
-                "Sequence {} matched for entity {}",
-                alert.sequence_id, entity_key
-            ),
+            format!("Sequence {} matched for entity {}", alert.sequence_id, entity_key),
             vec![],
         );
 
@@ -688,7 +676,7 @@ impl ActionExecutor for EbpfExecutor {
                     latency_us = latency_us,
                     "Action executed successfully"
                 );
-            }
+            },
             Err(e) => {
                 self.metrics.write().unwrap().record_action_execution(false);
                 error!(
@@ -696,7 +684,7 @@ impl ActionExecutor for EbpfExecutor {
                     error = %e,
                     "Action execution failed"
                 );
-            }
+            },
         }
 
         if let Err(e) = ebpf_result {
@@ -780,10 +768,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_executor_creation() {
-        let executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         assert_eq!(executor.config.policy, ActionPolicy::Inline);
         assert!(executor.config.decision_cache_size > 0);
@@ -791,10 +776,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_make_decision_no_rules() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         let event = Event::builder()
             .event_type(1)
@@ -810,10 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_make_decision_with_rules() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         let event = Event::builder()
             .event_type(1)
@@ -833,10 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_should_block_cached() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         assert!(!executor.should_block(42));
 
@@ -847,10 +823,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_should_not_block_allow() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         let _ = executor.force_block(42, ActionType::Allow, "test".to_string(), 60000);
 
@@ -859,10 +832,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unblock() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         assert!(!executor.should_block(42));
 
@@ -876,10 +846,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_cache() {
-        let mut executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let mut executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         let _ = executor.force_block(42, ActionType::Block, "test".to_string(), 60000);
         let _ = executor.force_block(43, ActionType::Block, "test".to_string(), 60000);
@@ -906,27 +873,12 @@ mod tests {
 
     #[test]
     fn test_severity_to_action() {
-        let executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
-        assert_eq!(
-            executor.determine_action_from_severity(Severity::Critical),
-            ActionType::Kill
-        );
-        assert_eq!(
-            executor.determine_action_from_severity(Severity::High),
-            ActionType::Block
-        );
-        assert_eq!(
-            executor.determine_action_from_severity(Severity::Medium),
-            ActionType::Alert
-        );
-        assert_eq!(
-            executor.determine_action_from_severity(Severity::Low),
-            ActionType::Alert
-        );
+        assert_eq!(executor.determine_action_from_severity(Severity::Critical), ActionType::Kill);
+        assert_eq!(executor.determine_action_from_severity(Severity::High), ActionType::Block);
+        assert_eq!(executor.determine_action_from_severity(Severity::Medium), ActionType::Alert);
+        assert_eq!(executor.determine_action_from_severity(Severity::Low), ActionType::Alert);
         assert_eq!(
             executor.determine_action_from_severity(Severity::Informational),
             ActionType::Allow
@@ -935,10 +887,7 @@ mod tests {
 
     #[test]
     fn test_metrics_snapshot() {
-        let executor = EbpfExecutor::new(
-            Arc::new(NoOpExecutor::default()),
-            EbpfExecutorConfig::default(),
-        );
+        let executor = EbpfExecutor::new(Arc::new(NoOpExecutor), EbpfExecutorConfig::default());
 
         let snapshot = executor.metrics();
         assert_eq!(snapshot.decisions_total, 0);

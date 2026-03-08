@@ -9,8 +9,13 @@ use std::sync::Arc;
 // Simple evaluator that always returns true
 struct SimpleEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for SimpleEvaluator {
-    fn evaluate(&self, predicate_id: &str, event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        predicate_id: &str,
+        event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         println!("  [Evaluator] Checking predicate: {}", predicate_id);
         println!("    Event type: {}", event.event_type_id);
         println!("    Entity key: {}", event.entity_key);
@@ -38,16 +43,14 @@ fn debug_single_step_sequence() {
     // 2. Create single-step sequence (just detect event type 1)
     // NOTE: state_id starts from 0!
     // SeqStep::new(state_id, predicate_id, event_type_id)
-    let seq_steps = vec![
-        SeqStep::new(0, "pred1".to_string(), 1),
-    ];
+    let seq_steps = vec![SeqStep::new(0, "pred1".to_string(), 1)];
 
     let sequence = NfaSequence::new(
         "single-step".to_string(),
-        100,  // by_field_id
+        100, // by_field_id
         seq_steps,
-        None,  // maxspan
-        None,  // until_step
+        None, // maxspan
+        None, // until_step
     );
 
     let compiled = CompiledSequence {
@@ -89,7 +92,7 @@ fn debug_single_step_sequence() {
     }
 
     // Verify
-    if alerts.len() > 0 {
+    if !alerts.is_empty() {
         println!("\n✅ SUCCESS: Single-step sequence works!");
     } else {
         println!("\n❌ FAILED: No alerts generated for single-step sequence");
@@ -119,7 +122,7 @@ fn debug_two_step_sequence() {
         "two-step".to_string(),
         100,
         seq_steps,
-        Some(10000),  // 10 second maxspan
+        Some(10000), // 10 second maxspan
         None,
     );
 
@@ -167,7 +170,7 @@ fn debug_two_step_sequence() {
         println!("    Events matched: {}", alert.events.len());
     }
 
-    if alerts2.len() > 0 {
+    if !alerts2.is_empty() {
         println!("\n✅ SUCCESS: Two-step sequence works!");
     } else {
         println!("\n❌ FAILED: No alerts for two-step sequence");
@@ -191,13 +194,7 @@ fn debug_different_entity_keys() {
         SeqStep::new(1, "pred2".to_string(), 2),
     ];
 
-    let sequence = NfaSequence::new(
-        "two-step-diff".to_string(),
-        100,
-        seq_steps,
-        Some(10000),
-        None,
-    );
+    let sequence = NfaSequence::new("two-step-diff".to_string(), 100, seq_steps, Some(10000), None);
 
     let compiled = CompiledSequence {
         id: "two-step-diff".to_string(),
@@ -231,7 +228,7 @@ fn debug_different_entity_keys() {
 
     println!("  Alerts: {}", alerts.len());
 
-    if alerts.len() == 0 {
+    if alerts.is_empty() {
         println!("\n✅ SUCCESS: Correctly no alert for different entity keys");
     } else {
         println!("\n❌ FAILED: Generated alert for different entity keys (should not match)");

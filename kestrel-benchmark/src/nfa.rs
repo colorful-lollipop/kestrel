@@ -5,14 +5,13 @@ use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator, SeqStep};
 use kestrel_schema::{SchemaRegistry, TypedValue};
 
-use super::{
-    calculate_percentiles, format_duration,
-};
+use super::{calculate_percentiles, format_duration};
 
 struct NoOpPredicateEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for NoOpPredicateEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -52,7 +51,7 @@ pub fn run_nfa_benchmarks() {
         rule_name: "Curl DNS Write Detection".to_string(),
     };
 
-    nfa_engine.load_sequence(sequence);
+    let _ = nfa_engine.load_sequence(sequence);
 
     let entity_key = 0xabcdef123456789u128;
 
@@ -97,7 +96,7 @@ pub fn run_nfa_benchmarks() {
 
     for event in &events {
         let start = std::time::Instant::now();
-        let _ = nfa_engine.process_event(event);
+        let _ = nfa_engine.process_event_blocking(event);
         latencies.push(start.elapsed());
     }
 

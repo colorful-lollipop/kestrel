@@ -165,7 +165,8 @@ impl DfaCache {
     fn ensure_memory_available(&self, required: usize) -> LazyDfaResult<()> {
         let current = *self.memory_usage.read();
         let _available = self.config.max_total_memory.saturating_sub(current);
-        let threshold = (self.config.max_total_memory as f64 * self.config.memory_eviction_threshold) as usize;
+        let threshold =
+            (self.config.max_total_memory as f64 * self.config.memory_eviction_threshold) as usize;
 
         // If we're below threshold, no need to evict
         if current + required < threshold {
@@ -292,8 +293,12 @@ mod tests {
     fn test_cache_clear() {
         let cache = DfaCache::with_default_config();
 
-        cache.insert("seq-1".to_string(), LazyDfa::new("seq-1".to_string(), 2)).unwrap();
-        cache.insert("seq-2".to_string(), LazyDfa::new("seq-2".to_string(), 2)).unwrap();
+        cache
+            .insert("seq-1".to_string(), LazyDfa::new("seq-1".to_string(), 2))
+            .unwrap();
+        cache
+            .insert("seq-2".to_string(), LazyDfa::new("seq-2".to_string(), 2))
+            .unwrap();
 
         assert_eq!(cache.len(), 2);
 
@@ -312,9 +317,15 @@ mod tests {
         let cache = DfaCache::new(config);
 
         // Insert 3 DFAs (exceeds max_dfas)
-        cache.insert("seq-1".to_string(), LazyDfa::new("seq-1".to_string(), 1)).unwrap();
-        cache.insert("seq-2".to_string(), LazyDfa::new("seq-2".to_string(), 1)).unwrap();
-        cache.insert("seq-3".to_string(), LazyDfa::new("seq-3".to_string(), 1)).unwrap();
+        cache
+            .insert("seq-1".to_string(), LazyDfa::new("seq-1".to_string(), 1))
+            .unwrap();
+        cache
+            .insert("seq-2".to_string(), LazyDfa::new("seq-2".to_string(), 1))
+            .unwrap();
+        cache
+            .insert("seq-3".to_string(), LazyDfa::new("seq-3".to_string(), 1))
+            .unwrap();
 
         // Should only have 2 due to LRU eviction
         assert_eq!(cache.len(), 2);

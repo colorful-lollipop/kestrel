@@ -1,0 +1,50 @@
+id: ransomware-early-stage-minimal
+name: Ransomware Early Stage Simulation
+category: ransomware
+severity: critical
+status: draft
+summary: >-
+  Simulates a minimal early-stage ransomware workflow using safe temporary files,
+  batch file-open activity, and rename previews without destructive encryption.
+
+objectives:
+  - validate early-stage ransomware and bulk file activity rules
+  - validate file-open telemetry on repeated access to multiple files
+  - provide a safe regression scenario for replay and battle-lab validation
+
+safe_defaults:
+  execute_by_default: false
+  requires_isolation: true
+  requires_temp_directory_only: true
+  notes:
+    - By default the script only creates files and prints the planned rename chain.
+    - Set KESTREL_LAB_EXECUTE=1 to execute the active simulation.
+    - The active path only touches files under a disposable temporary directory.
+
+telemetry_expectations:
+  categories:
+    - process
+    - file
+  important_fields:
+    - process.executable
+    - process.command_line
+    - process.operation
+    - file.name
+    - file.path
+    - file.directory
+    - file.inode
+    - file.operation
+
+recommended_rules:
+  - ransomware-001
+
+success_criteria:
+  expected_alerts_min: 1
+  required_rule_ids:
+    - ransomware-001
+
+execution:
+  entrypoint: attack.sh
+  env:
+    WORKDIR: /tmp/kestrel_lab_ransomware
+    FILE_COUNT: 5

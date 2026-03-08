@@ -5,8 +5,8 @@
 
 use ahash::AHashMap;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// Reason for a partial match eviction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,7 +76,7 @@ impl SequenceMetrics {
     pub fn record_event(&self) {
         self.events_processed.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     /// Record an event processed - relaxed ordering for hot path
     #[inline]
     pub fn record_event_relaxed(&self) {
@@ -217,9 +217,9 @@ impl NfaMetrics {
     pub fn get_sequence_metrics(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
         self.sequences.read().get(sequence_id).cloned()
     }
-    
+
     /// Get metrics for a specific sequence - returns Arc directly
-    /// 
+    ///
     /// PERFORMANCE: Avoids extra clone by returning Arc
     #[inline]
     pub fn get_sequence_metrics_arc(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
@@ -230,9 +230,9 @@ impl NfaMetrics {
     pub fn record_event(&self) {
         self.total_events_processed.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     /// Record an event processed - relaxed ordering for hot path
-    /// 
+    ///
     /// PERFORMANCE: Uses Relaxed ordering which is fastest on x86_64
     #[inline]
     pub fn record_event_relaxed(&self) {
@@ -338,14 +338,8 @@ mod tests {
         metrics.record_eviction(EvictionReason::Terminated);
 
         let evictions = metrics.evictions.read();
-        assert_eq!(
-            evictions[&EvictionReason::Expired].load(Ordering::Relaxed),
-            2
-        );
-        assert_eq!(
-            evictions[&EvictionReason::Terminated].load(Ordering::Relaxed),
-            1
-        );
+        assert_eq!(evictions[&EvictionReason::Expired].load(Ordering::Relaxed), 2);
+        assert_eq!(evictions[&EvictionReason::Terminated].load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -362,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_nfa_metrics_registration() {
-        let mut nfa_metrics = NfaMetrics::new();
+        let nfa_metrics = NfaMetrics::new();
 
         let _metrics1 = nfa_metrics.register_sequence("seq1".to_string());
         let _metrics2 = nfa_metrics.register_sequence("seq2".to_string());
@@ -379,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_nfa_metrics_summary() {
-        let mut nfa_metrics = NfaMetrics::new();
+        let nfa_metrics = NfaMetrics::new();
 
         let seq1 = nfa_metrics.register_sequence("seq1".to_string());
         let seq2 = nfa_metrics.register_sequence("seq2".to_string());

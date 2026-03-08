@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 struct TestPredicateEvaluator;
 
+#[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
     fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
@@ -21,7 +22,7 @@ impl PredicateEvaluator for TestPredicateEvaluator {
 
 #[tokio::test]
 async fn test_process_injection_sequence() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -53,7 +54,7 @@ async fn test_process_injection_sequence() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event(&e1).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(&e1).unwrap().is_empty());
 
     let e2 = Event::builder()
         .event_type(1002)
@@ -62,7 +63,7 @@ async fn test_process_injection_sequence() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event(&e2).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(&e2).unwrap().is_empty());
 
     let e3 = Event::builder()
         .event_type(1003)
@@ -71,14 +72,14 @@ async fn test_process_injection_sequence() {
         .entity_key(entity)
         .build()
         .unwrap();
-    let alerts = nfa.process_event(&e3).unwrap();
+    let alerts = nfa.process_event_blocking(&e3).unwrap();
     assert_eq!(alerts.len(), 1);
     assert_eq!(alerts[0].rule_id, "process-injection");
 }
 
 #[tokio::test]
 async fn test_file_exfiltration_sequence() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -113,12 +114,12 @@ async fn test_file_exfiltration_sequence() {
             .unwrap();
         if i < 2 {
             assert!(
-                nfa.process_event(&e).unwrap().is_empty(),
+                nfa.process_event_blocking(&e).unwrap().is_empty(),
                 "Step {} should be partial match",
                 i + 1
             );
         } else {
-            let alerts = nfa.process_event(&e).unwrap();
+            let alerts = nfa.process_event_blocking(&e).unwrap();
             assert_eq!(alerts.len(), 1, "Step {} should complete sequence", i + 1);
         }
     }
@@ -126,7 +127,7 @@ async fn test_file_exfiltration_sequence() {
 
 #[tokio::test]
 async fn test_c2_beaconing_pattern() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -164,12 +165,12 @@ async fn test_c2_beaconing_pattern() {
 
         if i < 4 {
             assert!(
-                nfa.process_event(&e).unwrap().is_empty(),
+                nfa.process_event_blocking(&e).unwrap().is_empty(),
                 "Beacon {} should be partial",
                 i + 1
             );
         } else {
-            let alerts = nfa.process_event(&e).unwrap();
+            let alerts = nfa.process_event_blocking(&e).unwrap();
             assert_eq!(alerts.len(), 1, "5th beacon should complete pattern");
         }
     }
@@ -177,7 +178,7 @@ async fn test_c2_beaconing_pattern() {
 
 #[tokio::test]
 async fn test_maxspan_enforcement() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -207,7 +208,7 @@ async fn test_maxspan_enforcement() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event(&e1).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(&e1).unwrap().is_empty());
 
     let e2 = Event::builder()
         .event_type(4002)
@@ -216,16 +217,13 @@ async fn test_maxspan_enforcement() {
         .entity_key(entity)
         .build()
         .unwrap();
-    let alerts = nfa.process_event(&e2).unwrap();
-    assert!(
-        alerts.is_empty(),
-        "Should not match - 10s exceeds 5s maxspan"
-    );
+    let alerts = nfa.process_event_blocking(&e2).unwrap();
+    assert!(alerts.is_empty(), "Should not match - 10s exceeds 5s maxspan");
 }
 
 #[tokio::test]
 async fn test_entity_isolation() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -260,8 +258,8 @@ async fn test_entity_isolation() {
         .entity_key(0xBBBB)
         .build()
         .unwrap();
-    assert!(nfa.process_event(&e1a).unwrap().is_empty());
-    assert!(nfa.process_event(&e1b).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(&e1a).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(&e1b).unwrap().is_empty());
 
     let e2a = Event::builder()
         .event_type(5002)
@@ -270,7 +268,7 @@ async fn test_entity_isolation() {
         .entity_key(0xAAAA)
         .build()
         .unwrap();
-    let alerts = nfa.process_event(&e2a).unwrap();
+    let alerts = nfa.process_event_blocking(&e2a).unwrap();
     assert_eq!(alerts.len(), 1);
     assert_eq!(alerts[0].entity_key, 0xAAAA);
 
@@ -281,14 +279,14 @@ async fn test_entity_isolation() {
         .entity_key(0xBBBB)
         .build()
         .unwrap();
-    let alerts = nfa.process_event(&e2b).unwrap();
+    let alerts = nfa.process_event_blocking(&e2b).unwrap();
     assert_eq!(alerts.len(), 1);
     assert_eq!(alerts[0].entity_key, 0xBBBB);
 }
 
 #[tokio::test]
 async fn test_multiple_sequences_different_entities() {
-    let schema = Arc::new(SchemaRegistry::new());
+    let _schema = Arc::new(SchemaRegistry::new());
     let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(TestPredicateEvaluator);
     let mut nfa = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
@@ -328,8 +326,8 @@ async fn test_multiple_sequences_different_entities() {
         .entity_key(entity2)
         .build()
         .unwrap();
-    nfa.process_event(&e1).unwrap();
-    nfa.process_event(&e2).unwrap();
+    nfa.process_event_blocking(&e1).unwrap();
+    nfa.process_event_blocking(&e2).unwrap();
 
     let e3 = Event::builder()
         .event_type(6002)
@@ -338,7 +336,7 @@ async fn test_multiple_sequences_different_entities() {
         .entity_key(entity1)
         .build()
         .unwrap();
-    nfa.process_event(&e3).unwrap();
+    nfa.process_event_blocking(&e3).unwrap();
 
     let e4 = Event::builder()
         .event_type(6002)
@@ -347,7 +345,7 @@ async fn test_multiple_sequences_different_entities() {
         .entity_key(entity2)
         .build()
         .unwrap();
-    nfa.process_event(&e4).unwrap();
+    nfa.process_event_blocking(&e4).unwrap();
 
     let e5 = Event::builder()
         .event_type(6003)
@@ -356,7 +354,7 @@ async fn test_multiple_sequences_different_entities() {
         .entity_key(entity1)
         .build()
         .unwrap();
-    let alerts1 = nfa.process_event(&e5).unwrap();
+    let alerts1 = nfa.process_event_blocking(&e5).unwrap();
     assert_eq!(alerts1.len(), 1);
     assert_eq!(alerts1[0].entity_key, entity1);
 
@@ -367,7 +365,7 @@ async fn test_multiple_sequences_different_entities() {
         .entity_key(entity2)
         .build()
         .unwrap();
-    let alerts2 = nfa.process_event(&e6).unwrap();
+    let alerts2 = nfa.process_event_blocking(&e6).unwrap();
     assert_eq!(alerts2.len(), 1);
     assert_eq!(alerts2[0].entity_key, entity2);
 }

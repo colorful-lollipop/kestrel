@@ -4,14 +4,16 @@
 
 #[cfg(test)]
 mod perf_tests {
-    use crate::{AcMatcher, MatchPattern, AcDfaConfig};
+    use crate::{AcDfaConfig, AcMatcher, MatchPattern};
     use std::time::Instant;
 
     #[test]
     #[ignore] // Run with: cargo test --release ac_dfa_perf -- --ignored
     fn ac_dfa_perf() {
         let patterns: Vec<_> = (0..100)
-            .map(|i| MatchPattern::equals(format!("pattern_{}", i), 1, format!("rule_{}", i)).unwrap())
+            .map(|i| {
+                MatchPattern::equals(format!("pattern_{}", i), 1, format!("rule_{}", i)).unwrap()
+            })
             .collect();
 
         let config = AcDfaConfig::default();
@@ -35,9 +37,16 @@ mod perf_tests {
         println!("Iterations: {}", iterations);
         println!("Total time: {:?}", duration);
         println!("Per operation: {} ns", ns_per_op);
-        println!("Throughput: {:.2} M ops/sec", (iterations as f64 / duration.as_secs_f64()) / 1_000_000.0);
+        println!(
+            "Throughput: {:.2} M ops/sec",
+            (iterations as f64 / duration.as_secs_f64()) / 1_000_000.0
+        );
 
         // Assertion for minimum performance
-        assert!(ns_per_op < 200, "AC-DFA should be fast in release mode, got {} ns/op", ns_per_op);
+        assert!(
+            ns_per_op < 200,
+            "AC-DFA should be fast in release mode, got {} ns/op",
+            ns_per_op
+        );
     }
 }

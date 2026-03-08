@@ -70,35 +70,33 @@ impl PatternExtractor {
             // Binary operations: check for string comparisons
             IrNode::BinaryOp { op, left, right } => {
                 // Handle logical operations by recursing into both sides
-                if matches!(
-                    op,
-                    kestrel_eql::ir::IrBinaryOp::And | kestrel_eql::ir::IrBinaryOp::Or
-                ) {
+                if matches!(op, kestrel_eql::ir::IrBinaryOp::And | kestrel_eql::ir::IrBinaryOp::Or)
+                {
                     self.extract_from_node(left, predicate, rule_id, patterns)?;
                     self.extract_from_node(right, predicate, rule_id, patterns)?;
                 } else {
                     // Handle comparison operations
                     self.extract_from_binary_op(op, left, right, predicate, rule_id, patterns)?;
                 }
-            }
+            },
 
             // Function calls: check for contains, startswith, endswith
             IrNode::FunctionCall { func, args } => {
                 self.extract_from_function_call(func, args, predicate, rule_id, patterns)?;
-            }
+            },
 
             // In operation: check for constant string sets
             IrNode::In { value, values } => {
                 self.extract_from_in_op(value, values, predicate, rule_id, patterns)?;
-            }
+            },
 
             // Unary operations: recurse into operand
             IrNode::UnaryOp { operand, .. } => {
                 self.extract_from_node(operand, predicate, rule_id, patterns)?;
-            }
+            },
 
             // Other node types: not relevant for pattern extraction
-            _ => {}
+            _ => {},
         }
 
         Ok(())
@@ -117,27 +115,24 @@ impl PatternExtractor {
         use kestrel_eql::ir::IrLiteral;
 
         // Only handle equality/inequality comparisons
-        if !matches!(
-            op,
-            kestrel_eql::ir::IrBinaryOp::Eq | kestrel_eql::ir::IrBinaryOp::NotEq
-        ) {
+        if !matches!(op, kestrel_eql::ir::IrBinaryOp::Eq | kestrel_eql::ir::IrBinaryOp::NotEq) {
             return Ok(());
         }
 
         // Try to extract (field, string_literal) pair
         let (field_id, pattern_str) = match (left, right) {
-            (IrNode::LoadField { field_id }, IrNode::Literal { value }) => {
-                match value {
-                    IrLiteral::String(s) => (*field_id, s),
-                    _ => return Ok(()),
-                }
-            }
-            (IrNode::Literal { value }, IrNode::LoadField { field_id }) => {
-                match value {
-                    IrLiteral::String(s) => (*field_id, s),
-                    _ => return Ok(()),
-                }
-            }
+            (
+                IrNode::LoadField { field_id },
+                IrNode::Literal {
+                    value: IrLiteral::String(s),
+                },
+            ) => (*field_id, s),
+            (
+                IrNode::Literal {
+                    value: IrLiteral::String(s),
+                },
+                IrNode::LoadField { field_id },
+            ) => (*field_id, s),
             _ => return Ok(()),
         };
 
@@ -184,12 +179,8 @@ impl PatternExtractor {
         }
 
         let (field_id, pattern_str) = match (&args[0], &args[1]) {
-            (IrNode::LoadField { field_id }, IrNode::Literal { value: lit }) => {
-                (field_id, lit)
-            }
-            (IrNode::Literal { value: lit }, IrNode::LoadField { field_id }) => {
-                (field_id, lit)
-            }
+            (IrNode::LoadField { field_id }, IrNode::Literal { value: lit }) => (field_id, lit),
+            (IrNode::Literal { value: lit }, IrNode::LoadField { field_id }) => (field_id, lit),
             _ => return Ok(()),
         };
 
@@ -205,12 +196,7 @@ impl PatternExtractor {
         }
 
         // Create the pattern
-        let pattern = MatchPattern::new(
-            pattern_str.clone(),
-            *field_id,
-            kind,
-            rule_id.to_string(),
-        )?;
+        let pattern = MatchPattern::new(pattern_str.clone(), *field_id, kind, rule_id.to_string())?;
 
         patterns.push(pattern);
 
@@ -285,11 +271,7 @@ impl AcDfaBuilder {
     }
 
     /// Add patterns from a predicate
-    pub fn add_predicate(
-        mut self,
-        predicate: &IrPredicate,
-        rule_id: &str,
-    ) -> AcDfaResult<Self> {
+    pub fn add_predicate(mut self, predicate: &IrPredicate, rule_id: &str) -> AcDfaResult<Self> {
         // Prevent duplicate rule IDs
         if self.rule_ids.contains(rule_id) {
             return Ok(self);
@@ -316,10 +298,7 @@ impl AcDfaBuilder {
     }
 
     /// Add patterns from multiple predicates
-    pub fn add_predicates(
-        mut self,
-        predicates: &[(String, IrPredicate)],
-    ) -> AcDfaResult<Self> {
+    pub fn add_predicates(mut self, predicates: &[(String, IrPredicate)]) -> AcDfaResult<Self> {
         for (rule_id, predicate) in predicates {
             self = self.add_predicate(predicate, rule_id)?;
         }
@@ -351,7 +330,7 @@ impl Default for AcDfaBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_eql::ir::{IrNode, IrPredicate, IrFunction};
+    use kestrel_eql::ir::{IrFunction, IrNode, IrPredicate};
 
     #[test]
     fn test_extractor_creation() {
@@ -383,7 +362,9 @@ mod tests {
         };
 
         let extractor = PatternExtractor::new();
-        let patterns = extractor.extract_from_predicate(&predicate, "rule-1").unwrap();
+        let patterns = extractor
+            .extract_from_predicate(&predicate, "rule-1")
+            .unwrap();
 
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0].pattern, "bash");
@@ -410,7 +391,9 @@ mod tests {
         };
 
         let extractor = PatternExtractor::new();
-        let patterns = extractor.extract_from_predicate(&predicate, "rule-1").unwrap();
+        let patterns = extractor
+            .extract_from_predicate(&predicate, "rule-1")
+            .unwrap();
 
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0].pattern, "ssh");

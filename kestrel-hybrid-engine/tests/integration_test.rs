@@ -3,19 +3,20 @@
 // Tests the complete workflow from rule analysis through
 // strategy selection to event processing.
 
-use kestrel_hybrid_engine::{
-    analyze_rule, HybridEngine, HybridEngineConfig, MatchingStrategy, RuleComplexityAnalyzer,
-    RuleStrategy,
-};
 use kestrel_eql::ir::*;
+use kestrel_hybrid_engine::{
+    HybridEngine, HybridEngineConfig, MatchingStrategy, RuleStrategy, analyze_rule,
+};
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 
 // Mock predicate evaluator for testing
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(
+    async fn evaluate(
         &self,
         _predicate_id: &str,
         _event: &kestrel_event::Event,
@@ -122,10 +123,7 @@ fn test_rule_complexity_analyzer_complex() {
 
     // Should recommend HybridAcNfa due to regex + string literals
     // (regex function has a string argument, so it's complex but has string literals)
-    assert!(matches!(
-        recommendation.strategy,
-        MatchingStrategy::HybridAcNfa
-    ));
+    assert!(matches!(recommendation.strategy, MatchingStrategy::HybridAcNfa));
     assert!(!recommendation.complexity.is_simple());
     assert!(recommendation.complexity.has_regex);
 }
@@ -180,7 +178,7 @@ fn test_hybrid_engine_multiple_strategies() {
                 | RuleStrategy::Nfa
                 | RuleStrategy::HybridAcNfa => {
                     println!("Sequence {} has strategy {:?}", id, s);
-                }
+                },
             }
         }
     }
@@ -194,8 +192,12 @@ fn test_engine_statistics() {
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load some sequences
-    engine.load_sequence(create_test_sequence("seq-1", 2)).unwrap();
-    engine.load_sequence(create_test_sequence("seq-2", 3)).unwrap();
+    engine
+        .load_sequence(create_test_sequence("seq-1", 2))
+        .unwrap();
+    engine
+        .load_sequence(create_test_sequence("seq-2", 3))
+        .unwrap();
 
     // Get statistics
     let stats = engine.stats();

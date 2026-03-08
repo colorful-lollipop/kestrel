@@ -40,7 +40,7 @@ pub extern "C" fn kestrel_version() -> *const c_char {
 /// the next FFI call that might set an error.
 #[no_mangle]
 pub extern "C" fn kestrel_last_error() -> *const c_char {
-    engine::get_last_error().unwrap_or(std::ptr::null())
+    error::get_last_error().unwrap_or(std::ptr::null())
 }
 
 #[cfg(test)]

@@ -3,24 +3,23 @@
 //! This module provides LuaJIT runtime support for predicate execution using mlua.
 //! Implements Host API v1 via FFI, consistent with Wasm runtime.
 
+use ahash::AHashMap;
 use anyhow::Result;
 use mlua::{Function, Lua, RegistryKey};
-use ahash::AHashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 use thiserror::Error;
 use tracing::{debug, info};
 
 use kestrel_event::Event;
 use kestrel_schema::{
-    EvalResult, EventHandle, FieldId, GlobId, RegexId,
-    RuleManifest, RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry,
-    TypedValue,
+    EvalResult, EventHandle, FieldId, GlobId, RegexId, RuleManifest, RuntimeCapabilities,
+    RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
 };
 
 // Re-export types from kestrel-schema for backward compatibility
 pub use kestrel_schema::{
-    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle,
-    FieldId as HostFieldId, GlobId as HostGlobId, RegexId as HostRegexId,
+    AlertRecord as HostAlertRecord, EventHandle as HostEventHandle, FieldId as HostFieldId,
+    GlobId as HostGlobId, RegexId as HostRegexId,
 };
 
 /// Lua runtime configuration
@@ -65,7 +64,7 @@ impl RuntimeConfig for LuaConfig {
 pub struct LuaEngine {
     lua: Arc<Lua>,
     config: LuaConfig,
-    schema: Arc<SchemaRegistry>,
+    _schema: Arc<SchemaRegistry>,
     predicates: Arc<StdRwLock<AHashMap<String, LuaPredicate>>>,
     regex_cache: Arc<StdRwLock<AHashMap<RegexId, regex::Regex>>>,
     glob_cache: Arc<StdRwLock<AHashMap<GlobId, glob::Pattern>>>,
@@ -79,8 +78,8 @@ pub struct LuaEngine {
 
 /// Loaded Lua predicate
 pub struct LuaPredicate {
-    rule_id: String,
-    init_func: Option<Function>,
+    _rule_id: String,
+    _init_func: Option<Function>,
     eval_func: RegistryKey,
 }
 
@@ -129,7 +128,7 @@ impl LuaEngine {
         let engine = Self {
             lua: Arc::new(lua),
             config,
-            schema,
+            _schema: schema,
             predicates: Arc::new(StdRwLock::new(AHashMap::new())),
             regex_cache: Arc::new(StdRwLock::new(AHashMap::new())),
             glob_cache: Arc::new(StdRwLock::new(AHashMap::new())),
@@ -175,7 +174,7 @@ impl LuaEngine {
                             } else {
                                 Ok(*v as i64)
                             }
-                        }
+                        },
                         Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
                         _ => Ok(0i64),
                     }
@@ -204,7 +203,7 @@ impl LuaEngine {
                             } else {
                                 Ok(*v as u64)
                             }
-                        }
+                        },
                         Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
                         _ => Ok(0),
                     }
@@ -369,8 +368,8 @@ impl LuaEngine {
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         Ok(LuaPredicate {
-            rule_id: rule_id.to_string(),
-            init_func,
+            _rule_id: rule_id.to_string(),
+            _init_func: init_func,
             eval_func: eval_key,
         })
     }
@@ -423,7 +422,7 @@ impl LuaEngine {
                     error: Some(e.to_string()),
                     captured_fields: AHashMap::new(),
                 })
-            }
+            },
         }
     }
 
@@ -487,142 +486,17 @@ impl LuaEngine {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kestrel_schema::{RuleCapabilities, RuleMetadata};
-
-    #[tokio::test]
-    async fn test_lua_engine_create() {
-        let config = LuaConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = LuaEngine::new(config, schema);
-        assert!(engine.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_lua_predicate_load() {
-        let config = LuaConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = LuaEngine::new(config, schema).unwrap();
-
-        let script = r#"
-            function pred_init()
-                return 0  -- Success
-            end
-
-            function pred_eval(event)
-                return 1  -- Match
-            end
-        "#
-        .to_string();
-
-        let manifest = RuleManifest::new(
-            RuleMetadata::new("test-001", "Test Rule")
-                .with_severity("Low")
-        ).with_capabilities(RuleCapabilities {
-            supports_inline: true,
-            requires_alert: true,
-            requires_block: false,
-            max_span_ms: None,
-        });
-
-        let result = engine.load_predicate(manifest, script).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_lua_eval_with_event() {
-        let config = LuaConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = LuaEngine::new(config, schema).unwrap();
-
-        let script = r#"
-            function pred_init()
-                return 0
-            end
-
-            function pred_eval(event)
-                local pid = kestrel.event_get_i64(0, 1)
-                return pid > 0 and pid < 10000
-            end
-        "#
-        .to_string();
-
-        let manifest = RuleManifest::new(
-            RuleMetadata::new("test-eval", "Test Eval")
-                .with_severity("Low")
-        ).with_capabilities(RuleCapabilities {
-            supports_inline: true,
-            requires_alert: true,
-            requires_block: false,
-            max_span_ms: None,
-        });
-
-        engine.load_predicate(manifest, script).await.unwrap();
-
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(0)
-            .ts_wall(0)
-            .entity_key(0)
-            .field(1, TypedValue::I64(1234))
-            .build()
-            .unwrap();
-
-        let result = engine.eval("test-eval", &event).await.unwrap();
-        assert!(result.matched);
-    }
-
-    #[tokio::test]
-    async fn test_regex_registration() {
-        let config = LuaConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = LuaEngine::new(config, schema).unwrap();
-
-        let result = engine.register_regex(r"\d+").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_glob_registration() {
-        let config = LuaConfig::default();
-        let schema = Arc::new(SchemaRegistry::new());
-        let engine = LuaEngine::new(config, schema).unwrap();
-
-        let result = engine.register_glob("*.exe").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
-    }
-
-    #[test]
-    fn test_lua_config_defaults() {
-        let config = LuaConfig::default();
-        assert_eq!(config.max_memory_mb, 16);
-        assert_eq!(config.max_execution_time_ms, 100);
-        assert_eq!(config.instruction_limit, Some(1_000_000));
-    }
-
-    #[test]
-    fn test_runtime_config_trait() {
-        let config = LuaConfig::default();
-        assert_eq!(config.max_memory_mb(), 16);
-        assert_eq!(config.max_execution_time_ms(), 100);
-        assert_eq!(config.instruction_limit(), Some(1_000_000));
-    }
-}
-
 /// Implement PredicateEvaluator trait for NFA engine integration
 ///
 /// This allows the Lua runtime to be used as a predicate evaluator
 /// for the NFA sequence engine, enabling dual runtime support (Wasm + Lua).
+#[async_trait::async_trait]
 impl kestrel_nfa::PredicateEvaluator for LuaEngine {
     /// Evaluate a predicate against an event
     ///
     /// The predicate_id should be in the format "rule_id" where:
     /// - rule_id is the Lua predicate identifier
-    fn evaluate(
+    async fn evaluate(
         &self,
         predicate_id: &str,
         event: &kestrel_event::Event,
@@ -642,7 +516,10 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
         }
 
         // Get the predicate (handle lock poisoning gracefully)
-        let predicates = self.predicates.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let predicates = self
+            .predicates
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _predicate = predicates.get(predicate_id).ok_or_else(|| {
             kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
         })?;
@@ -695,5 +572,129 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
     fn has_predicate(&self, predicate_id: &str) -> bool {
         let predicates = self.predicates.read().unwrap();
         predicates.contains_key(predicate_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_schema::{RuleCapabilities, RuleMetadata};
+
+    #[tokio::test]
+    async fn test_lua_engine_create() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema);
+        assert!(engine.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_lua_predicate_load() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema).unwrap();
+
+        let script = r#"
+            function pred_init()
+                return 0  -- Success
+            end
+
+            function pred_eval(event)
+                return 1  -- Match
+            end
+        "#
+        .to_string();
+
+        let manifest =
+            RuleManifest::new(RuleMetadata::new("test-001", "Test Rule").with_severity("Low"))
+                .with_capabilities(RuleCapabilities {
+                    supports_inline: true,
+                    requires_alert: true,
+                    requires_block: false,
+                    max_span_ms: None,
+                });
+
+        let result = engine.load_predicate(manifest, script).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_lua_eval_with_event() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema).unwrap();
+
+        let script = r#"
+            function pred_init()
+                return 0
+            end
+
+            function pred_eval(event)
+                local pid = kestrel.event_get_i64(0, 1)
+                return pid > 0 and pid < 10000
+            end
+        "#
+        .to_string();
+
+        let manifest =
+            RuleManifest::new(RuleMetadata::new("test-eval", "Test Eval").with_severity("Low"))
+                .with_capabilities(RuleCapabilities {
+                    supports_inline: true,
+                    requires_alert: true,
+                    requires_block: false,
+                    max_span_ms: None,
+                });
+
+        engine.load_predicate(manifest, script).await.unwrap();
+
+        let event = Event::builder()
+            .event_type(1)
+            .ts_mono(0)
+            .ts_wall(0)
+            .entity_key(0)
+            .field(1, TypedValue::I64(1234))
+            .build()
+            .unwrap();
+
+        let result = engine.eval("test-eval", &event).await.unwrap();
+        assert!(result.matched);
+    }
+
+    #[tokio::test]
+    async fn test_regex_registration() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema).unwrap();
+
+        let result = engine.register_regex(r"\d+").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_glob_registration() {
+        let config = LuaConfig::default();
+        let schema = Arc::new(SchemaRegistry::new());
+        let engine = LuaEngine::new(config, schema).unwrap();
+
+        let result = engine.register_glob("*.exe").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[test]
+    fn test_lua_config_defaults() {
+        let config = LuaConfig::default();
+        assert_eq!(config.max_memory_mb, 16);
+        assert_eq!(config.max_execution_time_ms, 100);
+        assert_eq!(config.instruction_limit, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_runtime_config_trait() {
+        let config = LuaConfig::default();
+        assert_eq!(config.max_memory_mb(), 16);
+        assert_eq!(config.max_execution_time_ms(), 100);
+        assert_eq!(config.instruction_limit(), Some(1_000_000));
     }
 }

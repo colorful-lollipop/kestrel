@@ -4,8 +4,8 @@
 //! in hot paths. This is particularly useful for event processing
 //! where we need to allocate Vecs and other collections frequently.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A simple object pool for reusable objects
 ///
@@ -285,10 +285,10 @@ mod tests {
     #[test]
     fn test_pooled_object_deref() {
         let pool = ObjectPool::<Vec<u32>>::new(1, 2);
-        
+
         let mut obj = pool.acquire();
         obj.get_mut().push(42);
-        
+
         assert_eq!(obj.get()[0], 42);
         assert_eq!(obj.len(), 1);
     }

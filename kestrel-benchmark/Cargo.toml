@@ -19,6 +19,7 @@ kestrel-eql = { path = "../kestrel-eql" }
 
 criterion = "0.5"
 tokio = { version = "1.42", features = ["full"] }
+async-trait = { workspace = true }
 futures = "0.3"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }

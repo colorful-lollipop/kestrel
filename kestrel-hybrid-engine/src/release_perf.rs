@@ -5,15 +5,17 @@
 #[cfg(test)]
 mod release_perf_tests {
     use crate::{HybridEngine, HybridEngineConfig};
-    use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, SeqStep};
+    use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
     use std::sync::Arc;
     use std::time::Instant;
 
     // Mock predicate evaluator
     struct MockEvaluator;
 
+    #[async_trait::async_trait]
+
     impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-        fn evaluate(&self, _p: &str, _e: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+        async fn evaluate(&self, _p: &str, _e: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
             Ok(true)
         }
         fn get_required_fields(&self, _p: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
@@ -75,7 +77,10 @@ mod release_perf_tests {
         println!("\nEvent Processing:");
         println!("  Total: {:?} for {} events", process_time, iterations);
         println!("  Per event: {} ns", ns_per_event);
-        println!("  Throughput: {:.2} K events/sec", (iterations as f64 / process_time.as_secs_f64()) / 1000.0);
+        println!(
+            "  Throughput: {:.2} K events/sec",
+            (iterations as f64 / process_time.as_secs_f64()) / 1000.0
+        );
 
         // Test 3: Statistics
         let stats = engine.stats();
@@ -84,7 +89,11 @@ mod release_perf_tests {
         println!("  NFA sequences: {}", stats.nfa_sequence_count);
 
         // Performance assertions (release mode targets)
-        assert!(ns_per_event < 200000, "Event processing should be fast, got {} ns", ns_per_event);
+        assert!(
+            ns_per_event < 200000,
+            "Event processing should be fast, got {} ns",
+            ns_per_event
+        );
         println!("\n✅ Release mode performance verified!");
     }
 }

@@ -99,19 +99,13 @@ impl InterestPushdown {
     /// Add field interest for an event type
     pub fn add_field_interest(&self, event_type: u32, field_id: u32) {
         let mut interests = self.field_interests.write().unwrap();
-        interests
-            .entry(event_type)
-            .or_insert_with(HashSet::new)
-            .insert(field_id);
+        interests.entry(event_type).or_default().insert(field_id);
     }
 
     /// Add predicate filter for an event type
     pub fn add_predicate_filter(&self, event_type: u32, filter: PredicateFilter) {
         let mut filters = self.predicate_filters.write().unwrap();
-        filters
-            .entry(event_type)
-            .or_insert_with(Vec::new)
-            .push(filter);
+        filters.entry(event_type).or_default().push(filter);
     }
 
     /// Check if an event type is interesting

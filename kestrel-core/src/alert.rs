@@ -152,10 +152,7 @@ impl AlertOutput {
     /// Output alert to stdout
     fn output_stdout(alert: &Alert) {
         let json = serde_json::to_string_pretty(alert).unwrap_or_else(|_| {
-            format!(
-                "{{ \"error\": \"Failed to serialize alert {}\" }}",
-                alert.id
-            )
+            format!("{{ \"error\": \"Failed to serialize alert {}\" }}", alert.id)
         });
         println!("{}", json);
     }

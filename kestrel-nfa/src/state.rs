@@ -6,7 +6,7 @@
 // - SeqStep: Individual step in a sequence
 
 use kestrel_event::Event;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 /// Unique identifier for an NFA state (position in sequence)

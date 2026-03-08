@@ -127,7 +127,7 @@ impl NfaEngine {
                 // Only add if this event_type wasn't already indexed
                 self.event_type_index
                     .entry(step.event_type_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(compiled.id.clone());
             }
         }
@@ -136,7 +136,7 @@ impl NfaEngine {
         if let Some(until_step) = &compiled.sequence.until_step {
             self.event_type_index
                 .entry(until_step.event_type_id)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(compiled.id.clone());
         }
 
@@ -169,15 +169,14 @@ impl NfaEngine {
             *window_start = now_ns;
         }
 
-        let exceeded = if max_evals > 0 && *count >= max_evals {
-            true
-        } else if max_time > 0 && *time >= max_time {
-            true
-        } else {
-            *count += 1;
-            *time += eval_time_ns;
-            false
-        };
+        let exceeded =
+            if (max_evals > 0 && *count >= max_evals) || (max_time > 0 && *time >= max_time) {
+                true
+            } else {
+                *count += 1;
+                *time += eval_time_ns;
+                false
+            };
 
         if exceeded {
             if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(sequence_id) {
@@ -217,27 +216,19 @@ impl NfaEngine {
     }
 
     /// Process an event through the NFA engine
-    /// 
+    ///
     /// PERFORMANCE OPTIMIZED:
     /// - Uses thread-local buffer to avoid allocations
     /// - Zero-copy sequence references (no clone)
     /// - Lock-free metrics for hot path
-    pub fn process_event(&mut self, event: &kestrel_event::Event) -> NfaResult<Vec<SequenceAlert>> {
-        use std::cell::RefCell;
-        
-        // Thread-local buffer to avoid allocations
-        thread_local! {
-            static ALERTS_BUF: RefCell<Vec<SequenceAlert>> = RefCell::new(Vec::with_capacity(16));
-        }
-        
+    pub async fn process_event(
+        &mut self,
+        event: &kestrel_event::Event,
+    ) -> NfaResult<Vec<SequenceAlert>> {
         let entity_key = event.entity_key;
         let event_type_id = event.event_type_id;
 
-        trace!(
-            event_type_id = event_type_id,
-            entity_key = entity_key,
-            "Processing event"
-        );
+        trace!(event_type_id = event_type_id, entity_key = entity_key, "Processing event");
 
         // Record event in metrics - use Relaxed ordering for hot path
         self.metrics.read().record_event_relaxed();
@@ -246,42 +237,42 @@ impl NfaEngine {
         let relevant_sequence_ids: Vec<String> = self
             .event_type_index
             .get(&event_type_id)
-            .map(|v| v.clone())
+            .cloned()
             .unwrap_or_default();
 
-        // Process each sequence without cloning
-        ALERTS_BUF.with(|buf| {
-            let mut alerts = buf.borrow_mut();
-            alerts.clear();
-            
-            for seq_id in &relevant_sequence_ids {
-                // Record event for this sequence - lock-free
-                if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id) {
-                    seq_metrics.record_event_relaxed();
-                }
+        let mut alerts = Vec::with_capacity(16);
 
-                // Process event through this sequence
-                // Get sequence clone for processing (needed due to mutable borrow of self)
-                if let Some(seq) = self.sequences.get(seq_id).cloned() {
-                    match self.process_sequence_event_optimized(&seq, event) {
-                        Ok(Some(match_alerts)) => alerts.extend(match_alerts),
-                        Ok(None) => {}
-                        Err(e) => {
-                            warn!(sequence_id = %seq_id, error = %e, "Sequence processing failed");
-                        }
-                    }
+        for seq_id in &relevant_sequence_ids {
+            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id) {
+                seq_metrics.record_event_relaxed();
+            }
+
+            if let Some(seq) = self.sequences.get(seq_id).cloned() {
+                match self.process_sequence_event_optimized(&seq, event).await {
+                    Ok(Some(match_alerts)) => alerts.extend(match_alerts),
+                    Ok(None) => {},
+                    Err(e) => {
+                        warn!(sequence_id = %seq_id, error = %e, "Sequence processing failed");
+                    },
                 }
             }
-            
-            // Return cloned alerts (alerts are expected to be returned)
-            Ok(alerts.clone())
-        })
+        }
+
+        Ok(alerts)
     }
-    
+
+    /// Synchronous compatibility wrapper for non-async callers.
+    pub fn process_event_blocking(
+        &mut self,
+        event: &kestrel_event::Event,
+    ) -> NfaResult<Vec<SequenceAlert>> {
+        futures::executor::block_on(self.process_event(event))
+    }
+
     /// Optimized sequence event processing using pre-computed indices
-    /// 
+    ///
     /// PERFORMANCE: Uses event_type_to_steps pre-computed index for O(1) lookup
-    fn process_sequence_event_optimized(
+    async fn process_sequence_event_optimized(
         &mut self,
         sequence: &NfaSequence,
         event: &kestrel_event::Event,
@@ -291,7 +282,7 @@ impl NfaEngine {
 
         // Use pre-computed index for O(1) step lookup (ZERO-COPY)
         let relevant_step_indices = sequence.get_relevant_steps(event_type_id);
-        
+
         if relevant_step_indices.is_empty() {
             return Ok(None);
         }
@@ -301,12 +292,12 @@ impl NfaEngine {
 
         // Check for until condition first
         if let Some(until_step) = &sequence.until_step {
-            if until_step.event_type_id == event_type_id {
-                if self.step_matches(event, until_step, &sequence.id)? {
-                    // Until condition matched - terminate all partial matches for this entity
-                    self.terminate_entity_partial_matches(sequence, entity_key)?;
-                    return Ok(None);
-                }
+            if until_step.event_type_id == event_type_id
+                && self.step_matches(event, until_step, &sequence.id).await?
+            {
+                // Until condition matched - terminate all partial matches for this entity
+                self.terminate_entity_partial_matches(sequence, entity_key)?;
+                return Ok(None);
             }
         }
 
@@ -326,7 +317,7 @@ impl NfaEngine {
         for &step_idx in relevant_step_indices {
             if let Some(step) = sequence.steps.get(step_idx) {
                 if step.state_id == expected_state
-                    && self.step_matches(event, step, &sequence.id)?
+                    && self.step_matches(event, step, &sequence.id).await?
                 {
                     step_to_process = Some(step);
                     break;
@@ -344,28 +335,18 @@ impl NfaEngine {
                 // Check if this is a single-step sequence (complete immediately)
                 if sequence.step_count() == 1 {
                     // Single-step sequence - generate alert immediately
-                    if let Some(pm) = self.state_store.get(
-                        &sequence.id,
-                        entity_key,
-                        0
-                    ) {
+                    if let Some(pm) = self.state_store.get(&sequence.id, entity_key, 0) {
                         let alert = self.generate_alert(sequence, pm)?;
                         alerts.push(alert);
 
                         // Remove the partial match
-                        self.state_store.remove(
-                            &sequence.id,
-                            entity_key,
-                            0
-                        );
+                        self.state_store.remove(&sequence.id, entity_key, 0);
                     }
                 }
-            } else {
-                if let Some(alert) =
-                    self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
-                {
-                    alerts.push(alert);
-                }
+            } else if let Some(alert) =
+                self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
+            {
+                alerts.push(alert);
             }
         }
 
@@ -407,7 +388,7 @@ impl NfaEngine {
     }
 
     /// Check if a step matches an event
-    fn step_matches(
+    async fn step_matches(
         &self,
         event: &kestrel_event::Event,
         step: &SeqStep,
@@ -415,7 +396,11 @@ impl NfaEngine {
     ) -> NfaResult<bool> {
         let start_time = std::time::Instant::now();
 
-        let result = match self.predicate_evaluator.evaluate(&step.predicate_id, event) {
+        let result = match self
+            .predicate_evaluator
+            .evaluate(&step.predicate_id, event)
+            .await
+        {
             Ok(matches) => Ok(matches),
             Err(e) => {
                 warn!(
@@ -424,7 +409,7 @@ impl NfaEngine {
                     "Predicate evaluation failed"
                 );
                 Err(e)
-            }
+            },
         };
 
         let eval_time_ns = start_time.elapsed().as_nanos() as u64;
@@ -443,12 +428,9 @@ impl NfaEngine {
                         "Skipping rule due to budget exceeded (fail-open)"
                     );
                     Ok(false)
-                }
+                },
                 BudgetAction::FailClosed => {
-                    warn!(
-                        sequence_id = sequence_id,
-                        "Rule budget exceeded (fail-closed)"
-                    );
+                    warn!(sequence_id = sequence_id, "Rule budget exceeded (fail-closed)");
                     Err(NfaError::QuotaExceeded {
                         rule_id: sequence_id.to_string(),
                         reason: format!(
@@ -461,14 +443,11 @@ impl NfaEngine {
                                 .unwrap_or(0)
                         ),
                     })
-                }
+                },
                 BudgetAction::Degrade => {
-                    trace!(
-                        sequence_id = sequence_id,
-                        "Degrading rule evaluation (expensive)"
-                    );
+                    trace!(sequence_id = sequence_id, "Degrading rule evaluation (expensive)");
                     Ok(false)
-                }
+                },
             }
         } else {
             result
@@ -712,8 +691,7 @@ impl NfaEngine {
 
         if max > 0 && total as f32 > max as f32 * self.config.state_store.lru_eviction_threshold {
             let to_evict = total
-                - (max as f32 * (1.0 - self.config.state_store.lru_eviction_threshold) as f32)
-                    as usize;
+                - (max as f32 * (1.0 - self.config.state_store.lru_eviction_threshold)) as usize;
             let evicted = self.state_store.evict_lru(to_evict);
 
             for pm in evicted {
@@ -810,7 +788,7 @@ impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_schema::SchemaRegistry;
+
     use std::sync::Arc;
 
     // Mock predicate evaluator for testing
@@ -830,8 +808,10 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    #[async_trait::async_trait]
     impl PredicateEvaluator for TestPredicateEvaluator {
-        fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> NfaResult<bool> {
+        async fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> NfaResult<bool> {
             Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
         }
 
@@ -842,6 +822,69 @@ mod tests {
         fn has_predicate(&self, predicate_id: &str) -> bool {
             self.predicates.contains_key(predicate_id)
         }
+    }
+
+    struct AsyncTestPredicateEvaluator {
+        predicates: ahash::AHashMap<String, bool>,
+    }
+
+    #[async_trait::async_trait]
+    #[async_trait::async_trait]
+    impl PredicateEvaluator for AsyncTestPredicateEvaluator {
+        async fn evaluate(
+            &self,
+            predicate_id: &str,
+            _event: &kestrel_event::Event,
+        ) -> NfaResult<bool> {
+            Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
+        }
+
+        fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+            Ok(vec![])
+        }
+
+        fn has_predicate(&self, predicate_id: &str) -> bool {
+            self.predicates.contains_key(predicate_id)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_event_with_async_predicate() {
+        let mut predicates = ahash::AHashMap::default();
+        predicates.insert("pred1".to_string(), true);
+        predicates.insert("pred2".to_string(), true);
+
+        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(AsyncTestPredicateEvaluator { predicates });
+        let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator);
+
+        let sequence = NfaSequence::new(
+            "test_seq".to_string(),
+            100,
+            vec![
+                SeqStep::new(0, "pred1".to_string(), 1),
+                SeqStep::new(1, "pred2".to_string(), 2),
+            ],
+            Some(5_000),
+            None,
+        );
+
+        let compiled = CompiledSequence {
+            id: "test_seq".to_string(),
+            sequence,
+            rule_id: "rule1".to_string(),
+            rule_name: "Test Rule".to_string(),
+        };
+
+        assert!(engine.load_sequence(compiled).is_ok());
+
+        let first_event = create_test_event(1, 1_000);
+        let second_event = create_test_event(2, 2_000);
+
+        let first_alerts = engine.process_event(&first_event).await.unwrap();
+        assert!(first_alerts.is_empty());
+
+        let second_alerts = engine.process_event(&second_event).await.unwrap();
+        assert_eq!(second_alerts.len(), 1);
     }
 
     #[test]
@@ -855,7 +898,7 @@ mod tests {
 
     #[test]
     fn test_load_sequence() {
-        let config = NfaEngineConfig::default();
+        let _config = NfaEngineConfig::default();
         let mut evaluator = TestPredicateEvaluator::new();
         evaluator.set_result("pred1".to_string(), true);
 
@@ -940,7 +983,7 @@ mod tests {
         assert!(engine.load_sequence(compiled).is_ok());
 
         let event = create_test_event(1, 1000);
-        let result = engine.process_event(&event);
+        let result = engine.process_event_blocking(&event);
         assert!(result.is_ok());
     }
 
@@ -980,17 +1023,13 @@ mod tests {
         // Process multiple events - first 2 should succeed, rest should hit budget
         for i in 0..5 {
             let event = create_test_event(1, 1000 + i);
-            let _ = engine.process_event(&event);
+            let _ = engine.process_event_blocking(&event);
         }
 
         let metrics = engine.metrics.read();
         if let Some(seq_metrics) = metrics.get_sequence_metrics("test_seq") {
             let violations = seq_metrics.get_budget_violations();
-            assert!(
-                violations > 0,
-                "Expected budget violations, got: {}",
-                violations
-            );
+            assert!(violations > 0, "Expected budget violations, got: {}", violations);
         }
     }
 
@@ -1024,7 +1063,7 @@ mod tests {
         assert!(engine.load_sequence(compiled).is_ok());
 
         let event = create_test_event(1, 1000);
-        let _result = engine.process_event(&event);
+        let _result = engine.process_event_blocking(&event);
     }
 
     #[test]
@@ -1058,13 +1097,13 @@ mod tests {
         let mut alerts_count = 0;
         for i in 0..5 {
             let event = create_test_event(1, 1000 + i);
-            let result = engine.process_event(&event);
-            if result.is_ok() {
-                alerts_count += result.unwrap().len();
+            let result = engine.process_event_blocking(&event);
+            if let Ok(alerts) = result {
+                alerts_count += alerts.len();
             }
         }
 
-        assert!(alerts_count >= 0);
+        let _ = alerts_count;
     }
 
     #[test]
@@ -1096,7 +1135,7 @@ mod tests {
         assert!(engine.load_sequence(compiled).is_ok());
 
         let event = create_test_event(1, 1000);
-        let _result = engine.process_event(&event);
+        let _result = engine.process_event_blocking(&event);
     }
 
     #[test]
@@ -1134,24 +1173,20 @@ mod tests {
         // but each event still triggers step_matches and budget check
         for i in 0..10 {
             let event = create_test_event(1, 1000 + i);
-            let _ = engine.process_event(&event);
+            let _ = engine.process_event_blocking(&event);
         }
 
         let summary = engine.metrics.read().get_summary();
-        assert!(summary.total_evictions >= 0);
+        let _ = summary.total_evictions;
 
         let metrics = engine.metrics.read();
         if let Some(seq_metrics) = metrics.get_sequence_metrics("test_seq") {
             let violations = seq_metrics.get_budget_violations();
-            assert!(
-                violations > 0,
-                "Expected budget violations, got: {}",
-                violations
-            );
+            assert!(violations > 0, "Expected budget violations, got: {}", violations);
 
             let evaluations = seq_metrics.get_evaluations();
             assert!(
-                evaluations >= violations as u64,
+                evaluations >= violations,
                 "Evaluations {} should be >= violations {}",
                 evaluations,
                 violations

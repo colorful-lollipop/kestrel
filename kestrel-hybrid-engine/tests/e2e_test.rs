@@ -9,8 +9,14 @@ use std::sync::Arc;
 // Mock predicate evaluator for testing
 struct MockEvaluator;
 
+#[async_trait::async_trait]
+
 impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    fn evaluate(&self, _predicate_id: &str, _event: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &kestrel_event::Event,
+    ) -> kestrel_nfa::NfaResult<bool> {
         Ok(true)
     }
 
@@ -107,9 +113,9 @@ fn test_e2e_with_different_complexities() {
     // Load sequences with varying complexity
     for i in 1..=10 {
         let steps = match i {
-            1..=3 => 2,   // Simple
-            4..=7 => 5,   // Medium
-            _ => 10,      // Complex
+            1..=3 => 2, // Simple
+            4..=7 => 5, // Medium
+            _ => 10,    // Complex
         };
 
         let seq = create_sequence(&format!("seq-{}", i), steps);
@@ -170,14 +176,21 @@ fn test_e2e_strategy_consistency() {
         .collect();
 
     // All should have some strategy
-    assert!(strategies.iter().all(|s| s.is_some()), "All sequences should have strategies assigned");
+    assert!(
+        strategies.iter().all(|s| s.is_some()),
+        "All sequences should have strategies assigned"
+    );
 
     // First strategy should be the same for all
     let first_strategy = strategies[0].unwrap();
     for strategy in &strategies[1..] {
-        assert_eq!(strategy.unwrap(), first_strategy, "All similar sequences should have the same strategy");
+        assert_eq!(
+            strategy.unwrap(),
+            first_strategy,
+            "All similar sequences should have the same strategy"
+        );
     }
-    
+
     // Verify consistent strategy assignment
     let stats = engine.stats();
     assert_eq!(stats.total_rules_tracked, 5, "Should track all 5 identical sequences");
@@ -248,8 +261,16 @@ fn test_e2e_event_processing_throughput() {
     let avg_latency_us = elapsed.as_micros() as f64 / 1000.0;
 
     // Should process at least 1k events/sec (conservative baseline for debug mode)
-    assert!(throughput > 1_000.0, "Throughput should be > 1k events/sec, got {:.2}", throughput);
-    
+    assert!(
+        throughput > 1_000.0,
+        "Throughput should be > 1k events/sec, got {:.2}",
+        throughput
+    );
+
     // Verify latency is reasonable (< 1ms per event)
-    assert!(avg_latency_us < 1000.0, "Average latency should be < 1ms, got {:.2} μs", avg_latency_us);
+    assert!(
+        avg_latency_us < 1000.0,
+        "Average latency should be < 1ms, got {:.2} μs",
+        avg_latency_us
+    );
 }

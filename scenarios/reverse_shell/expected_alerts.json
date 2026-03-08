@@ -1,0 +1,15 @@
+{
+  "scenario_id": "reverse-shell-minimal",
+  "expected_rules": [
+    {
+      "rule_id": "revshell-001",
+      "min_hits": 1,
+      "reason": "Process execution followed by outbound loopback connection should resemble the reverse-shell lab chain."
+    }
+  ],
+  "unexpected_rules": [],
+  "notes": [
+    "This scenario is intended for isolated lab execution only.",
+    "Loopback traffic is used to keep the scenario safe and deterministic."
+  ]
+}

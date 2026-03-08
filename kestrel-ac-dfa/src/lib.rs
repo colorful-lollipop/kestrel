@@ -1,5 +1,5 @@
-// Kestrel AC-DFA - Aho-Corasick Multi-Pattern DFA
-//!
+//! Kestrel AC-DFA - Aho-Corasick Multi-Pattern DFA
+
 // This crate provides fast multi-pattern string matching using the
 // Aho-Corasick algorithm, optimized for Kestrel's event detection needs.
 //

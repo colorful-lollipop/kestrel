@@ -46,10 +46,7 @@ unsafe fn convert_event(event_data: &kestrel_event_data_t) -> Option<Event> {
         builder = builder.field(field.field_id, typed_value);
     }
 
-    match builder.build() {
-        Ok(event) => Some(event),
-        Err(_) => None,
-    }
+    builder.build().ok()
 }
 
 /// Process an event through the engine
@@ -81,7 +78,7 @@ pub unsafe extern "C" fn kestrel_engine_process_event(
             *out_alert_count = 0;
             *out_alerts = std::ptr::null_mut();
             return KestrelError::InvalidArg;
-        }
+        },
     };
 
     // Process event through engine
@@ -92,7 +89,7 @@ pub unsafe extern "C" fn kestrel_engine_process_event(
             *out_alert_count = 0;
             *out_alerts = std::ptr::null_mut();
             return KestrelError::Unknown;
-        }
+        },
     };
 
     // Convert SequenceAlert to AlertWrapper
@@ -136,10 +133,7 @@ pub unsafe extern "C" fn kestrel_engine_process_event(
 /// - `alerts` must be a valid pointer or NULL
 /// - `count` must match the number of alerts
 #[no_mangle]
-pub unsafe extern "C" fn kestrel_alerts_free(
-    alerts: *mut *mut kestrel_alert_t,
-    count: usize,
-) {
+pub unsafe extern "C" fn kestrel_alerts_free(alerts: *mut *mut kestrel_alert_t, count: usize) {
     if alerts.is_null() {
         return;
     }
@@ -160,9 +154,7 @@ pub unsafe extern "C" fn kestrel_alerts_free(
 /// # Safety
 /// - `alert` must be a valid pointer
 #[no_mangle]
-pub unsafe extern "C" fn kestrel_alert_get_rule_id(
-    alert: *const kestrel_alert_t,
-) -> *const c_char {
+pub unsafe extern "C" fn kestrel_alert_get_rule_id(alert: *const kestrel_alert_t) -> *const c_char {
     if alert.is_null() {
         return std::ptr::null();
     }
@@ -223,9 +215,7 @@ pub unsafe extern "C" fn kestrel_alert_get_sequence_id(
 /// # Safety
 /// - `alert` must be a valid pointer
 #[no_mangle]
-pub unsafe extern "C" fn kestrel_alert_get_timestamp_ns(
-    alert: *const kestrel_alert_t,
-) -> u64 {
+pub unsafe extern "C" fn kestrel_alert_get_timestamp_ns(alert: *const kestrel_alert_t) -> u64 {
     if alert.is_null() {
         return 0;
     }
@@ -239,9 +229,7 @@ pub unsafe extern "C" fn kestrel_alert_get_timestamp_ns(
 /// # Safety
 /// - `alert` must be a valid pointer
 #[no_mangle]
-pub unsafe extern "C" fn kestrel_alert_get_entity_key(
-    alert: *const kestrel_alert_t,
-) -> u128 {
+pub unsafe extern "C" fn kestrel_alert_get_entity_key(alert: *const kestrel_alert_t) -> u128 {
     if alert.is_null() {
         return 0;
     }

@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn test_compile_simple_event() {
-        let mut schema = SchemaRegistry::new();
+        let schema = SchemaRegistry::new();
         // Register the process event type for the test
         schema
             .register_event_type(kestrel_schema::EventTypeDef {
@@ -88,15 +88,15 @@ mod tests {
                 assert!(wat.contains("(module"));
                 assert!(wat.contains("pred_init"));
                 assert!(wat.contains("pred_eval"));
-            }
+            },
             Err(EqlError::UnknownField { .. }) => {
                 // Expected - schema not set up for fields
                 // This is a valid error case - the parser works but semantic analysis
                 // correctly identifies that 'process.pid' field is not registered in schema
-            }
+            },
             Err(e) => {
                 panic!("Unexpected error: {:?}", e);
-            }
+            },
         }
     }
 
@@ -113,7 +113,7 @@ mod tests {
         match query {
             crate::ast::Query::Sequence(sq) => {
                 assert_eq!(sq.steps.len(), 2);
-            }
+            },
             _ => panic!("Expected sequence query"),
         }
     }

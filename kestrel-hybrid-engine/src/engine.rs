@@ -3,16 +3,14 @@
 // The hybrid engine automatically chooses the optimal matching strategy
 // based on rule complexity and runtime hot spot detection.
 
-use crate::analyzer::{analyze_rule, MatchingStrategy, StrategyRecommendation};
+use crate::analyzer::{MatchingStrategy, StrategyRecommendation, analyze_rule};
 use crate::{HybridEngineError, HybridEngineResult};
 use kestrel_ac_dfa::AcMatcher;
 use kestrel_event::Event;
-use kestrel_lazy_dfa::{
-    DfaCache, HotSpotDetector, LazyDfaConfig, NfaToDfaConverter,
-};
+use kestrel_lazy_dfa::{DfaCache, HotSpotDetector, LazyDfaConfig};
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, SequenceAlert};
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Configuration for the hybrid engine
 #[derive(Debug, Clone)]
@@ -75,9 +73,6 @@ pub struct HybridEngine {
     /// Hot spot detector
     hot_detector: HotSpotDetector,
 
-    /// NFA to DFA converter
-    dfa_converter: NfaToDfaConverter,
-
     /// Strategy per rule
     rule_strategies: RwLock<std::collections::HashMap<String, RuleStrategy>>,
 
@@ -94,14 +89,11 @@ impl HybridEngine {
 
         let dfa_cache = DfaCache::new(config.lazy_dfa_config.cache_config.clone());
         let hot_detector = HotSpotDetector::new(config.lazy_dfa_config.hot_spot_threshold.clone());
-        let dfa_converter = NfaToDfaConverter::new(config.lazy_dfa_config.max_dfa_states);
-
         Ok(Self {
             nfa_engine,
             ac_matcher: None,
             dfa_cache,
             hot_detector,
-            dfa_converter,
             rule_strategies: RwLock::new(std::collections::HashMap::new()),
             config,
         })
@@ -126,11 +118,8 @@ impl HybridEngine {
         match strategy {
             RuleStrategy::AcDfa => {
                 // Load into AC-DFA (will be done in bulk after all sequences loaded)
-                tracing::debug!(
-                    "Loaded sequence {} with AC-DFA strategy",
-                    sequence_id
-                );
-            }
+                tracing::debug!("Loaded sequence {} with AC-DFA strategy", sequence_id);
+            },
             RuleStrategy::LazyDfa => {
                 // Load into NFA for now, will convert to DFA when hot
                 self.nfa_engine.load_sequence(compiled)?;
@@ -138,27 +127,27 @@ impl HybridEngine {
                     "Loaded sequence {} with Lazy DFA strategy (will convert when hot)",
                     sequence_id
                 );
-            }
+            },
             RuleStrategy::Nfa => {
                 // Load into NFA
                 self.nfa_engine.load_sequence(compiled)?;
                 tracing::debug!("Loaded sequence {} with NFA strategy", sequence_id);
-            }
+            },
             RuleStrategy::HybridAcNfa => {
                 // Load into NFA, AC-DFA will be used as pre-filter
                 self.nfa_engine.load_sequence(compiled)?;
-                tracing::debug!(
-                    "Loaded sequence {} with Hybrid AC-DFA+NFA strategy",
-                    sequence_id
-                );
-            }
+                tracing::debug!("Loaded sequence {} with Hybrid AC-DFA+NFA strategy", sequence_id);
+            },
         }
 
         Ok(())
     }
 
     /// Analyze a sequence to determine optimal strategy
-    fn analyze_sequence(&self, compiled: &CompiledSequence) -> HybridEngineResult<StrategyRecommendation> {
+    fn analyze_sequence(
+        &self,
+        compiled: &CompiledSequence,
+    ) -> HybridEngineResult<StrategyRecommendation> {
         // Create a dummy IR rule for analysis
         let ir_rule = self.create_ir_rule_from_sequence(compiled)?;
 
@@ -169,7 +158,10 @@ impl HybridEngine {
     }
 
     /// Determine matching strategy from recommendation
-    fn determine_strategy(&self, recommendation: &StrategyRecommendation) -> HybridEngineResult<RuleStrategy> {
+    fn determine_strategy(
+        &self,
+        recommendation: &StrategyRecommendation,
+    ) -> HybridEngineResult<RuleStrategy> {
         let strategy = match recommendation.strategy {
             MatchingStrategy::AcDfa => RuleStrategy::AcDfa,
             MatchingStrategy::LazyDfa => {
@@ -178,7 +170,7 @@ impl HybridEngine {
                 } else {
                     RuleStrategy::Nfa
                 }
-            }
+            },
             MatchingStrategy::Nfa => RuleStrategy::Nfa,
             MatchingStrategy::HybridAcNfa => {
                 if self.config.enable_ac_dfa {
@@ -186,14 +178,17 @@ impl HybridEngine {
                 } else {
                     RuleStrategy::Nfa
                 }
-            }
+            },
         };
 
         Ok(strategy)
     }
 
     /// Create a dummy IR rule from a compiled sequence
-    fn create_ir_rule_from_sequence(&self, compiled: &CompiledSequence) -> HybridEngineResult<kestrel_eql::ir::IrRule> {
+    fn create_ir_rule_from_sequence(
+        &self,
+        compiled: &CompiledSequence,
+    ) -> HybridEngineResult<kestrel_eql::ir::IrRule> {
         // This is a simplified version - in practice, we'd pass the full IR rule
         Ok(kestrel_eql::ir::IrRule::new(
             compiled.id.clone(),
@@ -229,7 +224,7 @@ impl HybridEngine {
         // (In a full implementation, we'd track which rules matched)
 
         // Process through NFA engine (or DFA when available)
-        let nfa_alerts = self.nfa_engine.process_event(event)?;
+        let nfa_alerts = self.nfa_engine.process_event_blocking(event)?;
         alerts.extend(nfa_alerts);
 
         // Check for hot sequences and convert to DFA
@@ -276,7 +271,7 @@ impl HybridEngine {
 
             // In a full implementation:
             // 1. Get compiled sequence from NFA engine
-            // 2. Convert to DFA using self.dfa_converter
+            // 2. Convert to DFA using a converter derived from lazy_dfa_config
             // 3. Insert into self.dfa_cache
             // 4. Update strategy to use DFA for future matches
         }

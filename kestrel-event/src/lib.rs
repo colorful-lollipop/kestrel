@@ -170,6 +170,9 @@ pub enum BuildError {
     MissingField(&'static str),
 }
 
+// Re-export kestrel_schema for convenience
+pub use kestrel_schema;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,7 +220,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(event.source_id.as_ref().map(|s| s.as_str()), Some("ebpf"));
+        assert_eq!(event.source_id.as_deref(), Some("ebpf"));
     }
 
     #[test]
@@ -261,6 +264,3 @@ mod tests {
         assert_eq!(ids, vec![1, 2, 3, 4, 5]);
     }
 }
-
-// Re-export kestrel_schema for convenience
-pub use kestrel_schema;

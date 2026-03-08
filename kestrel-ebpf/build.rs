@@ -57,14 +57,14 @@ fn main() {
     match status {
         Ok(s) if s.success() => {
             println!("cargo:info=eBPF program compiled successfully");
-        }
+        },
         Ok(_) => {
             println!("cargo:warning=Failed to compile eBPF program (clang failed)");
             println!("cargo:warning=eBPF programs will not be available");
-        }
+        },
         Err(e) => {
             println!("cargo:warning=Failed to run clang: {}", e);
             println!("cargo:warning=eBPF programs will not be available");
-        }
+        },
     }
 }

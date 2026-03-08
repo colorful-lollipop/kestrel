@@ -109,7 +109,7 @@ blank_lines_lower_bound = 0
 
 # Brace style
 brace_style = "SameLineWhere"
-control_brace_style = "AlwaysSameLineWhere"
+control_brace_style = "AlwaysSameLine"
 
 # Empty item single line
 empty_item_single_line = true

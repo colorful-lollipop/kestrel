@@ -349,7 +349,7 @@ impl StateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{NfaSequence, PartialMatch};
+    use crate::state::PartialMatch;
     use kestrel_event::Event;
 
     fn create_test_partial_match(
@@ -398,8 +398,10 @@ mod tests {
 
     #[test]
     fn test_entity_quota() {
-        let mut config = StateStoreConfig::default();
-        config.max_partial_matches_per_entity = 2;
+        let config = StateStoreConfig {
+            max_partial_matches_per_entity: 2,
+            ..StateStoreConfig::default()
+        };
 
         let store = StateStore::new(config);
 
@@ -415,16 +417,15 @@ mod tests {
         let pm3 = create_test_partial_match("seq1", 12345, 2);
         let result = store.insert(pm3);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            NfaError::QuotaExceeded { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), NfaError::QuotaExceeded { .. }));
     }
 
     #[test]
     fn test_sequence_quota() {
-        let mut config = StateStoreConfig::default();
-        config.max_partial_matches_per_sequence = 2;
+        let config = StateStoreConfig {
+            max_partial_matches_per_sequence: 2,
+            ..StateStoreConfig::default()
+        };
 
         let store = StateStore::new(config);
 

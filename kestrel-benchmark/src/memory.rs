@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use kestrel_engine::{DetectionEngine, EngineConfig};
 
@@ -31,7 +31,7 @@ pub fn run_memory_benchmark() {
     let engine_memory = get_memory_usage().unwrap_or(0) - idle_memory;
     println!("    Engine memory: {}", format_bytes(engine_memory));
 
-    let mut engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
+    let engine = runtime.block_on(async { DetectionEngine::new(config).await.unwrap() });
 
     let after_engine = get_memory_usage().unwrap_or(0);
     println!("    Total with engine: {}", format_bytes(after_engine));
@@ -56,10 +56,7 @@ pub fn run_memory_benchmark() {
         });
 
         if let Some(mem) = get_memory_usage() {
-            peak_memory.store(
-                mem.max(peak_memory.load(Ordering::Relaxed)),
-                Ordering::Relaxed,
-            );
+            peak_memory.store(mem.max(peak_memory.load(Ordering::Relaxed)), Ordering::Relaxed);
         }
     }
 
