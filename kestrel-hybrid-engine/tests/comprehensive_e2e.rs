@@ -25,7 +25,14 @@ impl PredicateEvaluator for SimpleEvaluator {
 }
 
 fn create_engine() -> HybridEngine {
-    let config = HybridEngineConfig::default();
+    let config = HybridEngineConfig {
+        nfa_config: kestrel_nfa::NfaEngineConfig {
+            max_evaluations_per_sec: 0,
+            max_eval_time_ns: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let evaluator = Arc::new(SimpleEvaluator);
     HybridEngine::new(config, evaluator).unwrap()
 }
