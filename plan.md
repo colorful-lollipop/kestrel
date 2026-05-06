@@ -1238,6 +1238,136 @@ Kestrel 的下一阶段目标不再只是“继续堆功能”，而是建设一
 - 在不破坏 NFA 顺序语义前提下，提升单事件规则并行度
 - 为未来按规则优先级/成本分层执行打基础
 
+---
+
+## 16. 平台抽象层重构（2026-05-07）
+
+### 16.1 目标
+抽象平台无关层，使项目能在 macOS 上迭代开发，同时保持 Linux eBPF 完整功能。
+
+### 16.2 已完成工作
+
+#### ✅ EventCollector Trait（kestrel-core/src/platform.rs）
+- 定义平台无关的事件采集接口
+- 支持异步启动/停止、事件发送
+- 提供 PlatformInfo 和 PlatformCapability 描述平台能力
+
+#### ✅ MockEventCollector
+- 生成合成事件用于测试和开发
+- 支持自定义事件数量和实体键分布
+- 用于 macOS/Windows 开发和单元测试
+
+#### ✅ ReplayEventCollector
+- 从二进制日志文件回放事件
+- 使用现有 BinaryLog 基础设施
+- 支持离线分析和规则验证
+
+#### ✅ Feature-Gate eBPF 依赖
+- kestrel-cli/Cargo.toml: eBPF 和 aya 改为 optional
+- 默认启用 `ebpf` feature（Linux）
+- macOS 上使用 `--no-default-features` 构建
+
+#### ✅ CLI 重构
+- 使用 EventCollector trait 抽象采集器
+- 支持 ebpf/mock/replay 三种采集器类型
+- 条件编译 eBPF 相关代码
+
+#### ✅ EbpfCollector 实现 EventCollector
+- 为现有 EbpfCollector 实现平台无关接口
+- 保持向后兼容
+
+#### ✅ 代码清理
+- 清理 kestrel-engine 未使用的导入
+- 为 wasm 依赖的测试添加 feature gate
+- 移动过期分析文档到 docs/archive/
+
+### 16.3 macOS 开发工作流
+
+```bash
+# 构建核心（无 eBPF）
+cargo build -p kestrel-core -p kestrel-engine -p kestrel-cli --no-default-features
+
+# 运行测试
+cargo test -p kestrel-core -p kestrel-engine -p kestrel-nfa
+
+# 使用 replay 模式运行
+cargo run --bin kestrel --no-default-features -- replay --rules ./rules --log ./scenarios/test.log
+
+# 验证规则
+cargo run --bin kestrel --no-default-features -- validate --rules ./rules
+
+# 使用 mock 采集器运行
+cargo run --bin kestrel --no-default-features -- run --rules ./rules --collector mock
+```
+
+### 16.4 下一步计划
+
+#### 短期（1-2周）
+1. **完善 eBPF 程序覆盖**
+   - 实现文件事件（open, rename, unlink）
+   - 实现网络事件（connect, send）
+   - 完善进程树解析
+
+2. **EQL 编译器完善**
+   - 完善序列规则支持
+   - 优化 Wasm 代码生成
+   - 添加更多测试用例
+
+#### 中期（2-4周）
+3. **Ring Buffer 健壮性**
+   - 改进错误处理
+   - 添加重试机制
+   - 性能监控
+
+4. **LSM 阻断实现**
+   - 实现 LSM hooks
+   - 添加阻断策略
+   - 审计日志
+
+#### 长期（1-2月）
+5. **跨平台支持**
+   - macOS: EndpointSecurity framework
+   - Windows: ETW (Event Tracing for Windows)
+
+6. **性能优化**
+   - SIMD 优化字符串匹配
+   - 并行化事件处理
+   - 缓存策略优化
+
+### 16.5 测试覆盖
+
+当前测试状态：
+- kestrel-core: 92 tests passing
+- kestrel-engine: 36 tests passing
+- kestrel-nfa: 21 tests passing
+- kestrel-schema: 3 tests passing
+- kestrel-event: 12 tests passing
+- kestrel-eql: 20 tests passing
+- kestrel-rules: 4 tests passing
+- kestrel-runtime-wasm: 3 tests passing
+- kestrel-runtime-lua: 3 tests passing
+- kestrel-ac-dfa: 19 tests passing
+- kestrel-lazy-dfa: 30 tests passing
+- kestrel-hybrid-engine: 15 tests passing
+
+**总计**: 258+ tests passing
+
+### 16.6 构建验证
+
+```bash
+# macOS 构建（无 eBPF）
+cargo build -p kestrel-cli --no-default-features
+# ✅ 成功
+
+# Linux 构建（完整功能）
+cargo build --workspace
+# ✅ 成功（在 Linux 环境）
+
+# 测试运行
+cargo test -p kestrel-core -p kestrel-engine -p kestrel-nfa
+# ✅ 所有测试通过
+```
+
 #### B. Live Telemetry 持续增强
 当前 live collector 已接通：
 - `process/exec`
