@@ -284,9 +284,6 @@ impl DetectionEngine {
             None
         });
 
-        #[cfg(not(feature = "wasm"))]
-        let eql_compiler = std::sync::Mutex::new(None);
-
         // Initialize Wasm engine if configured
         #[cfg(feature = "wasm")]
         let wasm_engine = if let Some(wasm_config) = config.wasm_config {
@@ -298,9 +295,6 @@ impl DetectionEngine {
             info!("Wasm runtime disabled");
             None
         };
-
-        #[cfg(not(feature = "wasm"))]
-        let wasm_engine = None;
 
         let partition_count = config.event_bus.partitions.max(1);
         let partitioner: Arc<dyn Partitioner> =
@@ -314,7 +308,7 @@ impl DetectionEngine {
                 .map(|engine| engine as Arc<dyn PredicateEvaluator>);
 
             #[cfg(not(feature = "wasm"))]
-            let predicate_evaluator = None;
+            let predicate_evaluator: Option<Arc<dyn PredicateEvaluator>> = None;
 
             if let Some(evaluator) = predicate_evaluator {
                 let engines = (0..partition_count)
@@ -1190,6 +1184,7 @@ mod tests {
         assert_eq!(engine.nfa_engines.len(), 4);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_partitioned_nfa_load_sequence_all_partitions() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1275,6 +1270,7 @@ mod tests {
         assert_eq!(second_alerts[0].rule_id, "async-seq");
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_partitioned_nfa_unload_sequence_all_partitions() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1309,6 +1305,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_single_event_rule_always_match() {
         let rule = SingleEventRule {
@@ -1412,6 +1409,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_stats_includes_single_event_rules() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1432,6 +1430,7 @@ mod tests {
         assert_eq!(stats.actions_generated, 0);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_start_processes_published_events() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1495,6 +1494,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_replay_log_processes_events() {
         use kestrel_core::BinaryLog;
@@ -1569,6 +1569,7 @@ mod tests {
         assert_eq!(stats.events_processed, 1);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_single_event_rule_eval_always_match() {
         use kestrel_event::Event;
@@ -1623,6 +1624,7 @@ mod tests {
         assert_eq!(alerts[0].severity, Severity::Medium);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_single_event_rule_no_match_different_event_type() {
         use kestrel_event::Event;
@@ -1675,6 +1677,7 @@ mod tests {
         assert_eq!(alerts.len(), 0);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_eval_event_multiple_single_event_rules() {
         use kestrel_event::Event;
@@ -1755,6 +1758,7 @@ mod tests {
         assert!(!rule_ids.contains(&"test-rule-3"));
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_inline_mode_with_blockable_rule() {
         use kestrel_core::{ActionType, NoOpExecutor};
@@ -1821,6 +1825,7 @@ mod tests {
         assert_eq!(stats.alerts_generated, 1);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_detect_mode_no_enforcement() {
         use kestrel_core::{ActionType, NoOpExecutor};
@@ -1886,6 +1891,7 @@ mod tests {
         assert_eq!(stats.alerts_generated, 1);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_non_blockable_rule_no_enforcement() {
         use kestrel_core::{ActionType, NoOpExecutor};
@@ -1951,6 +1957,7 @@ mod tests {
         assert_eq!(stats.alerts_generated, 1);
     }
 
+    #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_action_type_kill() {
         use kestrel_core::{ActionType, NoOpExecutor};

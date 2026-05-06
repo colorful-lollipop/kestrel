@@ -5,11 +5,7 @@
 //! without direct dependency on specific runtime crates.
 
 use kestrel_event::Event;
-use kestrel_schema::{
-    FieldId, RuleCapabilities, RuleManifest, RuleMetadata,
-    RuntimeCapabilities as SchemaRuntimeCapabilities, RuntimeType as SchemaRuntimeType,
-    SchemaRegistry,
-};
+use kestrel_schema::{FieldId, RuleCapabilities, RuleManifest, RuleMetadata, SchemaRegistry};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -41,10 +37,6 @@ pub use kestrel_schema::EvalResult;
 
 /// Re-export runtime types from kestrel-schema
 pub use kestrel_schema::{RuntimeCapabilities, RuntimeType};
-
-// Type aliases for internal use
-type _RuntimeCapabilities = SchemaRuntimeCapabilities;
-type _RuntimeType = SchemaRuntimeType;
 
 /// Trait for rule runtimes (Wasm, Lua, etc.)
 ///

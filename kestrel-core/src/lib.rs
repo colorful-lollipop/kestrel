@@ -9,6 +9,7 @@ pub mod deterministic;
 pub mod eventbus;
 pub mod metrics;
 pub mod object_pool;
+pub mod platform;
 pub mod replay;
 pub mod runtime_comparison;
 pub mod time;
@@ -42,6 +43,11 @@ pub use metrics::{
 };
 
 pub use object_pool::{EventVecPool, ObjectPool, PoolManager, PoolMetrics, PooledObject};
+
+pub use platform::{
+    CollectorFactory, EventCollector, MockEventCollector, PlatformCapability, PlatformError,
+    PlatformInfo, ReplayEventCollector,
+};
 
 pub use runtime_comparison::{
     ConsistencyBenchmarkResult, ConsistencyMismatch, ConsistencyResult, RuntimeBenchmark,

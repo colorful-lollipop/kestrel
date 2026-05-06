@@ -9,8 +9,11 @@ license.workspace = true
 name = "kestrel"
 path = "src/main.rs"
 
+[features]
+default = ["ebpf"]
+ebpf = ["dep:kestrel-ebpf", "dep:aya"]
+
 [dependencies]
-aya = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,5 +25,8 @@ kestrel-engine = { path = "../kestrel-engine", features = ["wasm", "lua"] }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-rules = { path = "../kestrel-rules" }
-kestrel-ebpf = { path = "../kestrel-ebpf" }
 kestrel-core = { path = "../kestrel-core" }
+
+# Optional platform dependencies (Linux eBPF)
+aya = { workspace = true, optional = true }
+kestrel-ebpf = { path = "../kestrel-ebpf", optional = true }

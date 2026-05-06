@@ -526,6 +526,37 @@ impl Drop for EbpfCollector {
     }
 }
 
+/// Implement the platform-agnostic EventCollector trait for EbpfCollector.
+///
+/// This allows the engine to use EbpfCollector through the abstract
+/// EventCollector interface, enabling cross-platform code.
+#[async_trait::async_trait]
+impl kestrel_core::EventCollector for EbpfCollector {
+    async fn start(
+        &mut self,
+        _event_tx: mpsc::Sender<Event>,
+    ) -> std::result::Result<(), kestrel_core::PlatformError> {
+        // The event_tx is already set in EbpfCollector::new()
+        // We just need to start the collection
+        self.start()
+            .await
+            .map_err(|e| kestrel_core::PlatformError::InitializationError(e.to_string()))
+    }
+
+    async fn stop(&mut self) -> std::result::Result<(), kestrel_core::PlatformError> {
+        self.stop().await;
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "ebpf"
+    }
+
+    fn platform_info(&self) -> Option<&kestrel_core::PlatformInfo> {
+        None // Could be populated from Linux kernel detection
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

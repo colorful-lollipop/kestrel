@@ -1,8 +1,14 @@
 //! Kestrel CLI
 //!
 //! Command-line interface for the Kestrel detection engine.
+//!
+//! Platform support:
+//! - Linux: Full eBPF collection + replay
+//! - macOS/Windows: Replay and mock collection (no eBPF)
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(feature = "ebpf")]
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -27,9 +33,13 @@ enum Commands {
         #[arg(short, long, default_value = "./rules")]
         rules: PathBuf,
 
-        /// Optional eBPF object file path
+        /// Optional eBPF object file path (Linux only)
         #[arg(long)]
         ebpf_object: Option<PathBuf>,
+
+        /// Collector type: "ebpf" (Linux), "mock", or "replay"
+        #[arg(long, default_value = "ebpf")]
+        collector: String,
 
         /// Log level
         #[arg(short, long, default_value = "info")]
@@ -74,10 +84,11 @@ async fn main() -> Result<()> {
         Commands::Run {
             rules,
             ebpf_object,
+            collector,
             log_level,
         } => {
             setup_logging(&log_level)?;
-            run_engine(rules, ebpf_object).await?;
+            run_engine(rules, ebpf_object, &collector).await?;
         },
         Commands::Validate { rules } => {
             setup_logging("info")?;
@@ -107,7 +118,11 @@ fn setup_logging(level: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_engine(rules_dir: PathBuf, ebpf_object: Option<PathBuf>) -> Result<()> {
+async fn run_engine(
+    rules_dir: PathBuf,
+    ebpf_object: Option<PathBuf>,
+    collector_type: &str,
+) -> Result<()> {
     info!("Starting Kestrel detection engine");
     info!(rules_dir = %rules_dir.display(), "Loading rules from");
 
@@ -128,10 +143,16 @@ async fn run_engine(rules_dir: PathBuf, ebpf_object: Option<PathBuf>) -> Result<
     info!("Starting event processing loop...");
     engine.start().await?;
 
-    let mut collector = if let Some(object_path) = ebpf_object {
-        info!(path = %object_path.display(), "Loading eBPF collector object");
+    // Create collector based on type and platform
+    let mut collector: Option<Box<dyn kestrel_core::EventCollector>> =
+        create_collector(collector_type, ebpf_object).await?;
+
+    if let Some(ref mut c) = collector {
+        info!(collector = c.name(), "Starting event collector");
         let publisher = engine.publisher();
         let (collector_tx, mut collector_rx) = mpsc::channel(1024);
+
+        // Bridge collector events to engine
         tokio::spawn(async move {
             while let Some(event) = collector_rx.recv().await {
                 if let Err(error) = publisher.publish(event).await {
@@ -140,23 +161,14 @@ async fn run_engine(rules_dir: PathBuf, ebpf_object: Option<PathBuf>) -> Result<
             }
         });
 
-        let ebpf = aya::Ebpf::load_file(&object_path)
-            .with_context(|| format!("Failed to load eBPF object {}", object_path.display()))?;
-        let mut collector = kestrel_ebpf::EbpfCollector::new(collector_tx, ebpf);
-        let supported = kestrel_ebpf::EbpfCollector::supported_live_event_types();
-        info!(?supported, "Current live eBPF collector event support");
-        collector.update_interests(supported);
-        collector.start().await.with_context(|| {
-            format!("Failed to start eBPF collector from {}", object_path.display())
-        })?;
-        info!("eBPF collector started");
-        Some(collector)
+        c.start(collector_tx).await?;
+        info!(collector = c.name(), "Event collector started");
     } else {
-        None
-    };
+        info!("No collector specified, running in engine-only mode");
+    }
 
     info!(
-        "Engine running and waiting for events from a collector or publisher. Press Ctrl+C to stop."
+        "Engine running and waiting for events. Press Ctrl+C to stop."
     );
 
     let mut stats_interval = interval(Duration::from_secs(10));
@@ -172,10 +184,98 @@ async fn run_engine(rules_dir: PathBuf, ebpf_object: Option<PathBuf>) -> Result<
     info!("Shutting down engine");
 
     if let Some(ref mut collector) = collector {
-        collector.stop().await;
+        collector.stop().await?;
     }
 
     Ok(())
+}
+
+/// Create an event collector based on the specified type.
+///
+/// On non-Linux platforms, eBPF collector is not available.
+async fn create_collector(
+    collector_type: &str,
+    ebpf_object: Option<PathBuf>,
+) -> Result<Option<Box<dyn kestrel_core::EventCollector>>> {
+    match collector_type {
+        "ebpf" => {
+            #[cfg(feature = "ebpf")]
+            {
+                let object_path = ebpf_object.ok_or_else(|| {
+                    anyhow::anyhow!("eBPF collector requires --ebpf-object path")
+                })?;
+
+                info!(path = %object_path.display(), "Loading eBPF collector object");
+                let ebpf = aya::Ebpf::load_file(&object_path).with_context(|| {
+                    format!("Failed to load eBPF object {}", object_path.display())
+                })?;
+
+                let (tx, _rx) = mpsc::channel(1024);
+                let mut ebpf_collector = kestrel_ebpf::EbpfCollector::new(tx, ebpf);
+                let supported = kestrel_ebpf::EbpfCollector::supported_live_event_types();
+                info!(?supported, "Current live eBPF collector event support");
+                ebpf_collector.update_interests(supported);
+
+                Ok(Some(Box::new(EbpfCollectorAdapter(ebpf_collector))))
+            }
+            #[cfg(not(feature = "ebpf"))]
+            {
+                anyhow::bail!(
+                    "eBPF collector not available on this platform. \
+                     Build with --features ebpf on Linux, or use --collector mock/replay"
+                );
+            }
+        },
+        "mock" => {
+            let count = 100; // Default mock event count
+            info!(count, "Creating mock event collector");
+            Ok(Some(Box::new(
+                kestrel_core::MockEventCollector::generate_test_events(count),
+            )))
+        },
+        "replay" => {
+            let path = ebpf_object.ok_or_else(|| {
+                anyhow::anyhow!("Replay collector requires --ebpf-object as log path")
+            })?;
+            info!(path = %path.display(), "Creating replay event collector");
+            Ok(Some(Box::new(kestrel_core::ReplayEventCollector::new(path))))
+        },
+        _ => anyhow::bail!(
+            "Unknown collector type: '{}'. Use 'ebpf', 'mock', or 'replay'",
+            collector_type
+        ),
+    }
+}
+
+/// Adapter to make EbpfCollector implement EventCollector trait.
+#[cfg(feature = "ebpf")]
+struct EbpfCollectorAdapter(kestrel_ebpf::EbpfCollector);
+
+#[cfg(feature = "ebpf")]
+#[async_trait::async_trait]
+impl kestrel_core::EventCollector for EbpfCollectorAdapter {
+    async fn start(
+        &mut self,
+        _event_tx: mpsc::Sender<kestrel_event::Event>,
+    ) -> std::result::Result<(), kestrel_core::PlatformError> {
+        self.0
+            .start()
+            .await
+            .map_err(|e| kestrel_core::PlatformError::InitializationError(e.to_string()))
+    }
+
+    async fn stop(&mut self) -> std::result::Result<(), kestrel_core::PlatformError> {
+        self.0.stop().await;
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "ebpf"
+    }
+
+    fn platform_info(&self) -> Option<&kestrel_core::PlatformInfo> {
+        None
+    }
 }
 
 async fn validate_rules(rules_dir: PathBuf) -> Result<()> {
