@@ -57,19 +57,37 @@ impl Event {
         self
     }
 
-    /// Get a field value by field ID using binary search (O(log n))
+    /// Get a field value by field ID
+    /// For small field counts (≤8), uses linear search for better cache locality
+    /// For larger counts, uses binary search (O(log n))
+    #[inline]
     pub fn get_field(&self, field_id: FieldId) -> Option<&TypedValue> {
-        self.fields
-            .binary_search_by_key(&field_id, |(id, _)| *id)
-            .ok()
-            .map(|idx| &self.fields[idx].1)
+        // For small field counts, linear search is faster due to cache locality
+        if self.fields.len() <= 8 {
+            self.fields
+                .iter()
+                .find(|(id, _)| *id == field_id)
+                .map(|(_, value)| value)
+        } else {
+            self.fields
+                .binary_search_by_key(&field_id, |(id, _)| *id)
+                .ok()
+                .map(|idx| &self.fields[idx].1)
+        }
     }
 
-    /// Check if event has a specific field using binary search (O(log n))
+    /// Check if event has a specific field
+    /// For small field counts (≤8), uses linear search for better cache locality
+    /// For larger counts, uses binary search (O(log n))
+    #[inline]
     pub fn has_field(&self, field_id: FieldId) -> bool {
-        self.fields
-            .binary_search_by_key(&field_id, |(id, _)| *id)
-            .is_ok()
+        if self.fields.len() <= 8 {
+            self.fields.iter().any(|(id, _)| *id == field_id)
+        } else {
+            self.fields
+                .binary_search_by_key(&field_id, |(id, _)| *id)
+                .is_ok()
+        }
     }
 
     /// Set source identifier
