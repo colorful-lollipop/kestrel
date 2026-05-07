@@ -15,6 +15,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
+parking_lot = "0.12"
+arc-swap = "1.7"
 wat = "1.0"
 futures = "0.3"
 kestrel-schema = { path = "../kestrel-schema" }

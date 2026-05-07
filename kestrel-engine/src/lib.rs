@@ -27,6 +27,9 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
+// Performance optimization crates
+use arc_swap::ArcSwap;
+
 #[cfg(feature = "wasm")]
 use kestrel_eql::{EqlCompiler, IrRule, IrRuleType, codegen_wasm::WasmCodeGenerator};
 #[cfg(feature = "wasm")]
@@ -232,7 +235,8 @@ pub struct DetectionEngine {
     nfa_engines: Vec<Arc<Mutex<Option<NfaEngine>>>>,
 
     /// Compiled single-event rules
-    single_event_rules: Arc<tokio::sync::RwLock<Vec<SingleEventRule>>>,
+    /// Using ArcSwap for lock-free reads (rules change rarely, read on every event)
+    single_event_rules: Arc<ArcSwap<Vec<SingleEventRule>>>,
 
     /// Alert counter (atomic for thread safety)
     alerts_generated: Arc<std::sync::atomic::AtomicU64>,
@@ -333,7 +337,7 @@ impl DetectionEngine {
                 .collect::<Vec<_>>()
         };
 
-        let single_event_rules = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+        let single_event_rules = Arc::new(ArcSwap::new(Arc::new(Vec::new())));
 
         // Initialize action executor
         let action_executor = config
@@ -418,7 +422,7 @@ impl DetectionEngine {
         {
             let compiler_guard = self
                 .eql_compiler
-                .lock()
+                .lock().await
                 .map_err(|e| EngineError::WasmRuntimeError(format!("Mutex lock error: {}", e)))?;
 
             let compiler = compiler_guard.as_ref().ok_or_else(|| {
@@ -511,7 +515,7 @@ impl DetectionEngine {
         let ir = {
             let mut compiler_guard = self
                 .eql_compiler
-                .lock()
+                .lock().await
                 .map_err(|e| EngineError::WasmRuntimeError(format!("Mutex lock error: {}", e)))?;
             let compiler = compiler_guard.as_mut().ok_or_else(|| {
                 EngineError::WasmRuntimeError("EQL compiler not initialized".to_string())
@@ -567,8 +571,9 @@ impl DetectionEngine {
                     action_type: None,
                 };
 
-                let mut rules = self.single_event_rules.write().await;
+                let mut rules = (**self.single_event_rules.load()).clone();
                 rules.push(single_rule);
+                self.single_event_rules.store(Arc::new(rules));
                 info!(rule_id = %rule.metadata.id, "Compiled single-event rule");
             },
             IrRuleType::Sequence { .. } => {
@@ -685,10 +690,7 @@ impl DetectionEngine {
     pub async fn compile_rules(&self) -> Result<(), EngineError> {
         info!("Compiling rules");
 
-        {
-            let mut rules = self.single_event_rules.write().await;
-            rules.clear();
-        }
+        self.single_event_rules.store(Arc::new(Vec::new()));
 
         let rule_ids = self.rule_manager.list_rules().await;
 
@@ -702,7 +704,7 @@ impl DetectionEngine {
             }
         }
 
-        let count = self.single_event_rules.read().await.len();
+        let count = self.single_event_rules.load().len();
         info!(count, "Single-event rules compiled");
 
         Ok(())
@@ -718,7 +720,7 @@ impl DetectionEngine {
             .actions_generated
             .load(std::sync::atomic::Ordering::Relaxed);
         let errors_count = self.errors_count.load(std::sync::atomic::Ordering::Relaxed);
-        let single_event_rule_count = self.single_event_rules.read().await.len();
+        let single_event_rule_count = self.single_event_rules.load().len();
 
         EngineStats {
             rule_count,
@@ -766,7 +768,7 @@ impl DetectionEngine {
                 }
 
                 let partition_id = partitioner.partition(&batch[0], partition_count);
-                let single_event_rules_snapshot = { single_event_rules.read().await.clone() };
+                let single_event_rules_snapshot = single_event_rules.load().clone();
                 let eval_context = EvalContext {
                     nfa_engine: &nfa_engines[partition_id],
                     single_event_rules: &single_event_rules_snapshot,
@@ -827,7 +829,7 @@ impl DetectionEngine {
     /// Evaluate an event against all loaded rules
     #[tracing::instrument(skip(self, event), fields(event_id = %event.ts_mono_ns, event_type_id = event.event_type_id))]
     pub async fn eval_event(&self, event: &Event) -> Result<Vec<Alert>, EngineError> {
-        let single_event_rules_snapshot = { self.single_event_rules.read().await.clone() };
+        let single_event_rules_snapshot = self.single_event_rules.load().clone();
         let partition_id = self.partition_for_event(event);
         let context = EvalContext {
             nfa_engine: &self.nfa_engines[partition_id],
@@ -1453,7 +1455,7 @@ mod tests {
 
         let mut engine = DetectionEngine::new(config).await.unwrap();
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(SingleEventRule {
                 rule_id: "background-rule".to_string(),
                 rule_name: "Background Rule".to_string(),
@@ -1520,7 +1522,7 @@ mod tests {
 
         let mut engine = DetectionEngine::new(config).await.unwrap();
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(SingleEventRule {
                 rule_id: "replay-rule".to_string(),
                 rule_name: "Replay Rule".to_string(),
@@ -1605,7 +1607,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
@@ -1660,7 +1662,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
@@ -1735,7 +1737,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule1);
             rules.push(rule2);
             rules.push(rule3);
@@ -1800,7 +1802,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
@@ -1867,7 +1869,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
@@ -1933,7 +1935,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
@@ -1999,7 +2001,7 @@ mod tests {
         };
 
         {
-            let mut rules = engine.single_event_rules.write().await;
+            let mut rules = engine.single_event_rules.write();
             rules.push(rule);
         }
 
