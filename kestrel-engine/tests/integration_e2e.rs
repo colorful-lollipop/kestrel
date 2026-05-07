@@ -108,7 +108,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
         .field(
             name_field,
-            kestrel_schema::TypedValue::String("sudo".to_string()),
+            kestrel_schema::TypedValue::String("sudo".into()),
         )
         .build()
         .unwrap();
@@ -131,7 +131,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
         .field(
             name_field,
-            kestrel_schema::TypedValue::String("chmod".to_string()),
+            kestrel_schema::TypedValue::String("chmod".into()),
         )
         .build()
         .unwrap();
@@ -154,7 +154,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .field(pid_field, kestrel_schema::TypedValue::U64(54321))
         .field(
             path_field,
-            kestrel_schema::TypedValue::String("/etc/shadow".to_string()),
+            kestrel_schema::TypedValue::String("/etc/shadow".into()),
         )
         .build()
         .unwrap();
@@ -279,7 +279,7 @@ async fn test_e2e_ransomware_detection() {
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
             .field(
                 path_field,
-                kestrel_schema::TypedValue::String("C:\\Documents\\important.docx".to_string()),
+                kestrel_schema::TypedValue::String("C:\\Documents\\important.docx".into()),
             )
             .build()
             .unwrap(),
@@ -292,7 +292,7 @@ async fn test_e2e_ransomware_detection() {
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
             .field(
                 name_field,
-                kestrel_schema::TypedValue::String("powershell.exe".to_string()),
+                kestrel_schema::TypedValue::String("powershell.exe".into()),
             )
             .build()
             .unwrap(),
@@ -305,7 +305,7 @@ async fn test_e2e_ransomware_detection() {
             .field(pid_field, kestrel_schema::TypedValue::U64(99999))
             .field(
                 name_field,
-                kestrel_schema::TypedValue::String("vssadmin.exe".to_string()),
+                kestrel_schema::TypedValue::String("vssadmin.exe".into()),
             )
             .build()
             .unwrap(),
@@ -319,7 +319,7 @@ async fn test_e2e_ransomware_detection() {
             .field(
                 path_field,
                 kestrel_schema::TypedValue::String(
-                    "C:\\Documents\\important.docx.encrypted".to_string(),
+                    "C:\\Documents\\important.docx.encrypted".into(),
                 ),
             )
             .build()
@@ -417,7 +417,7 @@ async fn test_e2e_entity_isolation() {
         .ts_wall(base_time_ns)
         .entity_key(11111)
         .field(pid_field, kestrel_schema::TypedValue::U64(11111))
-        .field(name_field, kestrel_schema::TypedValue::String("sudo".to_string()))
+        .field(name_field, kestrel_schema::TypedValue::String("sudo".into()))
         .build()
         .unwrap();
 
@@ -432,7 +432,7 @@ async fn test_e2e_entity_isolation() {
         .ts_wall(base_time_ns + 1_000_000_000)
         .entity_key(22222)
         .field(pid_field, kestrel_schema::TypedValue::U64(22222))
-        .field(name_field, kestrel_schema::TypedValue::String("chmod".to_string()))
+        .field(name_field, kestrel_schema::TypedValue::String("chmod".into()))
         .build()
         .unwrap();
 

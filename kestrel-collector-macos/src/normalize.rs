@@ -72,7 +72,7 @@ impl EventNormalizer {
         }
         if let Some(fid) = self.schema.get_field_id("process.comm") {
             if !raw.comm.is_empty() {
-                b = b.field(fid, TypedValue::String(raw.comm.clone()));
+                b = b.field(fid, TypedValue::String(raw.comm.clone().into()));
             }
         }
         b
@@ -103,12 +103,12 @@ impl EventNormalizer {
     ) -> kestrel_event::EventBuilder {
         if let Some(fid) = self.schema.get_field_id("file.path") {
             if !raw.primary.is_empty() {
-                b = b.field(fid, TypedValue::String(raw.primary.clone()));
+                b = b.field(fid, TypedValue::String(raw.primary.clone().into()));
             }
         }
         if let Some(fid) = self.schema.get_field_id("process.args") {
             if !raw.secondary.is_empty() {
-                b = b.field(fid, TypedValue::String(raw.secondary.clone()));
+                b = b.field(fid, TypedValue::String(raw.secondary.clone().into()));
             }
         }
         if let Some(fid) = self.schema.get_field_id("process.cs_flags") {
@@ -152,7 +152,7 @@ impl EventNormalizer {
     ) -> kestrel_event::EventBuilder {
         if let Some(fid) = self.schema.get_field_id("file.path") {
             if !raw.primary.is_empty() {
-                b = b.field(fid, TypedValue::String(raw.primary.clone()));
+                b = b.field(fid, TypedValue::String(raw.primary.clone().into()));
             }
         }
         if let Some(fid) = self.schema.get_field_id("file.mode") {
@@ -170,12 +170,12 @@ impl EventNormalizer {
     ) -> kestrel_event::EventBuilder {
         if let Some(fid) = self.schema.get_field_id("file.source_path") {
             if let Some(ref src) = raw.metadata.source_path {
-                b = b.field(fid, TypedValue::String(src.clone()));
+                b = b.field(fid, TypedValue::String(src.clone().into()));
             }
         }
         if let Some(fid) = self.schema.get_field_id("file.dest_path") {
             if let Some(ref dst) = raw.metadata.dest_path {
-                b = b.field(fid, TypedValue::String(dst.clone()));
+                b = b.field(fid, TypedValue::String(dst.clone().into()));
             }
         }
         b

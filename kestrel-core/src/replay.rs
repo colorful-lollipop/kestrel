@@ -128,7 +128,7 @@ impl From<SerializedValue> for kestrel_schema::TypedValue {
             SerializedValue::U64(v) => Self::U64(v),
             SerializedValue::F64(v) => Self::F64(v),
             SerializedValue::Bool(v) => Self::Bool(v),
-            SerializedValue::String(v) => Self::String(v),
+            SerializedValue::String(v) => Self::String(v.into()),
             SerializedValue::Bytes(v) => Self::Bytes(v),
         }
     }
@@ -141,7 +141,7 @@ impl From<kestrel_schema::TypedValue> for SerializedValue {
             kestrel_schema::TypedValue::U64(v) => Self::U64(v),
             kestrel_schema::TypedValue::F64(v) => Self::F64(v),
             kestrel_schema::TypedValue::Bool(v) => Self::Bool(v),
-            kestrel_schema::TypedValue::String(v) => Self::String(v),
+            kestrel_schema::TypedValue::String(v) => Self::String(v.to_string()),
             kestrel_schema::TypedValue::Bytes(v) => Self::Bytes(v),
             kestrel_schema::TypedValue::Array(v) => {
                 // Serialize array as JSON string for compatibility
@@ -636,7 +636,7 @@ mod tests {
                 .ts_wall(i as u64 * 1000000)
                 .entity_key(i as u128 % 4)
                 .field(1, TypedValue::I64(i as i64))
-                .field(2, TypedValue::String(format!("event_{}", i)))
+                .field(2, TypedValue::String(format!("event_{}", i).into()))
                 .build()
                 .unwrap();
             events.push(event);
@@ -656,12 +656,12 @@ mod tests {
 
     #[test]
     fn test_serialized_value_conversion() {
-        let original = TypedValue::String("test".to_string());
+        let original = TypedValue::String("test".into());
         let serialized = SerializedValue::from(original.clone());
         let converted: TypedValue = serialized.into();
 
         match converted {
-            TypedValue::String(s) => assert_eq!(s, "test"),
+            TypedValue::String(s) => assert_eq!(&*s, "test"),
             _ => panic!("Wrong type"),
         }
     }

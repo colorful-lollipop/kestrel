@@ -374,7 +374,7 @@ async fn test_process_event_with_fields() {
         .ts_mono(1_000_000)
         .ts_wall(1_000_000)
         .entity_key(1)
-        .field(1, TypedValue::String("process_name".to_string()))
+        .field(1, TypedValue::String("process_name".into()))
         .field(2, TypedValue::I64(1234))
         .field(3, TypedValue::Bool(true))
         .build()

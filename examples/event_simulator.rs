@@ -60,8 +60,8 @@ impl EventSimulator {
             .entity_key(((pid as u128) << 32) | (ppid as u128))
             .field(1, TypedValue::U32(pid)) // FIELD_PID
             .field(2, TypedValue::U32(ppid)) // FIELD_PPID
-            .field(3, TypedValue::String(name.to_string())) // FIELD_NAME
-            .field(4, TypedValue::String(cmdline.to_string())) // FIELD_CMDLINE
+            .field(3, TypedValue::String(name.to_string().into())) // FIELD_NAME
+            .field(4, TypedValue::String(cmdline.to_string().into())) // FIELD_CMDLINE
             .build()
             .unwrap()
     }
@@ -89,7 +89,7 @@ impl EventSimulator {
             .ts_wall(self.base_timestamp)
             .entity_key(((pid as u128) << 32) | (std::ptr::hash(path) as u128))
             .field(1, TypedValue::U32(pid)) // FIELD_PID
-            .field(10, TypedValue::String(path.to_string())) // FIELD_PATH
+            .field(10, TypedValue::String(path.to_string().into())) // FIELD_PATH
             .build()
             .unwrap()
     }
@@ -103,7 +103,7 @@ impl EventSimulator {
             .ts_wall(self.base_timestamp)
             .entity_key(((pid as u128) << 32) | (std::ptr::hash(path) as u128))
             .field(1, TypedValue::U32(pid)) // FIELD_PID
-            .field(10, TypedValue::String(path.to_string())) // FIELD_PATH
+            .field(10, TypedValue::String(path.to_string().into())) // FIELD_PATH
             .build()
             .unwrap()
     }
@@ -117,7 +117,7 @@ impl EventSimulator {
             .ts_wall(self.base_timestamp)
             .entity_key(((pid as u128) << 32) | (std::ptr::hash(path) as u128))
             .field(1, TypedValue::U32(pid)) // FIELD_PID
-            .field(10, TypedValue::String(path.to_string())) // FIELD_PATH
+            .field(10, TypedValue::String(path.to_string().into())) // FIELD_PATH
             .build()
             .unwrap()
     }
@@ -131,7 +131,7 @@ impl EventSimulator {
             .ts_wall(self.base_timestamp)
             .entity_key(((pid as u128) << 32) | (dest_port as u128))
             .field(1, TypedValue::U32(pid)) // FIELD_PID
-            .field(20, TypedValue::String(dest_ip.to_string())) // FIELD_DEST_IP
+            .field(20, TypedValue::String(dest_ip.to_string().into())) // FIELD_DEST_IP
             .field(21, TypedValue::U16(dest_port)) // FIELD_DEST_PORT
             .build()
             .unwrap()

@@ -662,7 +662,7 @@ pub enum TypedValue {
     U64(u64),
     F64(f64),
     Bool(bool),
-    String(String),
+    String(std::sync::Arc<str>),
     Bytes(Vec<u8>),
     Array(Vec<TypedValue>),
     Null,
@@ -680,7 +680,7 @@ impl serde::Serialize for TypedValue {
             TypedValue::F64(v) => serializer.serialize_newtype_variant("TypedValue", 2, "F64", v),
             TypedValue::Bool(v) => serializer.serialize_newtype_variant("TypedValue", 3, "Bool", v),
             TypedValue::String(v) => {
-                serializer.serialize_newtype_variant("TypedValue", 4, "String", v)
+                serializer.serialize_newtype_variant("TypedValue", 4, "String", v.as_ref())
             },
             TypedValue::Bytes(v) => {
                 serializer.serialize_newtype_variant("TypedValue", 5, "Bytes", v)
@@ -731,7 +731,10 @@ impl<'de> serde::Deserialize<'de> for TypedValue {
                     (Field::U64, v) => v.newtype_variant().map(TypedValue::U64),
                     (Field::F64, v) => v.newtype_variant().map(TypedValue::F64),
                     (Field::Bool, v) => v.newtype_variant().map(TypedValue::Bool),
-                    (Field::String, v) => v.newtype_variant().map(TypedValue::String),
+                    (Field::String, v) => {
+                        let s: String = v.newtype_variant()?;
+                        Ok(TypedValue::String(s.into()))
+                    },
                     (Field::Bytes, v) => v.newtype_variant().map(TypedValue::Bytes),
                     (Field::Array, v) => v.newtype_variant().map(TypedValue::Array),
                     (Field::Null, v) => {

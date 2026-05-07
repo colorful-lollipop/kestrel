@@ -17,7 +17,7 @@ fn create_test_events(count: usize) -> Vec<Event> {
             .ts_wall((i as u64 + 1) * 1_000_000_000)
             .entity_key(i as u128 % 4)
             .field(1, TypedValue::I64(i as i64))
-            .field(2, TypedValue::String(format!("event_{}", i)))
+            .field(2, TypedValue::String(format!("event_{}", i).into()))
             .build()
             .unwrap();
         events.push(event);

@@ -1338,7 +1338,7 @@ mod tests {
             .ts_wall(1)
             .entity_key(999)
             .field(pid_field, kestrel_schema::TypedValue::U64(4242))
-            .field(exec_field, kestrel_schema::TypedValue::String("/usr/bin/bash".to_string()))
+            .field(exec_field, kestrel_schema::TypedValue::String("/usr/bin/bash".into()))
             .build()
             .unwrap();
 
@@ -1365,7 +1365,7 @@ mod tests {
             .ts_wall(1)
             .entity_key(999)
             .field(pid_field, kestrel_schema::TypedValue::U64(4242))
-            .field(path_field, kestrel_schema::TypedValue::String("/etc/passwd".to_string()))
+            .field(path_field, kestrel_schema::TypedValue::String("/etc/passwd".into()))
             .build()
             .unwrap();
 
@@ -1395,7 +1395,7 @@ mod tests {
             .field(pid_field, kestrel_schema::TypedValue::U64(4242))
             .field(
                 destination_field,
-                kestrel_schema::TypedValue::String("192.168.1.10".to_string()),
+                kestrel_schema::TypedValue::String("192.168.1.10".into()),
             )
             .field(port_field, kestrel_schema::TypedValue::U64(443))
             .build()

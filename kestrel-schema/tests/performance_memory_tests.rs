@@ -207,7 +207,7 @@ fn test_typed_value_creation_performance() {
             TypedValue::I64(i as i64),
             TypedValue::U64(i as u64),
             TypedValue::Bool(i % 2 == 0),
-            TypedValue::String(format!("value_{}", i)),
+            TypedValue::String(format!("value_{}", i).into()),
         ];
     }
 
@@ -351,7 +351,7 @@ fn test_typed_value_formatting() {
         TypedValue::I64(-42),
         TypedValue::U64(42),
         TypedValue::F64(std::f64::consts::PI),
-        TypedValue::String("test string".to_string()),
+        TypedValue::String("test string".into()),
     ];
 
     for value in values {

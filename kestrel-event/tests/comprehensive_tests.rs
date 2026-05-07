@@ -40,11 +40,11 @@ fn test_event_creation_with_fields() {
         .ts_mono(1000)
         .ts_wall(1000)
         .entity_key(1)
-        .field(field_id, TypedValue::String("test".to_string()))
+        .field(field_id, TypedValue::String("test".into()))
         .build()
         .unwrap();
 
-    assert_eq!(event.get_field(field_id), Some(&TypedValue::String("test".to_string())));
+    assert_eq!(event.get_field(field_id), Some(&TypedValue::String("test".into())));
 }
 
 #[test]

@@ -86,7 +86,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(exec.entity_key as u64));
         }
         if let Some(operation_field) = self.schema.get_field_id("process.operation") {
-            builder = builder.field(operation_field, TypedValue::String("exec".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("exec".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(exec.pid as u64));
@@ -102,17 +102,17 @@ impl EventNormalizer {
         }
         if let Some(comm_str) = self.parse_bytes(&exec.comm) {
             if let Some(comm_field) = self.schema.get_field_id("process.name") {
-                builder = builder.field(comm_field, TypedValue::String(comm_str));
+                builder = builder.field(comm_field, TypedValue::String(comm_str.into()));
             }
         }
         if let Some(path_str) = self.parse_bytes(&exec.pathname) {
             if let Some(exec_field) = self.schema.get_field_id("process.executable") {
-                builder = builder.field(exec_field, TypedValue::String(path_str));
+                builder = builder.field(exec_field, TypedValue::String(path_str.into()));
             }
         }
         if let Some(args_str) = self.parse_bytes(&exec.args) {
             if let Some(cmdline_field) = self.schema.get_field_id("process.command_line") {
-                builder = builder.field(cmdline_field, TypedValue::String(args_str));
+                builder = builder.field(cmdline_field, TypedValue::String(args_str.into()));
             }
         }
 
@@ -143,7 +143,7 @@ impl EventNormalizer {
                 2 => "exit",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string()));
+            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
@@ -159,17 +159,17 @@ impl EventNormalizer {
         }
         if let Some(comm_field) = self.schema.get_field_id("process.name") {
             if let Some(comm) = self.parse_bytes(&event.comm) {
-                builder = builder.field(comm_field, TypedValue::String(comm));
+                builder = builder.field(comm_field, TypedValue::String(comm.into()));
             }
         }
         if let Some(exec_field) = self.schema.get_field_id("process.executable") {
             if let Some(path) = self.parse_bytes(&event.primary) {
-                builder = builder.field(exec_field, TypedValue::String(path));
+                builder = builder.field(exec_field, TypedValue::String(path.into()));
             }
         }
         if let Some(cmdline_field) = self.schema.get_field_id("process.command_line") {
             if let Some(args) = self.parse_bytes(&event.secondary) {
-                builder = builder.field(cmdline_field, TypedValue::String(args));
+                builder = builder.field(cmdline_field, TypedValue::String(args.into()));
             }
         }
         if event.subtype == 2 {
@@ -205,7 +205,7 @@ impl EventNormalizer {
                 1 => "open",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string()));
+            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
@@ -215,19 +215,19 @@ impl EventNormalizer {
         if let Some(directory_value) = directory.as_ref() {
             if let Some(directory_field) = self.schema.get_field_id("file.directory") {
                 builder =
-                    builder.field(directory_field, TypedValue::String(directory_value.clone()));
+                    builder.field(directory_field, TypedValue::String(directory_value.clone().into()));
             }
         }
         if let Some(name_value) = name.as_ref() {
             if let Some(name_field) = self.schema.get_field_id("file.name") {
-                builder = builder.field(name_field, TypedValue::String(name_value.clone()));
+                builder = builder.field(name_field, TypedValue::String(name_value.clone().into()));
             }
             if let Some(path_field) = self.schema.get_field_id("file.path") {
                 let path_value = directory
                     .as_ref()
                     .map(|dir| format!("{}/{}", dir.trim_end_matches('/'), name_value))
                     .unwrap_or_else(|| name_value.clone());
-                builder = builder.field(path_field, TypedValue::String(path_value));
+                builder = builder.field(path_field, TypedValue::String(path_value.into()));
             }
         }
         if event.aux_u64_1 > 0 {
@@ -262,7 +262,7 @@ impl EventNormalizer {
                 1 => "connect",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string()));
+            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
@@ -272,7 +272,7 @@ impl EventNormalizer {
         if family == 2 {
             let ip = std::net::Ipv4Addr::from(event.aux_u32_2.to_ne_bytes()).to_string();
             if let Some(destination_field) = self.schema.get_field_id("network.destination") {
-                builder = builder.field(destination_field, TypedValue::String(ip));
+                builder = builder.field(destination_field, TypedValue::String(ip.into()));
             }
         }
         if port > 0 {
@@ -312,7 +312,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("process.operation") {
-            builder = builder.field(operation_field, TypedValue::String("exec".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("exec".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -330,7 +330,7 @@ impl EventNormalizer {
         let path = self.parse_path(data, 0, raw.path_len as usize);
         if let Some(path_str) = path {
             if let Some(exec_field) = self.schema.get_field_id("process.executable") {
-                builder = builder.field(exec_field, TypedValue::String(path_str));
+                builder = builder.field(exec_field, TypedValue::String(path_str.into()));
             }
         }
 
@@ -338,7 +338,7 @@ impl EventNormalizer {
         let cmdline = self.parse_path(data, cmdline_offset, raw.cmdline_len as usize);
         if let Some(cmdline_str) = cmdline {
             if let Some(cmdline_field) = self.schema.get_field_id("process.command_line") {
-                builder = builder.field(cmdline_field, TypedValue::String(cmdline_str));
+                builder = builder.field(cmdline_field, TypedValue::String(cmdline_str.into()));
             }
         }
 
@@ -360,7 +360,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("process.operation") {
-            builder = builder.field(operation_field, TypedValue::String("exit".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("exit".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -390,7 +390,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("file.operation") {
-            builder = builder.field(operation_field, TypedValue::String("open".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("open".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -399,7 +399,7 @@ impl EventNormalizer {
         let path = self.parse_path(data, 0, raw.path_len as usize);
         if let Some(path_str) = path {
             if let Some(path_field) = self.schema.get_field_id("file.path") {
-                builder = builder.field(path_field, TypedValue::String(path_str));
+                builder = builder.field(path_field, TypedValue::String(path_str.into()));
             }
         }
 
@@ -421,7 +421,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("file.operation") {
-            builder = builder.field(operation_field, TypedValue::String("rename".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("rename".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -445,7 +445,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("file.operation") {
-            builder = builder.field(operation_field, TypedValue::String("unlink".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("unlink".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -473,7 +473,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("network.operation") {
-            builder = builder.field(operation_field, TypedValue::String("connect".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("connect".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));
@@ -497,7 +497,7 @@ impl EventNormalizer {
             builder = builder.field(entity_field, TypedValue::U64(raw.entity_key));
         }
         if let Some(operation_field) = self.schema.get_field_id("network.operation") {
-            builder = builder.field(operation_field, TypedValue::String("send".to_string()));
+            builder = builder.field(operation_field, TypedValue::String("send".into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(raw.pid as u64));

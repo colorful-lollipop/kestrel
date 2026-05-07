@@ -711,7 +711,7 @@ fn test_event_with_all_fields() {
         .ts_wall(2_000_000)
         .entity_key(12345)
         .field(1, kestrel_schema::TypedValue::I64(42))
-        .field(2, kestrel_schema::TypedValue::String("test".to_string()))
+        .field(2, kestrel_schema::TypedValue::String("test".into()))
         .field(3, kestrel_schema::TypedValue::Bool(true))
         .build()
         .unwrap();

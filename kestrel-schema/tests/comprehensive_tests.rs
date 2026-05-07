@@ -11,14 +11,14 @@ fn test_typed_value_equality() {
     assert_eq!(TypedValue::Bool(true), TypedValue::Bool(true));
     assert_eq!(TypedValue::I64(-42), TypedValue::I64(-42));
     assert_eq!(TypedValue::U64(42), TypedValue::U64(42));
-    assert_eq!(TypedValue::String("test".to_string()), TypedValue::String("test".to_string()));
+    assert_eq!(TypedValue::String("test".into()), TypedValue::String("test".into()));
 }
 
 #[test]
 fn test_typed_value_inequality() {
     assert_ne!(TypedValue::Bool(true), TypedValue::Bool(false));
     assert_ne!(TypedValue::I64(42), TypedValue::I64(-42));
-    assert_ne!(TypedValue::String("a".to_string()), TypedValue::String("b".to_string()));
+    assert_ne!(TypedValue::String("a".into()), TypedValue::String("b".into()));
 }
 
 #[test]
@@ -27,12 +27,12 @@ fn test_typed_value_variants() {
     let _ = TypedValue::I64(-1);
     let _ = TypedValue::U64(1);
     let _ = TypedValue::F64(1.0);
-    let _ = TypedValue::String("test".to_string());
+    let _ = TypedValue::String("test".into());
 }
 
 #[test]
 fn test_typed_value_clone() {
-    let value = TypedValue::String("test".to_string());
+    let value = TypedValue::String("test".into());
     let cloned = value.clone();
     assert_eq!(value, cloned);
 }
@@ -94,7 +94,7 @@ fn test_severity_default() {
 
 #[test]
 fn test_typed_value_debug() {
-    let value = TypedValue::String("test".to_string());
+    let value = TypedValue::String("test".into());
     let debug = format!("{:?}", value);
     assert!(debug.contains("test"));
 }

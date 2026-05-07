@@ -54,7 +54,7 @@ fn test_event_with_fields_creation_performance() {
             .ts_wall(i as u64 * 1_000_000)
             .entity_key(i as u128)
             .field(1, TypedValue::I64(i as i64))
-            .field(2, TypedValue::String(format!("process_{}", i)))
+            .field(2, TypedValue::String(format!("process_{}", i).into()))
             .field(3, TypedValue::U64(i as u64))
             .build()
             .unwrap();
@@ -144,7 +144,7 @@ fn test_event_field_storage_efficiency() {
             .ts_wall(i as u64 * 1_000_000)
             .entity_key((i % 100) as u128)
             .field(1, TypedValue::I64(i as i64))
-            .field(2, TypedValue::String(format!("string_{}", i % 1000)))
+            .field(2, TypedValue::String(format!("string_{}", i % 1000).into()))
             .field(3, TypedValue::Bool(i % 2 == 0))
             .build()
             .unwrap();
@@ -250,7 +250,7 @@ fn test_field_access_performance() {
         .ts_wall(1_000_000)
         .entity_key(1)
         .field(1, TypedValue::I64(42))
-        .field(2, TypedValue::String("test".to_string()))
+        .field(2, TypedValue::String("test".into()))
         .field(3, TypedValue::Bool(true))
         .field(4, TypedValue::U64(12345))
         .field(5, TypedValue::F64(std::f64::consts::PI))
@@ -427,7 +427,7 @@ fn test_large_string_field_performance() {
         .ts_mono(1_000_000)
         .ts_wall(1_000_000)
         .entity_key(1)
-        .field(1, TypedValue::String(large_string.clone()))
+        .field(1, TypedValue::String(large_string.clone().into()))
         .build()
         .unwrap();
     let elapsed = start.elapsed();
@@ -447,7 +447,7 @@ fn test_event_clone_performance() {
         .ts_wall(1_000_000)
         .entity_key(1)
         .field(1, TypedValue::I64(42))
-        .field(2, TypedValue::String("test".to_string()))
+        .field(2, TypedValue::String("test".into()))
         .field(3, TypedValue::Bool(true))
         .build()
         .unwrap();
@@ -483,7 +483,7 @@ fn test_burst_event_creation() {
                 .ts_wall(i as u64 * 1_000)
                 .entity_key((i % 100) as u128)
                 .field(1, TypedValue::I64(i as i64))
-                .field(2, TypedValue::String(format!("event_{}", i)))
+                .field(2, TypedValue::String(format!("event_{}", i).into()))
                 .build()
                 .unwrap();
         }
@@ -523,7 +523,7 @@ fn test_event_processing_pipeline_simulation() {
             .ts_wall(1_700_000_000_000_000_000 + i as u64 * 1_000_000)
             .entity_key((i % 500) as u128) // 500 different processes
             .field(1, TypedValue::I64((i % 65535) as i64)) // pid
-            .field(2, TypedValue::String(format!("/bin/process_{}", i % 100))) // exe
+            .field(2, TypedValue::String(format!("/bin/process_{}", i % 100).into())) // exe
             .field(3, TypedValue::U64(i as u64)) // sequence number
             .build()
             .unwrap();

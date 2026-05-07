@@ -25,7 +25,7 @@ fn create_test_event(id: u64, event_type: u16, ts_ns: u64, entity_key: u128) -> 
         .ts_wall(ts_ns)
         .entity_key(entity_key)
         .field(1, TypedValue::I64(id as i64))
-        .field(2, TypedValue::String(format!("event_{}", id)))
+        .field(2, TypedValue::String(format!("event_{}", id).into()))
         .build()
         .unwrap()
 }

@@ -41,9 +41,9 @@ fn create_compliance_event(
         .ts_mono(timestamp_ns)
         .ts_wall(timestamp_ns)
         .entity_key(entity)
-        .field(1, kestrel_schema::TypedValue::String(category.to_string()))
-        .field(2, kestrel_schema::TypedValue::String(action.to_string()))
-        .field(3, kestrel_schema::TypedValue::String(user.to_string()))
+        .field(1, kestrel_schema::TypedValue::String(category.to_string().into()))
+        .field(2, kestrel_schema::TypedValue::String(action.to_string().into()))
+        .field(3, kestrel_schema::TypedValue::String(user.to_string().into()))
         .build()
         .unwrap()
 }

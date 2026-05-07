@@ -19,7 +19,7 @@ fn create_test_event() -> Event {
         .ts_mono(1_000_000)
         .ts_wall(1_000_000)
         .entity_key(12345)
-        .field(1, TypedValue::String("test_process".to_string()))
+        .field(1, TypedValue::String("test_process".into()))
         .field(2, TypedValue::I64(1234))
         .build()
         .unwrap()

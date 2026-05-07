@@ -57,7 +57,7 @@ mod event_simulator {
                 .ts_wall(self.base_timestamp)
                 .entity_key(self.get_entity_key())
                 .field(1, TypedValue::U64(pid as u64))
-                .field(3, TypedValue::String(name.to_string()))
+                .field(3, TypedValue::String(name.to_string().into()))
                 .build()
                 .unwrap()
         }
@@ -70,7 +70,7 @@ mod event_simulator {
                 .ts_wall(self.base_timestamp)
                 .entity_key(self.get_entity_key())
                 .field(1, TypedValue::U64(pid as u64))
-                .field(10, TypedValue::String(path.to_string()))
+                .field(10, TypedValue::String(path.to_string().into()))
                 .build()
                 .unwrap()
         }
@@ -83,7 +83,7 @@ mod event_simulator {
                 .ts_wall(self.base_timestamp)
                 .entity_key(self.get_entity_key())
                 .field(1, TypedValue::U64(pid as u64))
-                .field(10, TypedValue::String(path.to_string()))
+                .field(10, TypedValue::String(path.to_string().into()))
                 .build()
                 .unwrap()
         }
@@ -96,7 +96,7 @@ mod event_simulator {
                 .ts_wall(self.base_timestamp)
                 .entity_key(self.get_entity_key())
                 .field(1, TypedValue::U64(pid as u64))
-                .field(20, TypedValue::String(dest_ip.to_string()))
+                .field(20, TypedValue::String(dest_ip.to_string().into()))
                 .build()
                 .unwrap()
         }

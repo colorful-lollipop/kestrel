@@ -40,7 +40,7 @@ fn create_test_event(event_type: u16, entity: u128, timestamp_ns: u64, data: &st
         .ts_mono(timestamp_ns)
         .ts_wall(timestamp_ns)
         .entity_key(entity)
-        .field(1, TypedValue::String(data.to_string()))
+        .field(1, TypedValue::String(data.to_string().into()))
         .build()
         .unwrap()
 }
