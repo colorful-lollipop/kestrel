@@ -1,0 +1,47 @@
+[package]
+name = "kestrel-collector-macos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "macOS event collector using Endpoint Security Framework (ESF) for Kestrel detection engine"
+
+[features]
+default = ["esf"]
+esf = ["dep:endpoint-sec"]
+proc-info = ["dep:libproc"]
+
+[dependencies]
+# Kestrel core dependencies
+kestrel-core = { path = "../kestrel-core" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-schema = { path = "../kestrel-schema" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# macOS-specific dependencies
+# Endpoint Security Framework bindings
+endpoint-sec = { version = "0.5", optional = true }
+
+# Process information (proc_info)
+libproc = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tracing-subscriber = { workspace = true }
+
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-darwin"

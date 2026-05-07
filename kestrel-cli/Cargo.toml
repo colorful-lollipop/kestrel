@@ -12,6 +12,7 @@ path = "src/main.rs"
 [features]
 default = ["ebpf"]
 ebpf = ["dep:kestrel-ebpf", "dep:aya"]
+macos = ["dep:kestrel-collector-macos"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -30,3 +31,6 @@ kestrel-core = { path = "../kestrel-core" }
 # Optional platform dependencies (Linux eBPF)
 aya = { workspace = true, optional = true }
 kestrel-ebpf = { path = "../kestrel-ebpf", optional = true }
+
+# Optional platform dependencies (macOS)
+kestrel-collector-macos = { path = "../kestrel-collector-macos", optional = true }

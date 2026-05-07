@@ -13,6 +13,7 @@ members = [
     "kestrel-lazy-dfa",
     "kestrel-hybrid-engine",
     "kestrel-ebpf",
+    "kestrel-collector-macos",
     "kestrel-cli",
     "kestrel-benchmark",
     "kestrel-ffi",

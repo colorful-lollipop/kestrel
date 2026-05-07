@@ -193,6 +193,7 @@ async fn run_engine(
 /// Create an event collector based on the specified type.
 ///
 /// On non-Linux platforms, eBPF collector is not available.
+/// On non-macOS platforms, macOS collector is not available.
 async fn create_collector(
     collector_type: &str,
     ebpf_object: Option<PathBuf>,
@@ -226,6 +227,22 @@ async fn create_collector(
                 );
             }
         },
+        "macos" => {
+            #[cfg(feature = "macos")]
+            {
+                info!("Creating macOS event collector with Endpoint Security");
+                let collector = kestrel_collector_macos::MacOSEventCollector::new()
+                    .map_err(|e| anyhow::anyhow!("Failed to create macOS collector: {}", e))?;
+                Ok(Some(Box::new(collector)))
+            }
+            #[cfg(not(feature = "macos"))]
+            {
+                anyhow::bail!(
+                    "macOS collector not available on this platform. \
+                     Build with --features macos on macOS, or use --collector mock/replay"
+                );
+            }
+        },
         "mock" => {
             let count = 100; // Default mock event count
             info!(count, "Creating mock event collector");
@@ -241,7 +258,7 @@ async fn create_collector(
             Ok(Some(Box::new(kestrel_core::ReplayEventCollector::new(path))))
         },
         _ => anyhow::bail!(
-            "Unknown collector type: '{}'. Use 'ebpf', 'mock', or 'replay'",
+            "Unknown collector type: '{}'. Use 'ebpf', 'macos', 'mock', or 'replay'",
             collector_type
         ),
     }
