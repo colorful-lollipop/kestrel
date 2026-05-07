@@ -63,7 +63,8 @@ impl Default for NfaEngineConfig {
 /// NFA Engine - main execution engine for sequence detection
 pub struct NfaEngine {
     /// Loaded sequences indexed by sequence ID
-    sequences: AHashMap<String, NfaSequence>,
+    /// Using Arc for zero-copy cloning in hot path
+    sequences: AHashMap<String, Arc<NfaSequence>>,
 
     /// Event type index: event_type_id -> sequence IDs that have steps matching this type
     event_type_index: HashMap<u16, Vec<String>>,
@@ -116,9 +117,9 @@ impl NfaEngine {
         // Register metrics for this sequence
         self.metrics.write().register_sequence(compiled.id.clone());
 
-        // Store the sequence
+        // Store the sequence (wrapped in Arc for zero-copy cloning)
         self.sequences
-            .insert(compiled.id.clone(), compiled.sequence.clone());
+            .insert(compiled.id.clone(), Arc::new(compiled.sequence.clone()));
 
         // Update event type index - use a Set to avoid duplicates for steps with same event_type_id
         let mut event_types: std::collections::HashSet<u16> = std::collections::HashSet::new();
