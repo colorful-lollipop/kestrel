@@ -22,6 +22,9 @@ use async_trait::async_trait;
 use kestrel_event::Event;
 use std::sync::Arc;
 
+/// Sequence identifier (u32 for fast comparison and small keys)
+pub type SeqId = u32;
+
 use thiserror::Error;
 
 /// Errors that can occur in the NFA engine

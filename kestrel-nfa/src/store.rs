@@ -7,7 +7,7 @@
 // - Sharded storage for parallelism
 
 use crate::state::{NfaStateId, PartialMatch};
-use crate::{NfaError, NfaResult};
+use crate::{NfaError, NfaResult, SeqId};
 use ahash::AHashMap;
 use parking_lot::RwLock;
 use priority_queue::PriorityQueue;
@@ -76,19 +76,20 @@ impl Default for QuotaConfig {
 /// and enable parallel processing.
 #[derive(Debug)]
 struct StateShard {
-    /// Partial matches indexed by (sequence_id, entity_key, state_id)
-    matches: AHashMap<(String, u128, NfaStateId), PartialMatch>,
+    /// Partial matches indexed by (seq_id, entity_key, state_id)
+    /// Using SeqId (u32) for O(1) comparison instead of String
+    matches: AHashMap<(SeqId, u128, NfaStateId), PartialMatch>,
 
     /// LRU queue ordered by last access time
-    /// Key: (sequence_id, entity_key, state_id)
+    /// Key: (seq_id, entity_key, state_id)
     /// Priority: timestamp (lower = older, higher eviction priority)
-    lru_queue: PriorityQueue<(String, u128, NfaStateId), u64>,
+    lru_queue: PriorityQueue<(SeqId, u128, NfaStateId), u64>,
 
     /// Per-entity match count (for quota enforcement)
-    entity_counts: AHashMap<(String, u128), usize>,
+    entity_counts: AHashMap<(SeqId, u128), usize>,
 
     /// Per-sequence match count
-    sequence_counts: AHashMap<String, usize>,
+    sequence_counts: AHashMap<SeqId, usize>,
 }
 
 impl StateShard {
@@ -103,29 +104,29 @@ impl StateShard {
 
     fn insert(
         &mut self,
-        key: (String, u128, NfaStateId),
+        key: (SeqId, u128, NfaStateId),
         match_state: PartialMatch,
         timestamp: u64,
     ) {
         self.entity_counts
-            .entry((key.0.clone(), key.1))
+            .entry((key.0, key.1))
             .and_modify(|c| *c += 1)
             .or_insert(1);
 
         self.sequence_counts
-            .entry(key.0.clone())
+            .entry(key.0)
             .and_modify(|c| *c += 1)
             .or_insert(1);
 
-        self.matches.insert(key.clone(), match_state);
+        self.matches.insert(key, match_state);
         self.lru_queue.push(key, timestamp);
     }
 
-    fn remove(&mut self, key: &(String, u128, NfaStateId)) -> Option<PartialMatch> {
+    fn remove(&mut self, key: &(SeqId, u128, NfaStateId)) -> Option<PartialMatch> {
         let match_state = self.matches.remove(key)?;
         self.lru_queue.remove(key);
 
-        let entity_key = (key.0.clone(), key.1);
+        let entity_key = (key.0, key.1);
         if let Some(count) = self.entity_counts.get_mut(&entity_key) {
             *count = count.saturating_sub(1);
             if *count == 0 {
@@ -133,30 +134,30 @@ impl StateShard {
             }
         }
 
-        let seq_id = &key.0;
-        if let Some(count) = self.sequence_counts.get_mut(seq_id) {
+        let seq_id = key.0;
+        if let Some(count) = self.sequence_counts.get_mut(&seq_id) {
             *count = count.saturating_sub(1);
             if *count == 0 {
-                self.sequence_counts.remove(seq_id);
+                self.sequence_counts.remove(&seq_id);
             }
         }
 
         Some(match_state)
     }
 
-    fn get(&self, key: &(String, u128, NfaStateId)) -> Option<&PartialMatch> {
+    fn get(&self, key: &(SeqId, u128, NfaStateId)) -> Option<&PartialMatch> {
         self.matches.get(key)
     }
 
-    fn get_entity_count(&self, sequence_id: &str, entity_key: u128) -> usize {
+    fn get_entity_count(&self, seq_id: SeqId, entity_key: u128) -> usize {
         self.entity_counts
-            .get(&(sequence_id.to_string(), entity_key))
+            .get(&(seq_id, entity_key))
             .copied()
             .unwrap_or(0)
     }
 
-    fn get_sequence_count(&self, sequence_id: &str) -> usize {
-        self.sequence_counts.get(sequence_id).copied().unwrap_or(0)
+    fn get_sequence_count(&self, seq_id: SeqId) -> usize {
+        self.sequence_counts.get(&seq_id).copied().unwrap_or(0)
     }
 
     fn total_matches(&self) -> usize {
@@ -185,6 +186,15 @@ pub struct StateStore {
 
     /// Configuration
     config: StateStoreConfig,
+
+    /// Mapping from sequence_id (String) to SeqId (u32)
+    seq_id_map: RwLock<AHashMap<String, SeqId>>,
+
+    /// Reverse mapping from SeqId to sequence_id
+    seq_id_reverse: RwLock<AHashMap<SeqId, String>>,
+
+    /// Next SeqId to assign
+    next_seq_id: std::sync::atomic::AtomicU32,
 }
 
 impl StateStore {
@@ -199,7 +209,33 @@ impl StateStore {
             shards,
             num_shards,
             config,
+            seq_id_map: RwLock::new(AHashMap::new()),
+            seq_id_reverse: RwLock::new(AHashMap::new()),
+            next_seq_id: std::sync::atomic::AtomicU32::new(1),
         }
+    }
+
+    /// Get or create SeqId for a sequence_id string
+    fn get_or_create_seq_id(&self, sequence_id: &str) -> SeqId {
+        // Fast path: check if already mapped
+        {
+            let map = self.seq_id_map.read();
+            if let Some(&seq_id) = map.get(sequence_id) {
+                return seq_id;
+            }
+        }
+
+        // Slow path: create new mapping
+        let mut map = self.seq_id_map.write();
+        // Double-check after acquiring write lock
+        if let Some(&seq_id) = map.get(sequence_id) {
+            return seq_id;
+        }
+
+        let seq_id = self.next_seq_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        map.insert(sequence_id.to_string(), seq_id);
+        self.seq_id_reverse.write().insert(seq_id, sequence_id.to_string());
+        seq_id
     }
 
     /// Get the shard index for a given entity key
@@ -209,10 +245,10 @@ impl StateStore {
 
     /// Insert or update a partial match
     pub fn insert(&self, match_state: PartialMatch) -> NfaResult<()> {
-        let sequence_id = match_state.sequence_id.clone();
+        let seq_id = self.get_or_create_seq_id(&match_state.sequence_id);
         let entity_key = match_state.entity_key;
         let state_id = match_state.current_state;
-        let key = (sequence_id, entity_key, state_id);
+        let key = (seq_id, entity_key, state_id);
         let timestamp = match_state.last_match_ns;
 
         // Check quota before inserting
@@ -232,8 +268,9 @@ impl StateStore {
         entity_key: u128,
         state_id: NfaStateId,
     ) -> Option<PartialMatch> {
+        let seq_id = self.get_or_create_seq_id(sequence_id);
         let shard_idx = self.get_shard_index(entity_key);
-        let key = (sequence_id.to_string(), entity_key, state_id);
+        let key = (seq_id, entity_key, state_id);
         let mut shard = self.shards[shard_idx].write();
         shard.remove(&key)
     }
@@ -245,22 +282,27 @@ impl StateStore {
         entity_key: u128,
         state_id: NfaStateId,
     ) -> Option<PartialMatch> {
+        let seq_id = self.get_or_create_seq_id(sequence_id);
         let shard_idx = self.get_shard_index(entity_key);
-        let key = (sequence_id.to_string(), entity_key, state_id);
+        let key = (seq_id, entity_key, state_id);
         let shard = self.shards[shard_idx].read();
         shard.get(&key).cloned()
     }
 
     /// Check if inserting would violate quota
-    fn check_quota(&self, key: &(String, u128, NfaStateId)) -> NfaResult<()> {
+    fn check_quota(&self, key: &(SeqId, u128, NfaStateId)) -> NfaResult<()> {
         let shard_idx = self.get_shard_index(key.1);
         let shard = self.shards[shard_idx].read();
 
         // Check per-entity quota
-        let entity_count = shard.get_entity_count(&key.0, key.1);
+        let entity_count = shard.get_entity_count(key.0, key.1);
         if entity_count >= self.config.max_partial_matches_per_entity {
+            let seq_name = self.seq_id_reverse.read()
+                .get(&key.0)
+                .cloned()
+                .unwrap_or_else(|| format!("seq_{}", key.0));
             return Err(NfaError::QuotaExceeded {
-                rule_id: key.0.clone(),
+                rule_id: seq_name,
                 reason: format!(
                     "entity quota exceeded: {} >= {}",
                     entity_count, self.config.max_partial_matches_per_entity
@@ -269,10 +311,14 @@ impl StateStore {
         }
 
         // Check per-sequence quota
-        let seq_count = shard.get_sequence_count(&key.0);
+        let seq_count = shard.get_sequence_count(key.0);
         if seq_count >= self.config.max_partial_matches_per_sequence {
+            let seq_name = self.seq_id_reverse.read()
+                .get(&key.0)
+                .cloned()
+                .unwrap_or_else(|| format!("seq_{}", key.0));
             return Err(NfaError::QuotaExceeded {
-                rule_id: key.0.clone(),
+                rule_id: seq_name,
                 reason: format!(
                     "sequence quota exceeded: {} >= {}",
                     seq_count, self.config.max_partial_matches_per_sequence
