@@ -143,7 +143,7 @@ impl EventNormalizer {
                 2 => "exit",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
+            builder = builder.field(operation_field, TypedValue::String(op.into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
@@ -205,7 +205,7 @@ impl EventNormalizer {
                 1 => "open",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
+            builder = builder.field(operation_field, TypedValue::String(op.into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
@@ -262,7 +262,7 @@ impl EventNormalizer {
                 1 => "connect",
                 _ => "unknown",
             };
-            builder = builder.field(operation_field, TypedValue::String(op.to_string().into()));
+            builder = builder.field(operation_field, TypedValue::String(op.into()));
         }
         if let Some(pid_field) = self.schema.get_field_id("process.pid") {
             builder = builder.field(pid_field, TypedValue::U64(event.pid as u64));
