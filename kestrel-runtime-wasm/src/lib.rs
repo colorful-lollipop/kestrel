@@ -100,6 +100,8 @@ struct CompiledModule {
     module: Module,
     instance_pre: InstancePre<WasmContext>,
     metadata: RuleMetadata,
+    /// Required fields per predicate (predicate_index -> field_ids)
+    predicate_fields: AHashMap<u32, Vec<u32>>,
 }
 
 /// Pool metrics for tracking instance pool utilization
@@ -732,7 +734,7 @@ impl WasmEngine {
         });
 
         // Load the module with the generated manifest
-        self.load_module(manifest, wasm_bytes).await?;
+        self.load_module(manifest, wasm_bytes, AHashMap::new()).await?;
         Ok(())
     }
 
@@ -741,6 +743,7 @@ impl WasmEngine {
         &self,
         manifest: RuleManifest,
         wasm_bytes: Vec<u8>,
+        predicate_fields: AHashMap<u32, Vec<u32>>,
     ) -> Result<String, WasmRuntimeError> {
         let rule_id = manifest.metadata.rule_id.clone();
 
@@ -763,6 +766,7 @@ impl WasmEngine {
             module,
             instance_pre,
             metadata: manifest.metadata,
+            predicate_fields,
         };
 
         // Pre-populate the instance pool
@@ -1019,9 +1023,28 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         Ok(result)
     }
 
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        // TODO: Implement field tracking for Wasm predicates
-        Ok(vec![])
+    fn get_required_fields(&self, predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+        // Parse predicate_id as "rule_id:predicate_index"
+        let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Ok(vec![]);
+        }
+
+        let rule_id = parts[0];
+        let predicate_index: u32 = parts[1].parse().unwrap_or(0);
+
+        // Look up required fields from compiled module
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let modules = self.modules.read().await;
+                if let Some(compiled) = modules.get(rule_id) {
+                    if let Some(fields) = compiled.predicate_fields.get(&predicate_index) {
+                        return Ok(fields.clone());
+                    }
+                }
+                Ok(vec![])
+            })
+        })
     }
 
     fn has_predicate(&self, predicate_id: &str) -> bool {

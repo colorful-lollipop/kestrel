@@ -527,6 +527,14 @@ impl DetectionEngine {
         };
         let predicate_indices = Self::predicate_indices(&ir);
 
+        // Build predicate_fields map from IR
+        let mut predicate_fields = std::collections::HashMap::new();
+        for (pred_id, pred) in &ir.predicates {
+            if let Some(&idx) = predicate_indices.get(pred_id) {
+                predicate_fields.insert(idx, pred.required_fields.clone());
+            }
+        }
+
         let mut wasm_generator = WasmCodeGenerator::new();
         let wat = wasm_generator
             .generate(&ir)
@@ -535,7 +543,7 @@ impl DetectionEngine {
             .map_err(|e| EngineError::WasmRuntimeError(format!("WAT parsing error: {}", e)))?;
 
         wasm_engine
-            .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone())
+            .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone(), predicate_fields)
             .await
             .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))?;
 
