@@ -65,6 +65,59 @@ pub trait PredicateEvaluator: Send + Sync {
     fn has_predicate(&self, predicate_id: &str) -> bool;
 }
 
+/// Cached predicate evaluator that wraps a PredicateEvaluator and adds caching
+///
+/// Caches predicate results for the current event to avoid redundant evaluations
+/// when the same predicate is used in multiple sequences.
+pub struct CachedPredicateEvaluator {
+    inner: Arc<dyn PredicateEvaluator>,
+    cache: parking_lot::Mutex<ahash::AHashMap<String, bool>>,
+}
+
+impl CachedPredicateEvaluator {
+    /// Create a new cached predicate evaluator
+    pub fn new(inner: Arc<dyn PredicateEvaluator>) -> Self {
+        Self {
+            inner,
+            cache: parking_lot::Mutex::new(ahash::AHashMap::new()),
+        }
+    }
+
+    /// Clear the cache (call this when processing a new event)
+    pub fn clear_cache(&self) {
+        self.cache.lock().clear();
+    }
+}
+
+#[async_trait]
+impl PredicateEvaluator for CachedPredicateEvaluator {
+    async fn evaluate(&self, predicate_id: &str, event: &Event) -> NfaResult<bool> {
+        // Create cache key from predicate_id and event timestamp
+        let cache_key = format!("{}:{}", predicate_id, event.ts_mono_ns);
+
+        // Check cache first
+        {
+            let cache = self.cache.lock();
+            if let Some(&result) = cache.get(&cache_key) {
+                return Ok(result);
+            }
+        }
+
+        // Evaluate and cache result
+        let result = self.inner.evaluate(predicate_id, event).await?;
+        self.cache.lock().insert(cache_key, result);
+        Ok(result)
+    }
+
+    fn get_required_fields(&self, predicate_id: &str) -> NfaResult<Vec<u32>> {
+        self.inner.get_required_fields(predicate_id)
+    }
+
+    fn has_predicate(&self, predicate_id: &str) -> bool {
+        self.inner.has_predicate(predicate_id)
+    }
+}
+
 /// Compilation result - contains a compiled sequence ready for loading into the engine
 #[derive(Debug, Clone)]
 pub struct CompiledSequence {
