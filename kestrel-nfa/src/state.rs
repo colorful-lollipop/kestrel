@@ -8,6 +8,7 @@
 use kestrel_event::Event;
 use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Unique identifier for an NFA state (position in sequence)
 pub type NfaStateId = u16;
@@ -136,8 +137,8 @@ pub struct MatchedEvent {
     /// State ID (step position)
     pub state_id: NfaStateId,
 
-    /// The event that matched
-    pub event: Event,
+    /// The event that matched (Arc for zero-copy cloning)
+    pub event: Arc<Event>,
 
     /// Timestamp of this match
     pub timestamp_ns: u64,
@@ -148,7 +149,7 @@ impl PartialMatch {
     pub fn new(
         sequence_id: String,
         entity_key: u128,
-        initial_event: Event,
+        initial_event: Arc<Event>,
         initial_state_id: NfaStateId,
     ) -> Self {
         let timestamp_ns = initial_event.ts_mono_ns;
@@ -170,7 +171,7 @@ impl PartialMatch {
     }
 
     /// Advance this partial match to the next state
-    pub fn advance(&mut self, event: Event, next_state_id: NfaStateId) {
+    pub fn advance(&mut self, event: Arc<Event>, next_state_id: NfaStateId) {
         let timestamp_ns = event.ts_mono_ns;
         let matched_event = MatchedEvent {
             state_id: next_state_id,
@@ -316,7 +317,7 @@ mod tests {
     #[test]
     fn test_partial_match_creation() {
         let event = create_test_event(1, 1000);
-        let pm = PartialMatch::new("test_seq".to_string(), 12345, event, 0);
+        let pm = PartialMatch::new("test_seq".to_string(), 12345, Arc::new(event), 0);
 
         assert_eq!(pm.sequence_id, "test_seq");
         assert_eq!(pm.entity_key, 12345);
@@ -329,10 +330,10 @@ mod tests {
     #[test]
     fn test_partial_match_advance() {
         let event1 = create_test_event(1, 1000);
-        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, event1, 0);
+        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, Arc::new(event1), 0);
 
         let event2 = create_test_event(2, 2000);
-        pm.advance(event2, 1);
+        pm.advance(Arc::new(event2), 1);
 
         assert_eq!(pm.current_state, 1);
         assert_eq!(pm.matched_events.len(), 2);
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn test_partial_match_is_complete() {
         let event = create_test_event(1, 1000);
-        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, event, 0);
+        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, Arc::new(event), 0);
 
         // 3-step sequence
         assert!(!pm.is_complete(3)); // State 0 of 3
@@ -357,7 +358,7 @@ mod tests {
     #[test]
     fn test_partial_match_expiration() {
         let event = create_test_event(1, 1_000_000_000); // 1 second in ns
-        let pm = PartialMatch::new("test_seq".to_string(), 12345, event, 0);
+        let pm = PartialMatch::new("test_seq".to_string(), 12345, Arc::new(event), 0);
 
         // maxspan of 5 seconds (5000 ms)
         let maxspan_ms = Some(5000);
@@ -375,7 +376,7 @@ mod tests {
     #[test]
     fn test_partial_match_terminate() {
         let event = create_test_event(1, 1000);
-        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, event, 0);
+        let mut pm = PartialMatch::new("test_seq".to_string(), 12345, Arc::new(event), 0);
 
         assert!(!pm.terminated);
         pm.terminate();

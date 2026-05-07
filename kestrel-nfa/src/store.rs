@@ -351,6 +351,7 @@ mod tests {
     use super::*;
     use crate::state::PartialMatch;
     use kestrel_event::Event;
+    use std::sync::Arc;
 
     fn create_test_partial_match(
         sequence_id: &str,
@@ -365,7 +366,7 @@ mod tests {
             .build()
             .expect("failed to build test event");
 
-        PartialMatch::new(sequence_id.to_string(), entity_key, event, state_id)
+        PartialMatch::new(sequence_id.to_string(), entity_key, Arc::new(event), state_id)
     }
 
     #[test]

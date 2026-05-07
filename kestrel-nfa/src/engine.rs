@@ -281,6 +281,9 @@ impl NfaEngine {
         let entity_key = event.entity_key;
         let event_type_id = event.event_type_id;
 
+        // Create Arc<Event> once for zero-copy cloning
+        let event_arc = Arc::new(event.clone());
+
         // Use pre-computed index for O(1) step lookup (ZERO-COPY)
         let relevant_step_indices = sequence.get_relevant_steps(event_type_id);
 
@@ -331,7 +334,7 @@ impl NfaEngine {
             let state_id = step.state_id;
             if state_id == 0 {
                 // Start a new partial match
-                self.start_partial_match(sequence, event.clone(), entity_key)?;
+                self.start_partial_match(sequence, event_arc.clone(), entity_key)?;
 
                 // Check if this is a single-step sequence (complete immediately)
                 if sequence.step_count() == 1 {
@@ -345,7 +348,7 @@ impl NfaEngine {
                     }
                 }
             } else if let Some(alert) =
-                self.try_advance_partial_matches(sequence, event.clone(), entity_key, state_id)?
+                self.try_advance_partial_matches(sequence, event_arc.clone(), entity_key, state_id)?
             {
                 alerts.push(alert);
             }
@@ -459,7 +462,7 @@ impl NfaEngine {
     fn start_partial_match(
         &mut self,
         sequence: &NfaSequence,
-        event: kestrel_event::Event,
+        event: Arc<kestrel_event::Event>,
         entity_key: u128,
     ) -> NfaResult<()> {
         let partial_match = PartialMatch::new(
@@ -494,7 +497,7 @@ impl NfaEngine {
     fn try_advance_partial_matches(
         &mut self,
         sequence: &NfaSequence,
-        event: kestrel_event::Event,
+        event: Arc<kestrel_event::Event>,
         entity_key: u128,
         step_state_id: NfaStateId,
     ) -> NfaResult<Option<SequenceAlert>> {
@@ -633,7 +636,7 @@ impl NfaEngine {
     pub fn extract_captures(
         &self,
         sequence: &NfaSequence,
-        events: &[kestrel_event::Event],
+        events: &[Arc<kestrel_event::Event>],
     ) -> NfaResult<Vec<(String, kestrel_schema::TypedValue)>> {
         let mut captures = Vec::new();
 

@@ -20,6 +20,7 @@ pub use store::{QuotaConfig, StateStore, StateStoreConfig};
 
 use async_trait::async_trait;
 use kestrel_event::Event;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -91,8 +92,8 @@ pub struct SequenceAlert {
     /// Timestamp of the match
     pub timestamp_ns: u64,
 
-    /// Events that participated in the sequence
-    pub events: Vec<Event>,
+    /// Events that participated in the sequence (Arc for zero-copy)
+    pub events: Vec<Arc<Event>>,
 
     /// Captured data from predicates (alias -> value)
     pub captures: Vec<(String, kestrel_schema::TypedValue)>,
