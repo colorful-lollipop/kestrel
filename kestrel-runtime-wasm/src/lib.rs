@@ -8,7 +8,8 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::{RwLock, Semaphore};
+use parking_lot::{Mutex, RwLock};
+use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
 use wasmtime::{
     Caller, Config, Engine, Extern, Instance, InstanceAllocationStrategy, InstancePre, Linker,
@@ -222,7 +223,7 @@ impl PoolMetrics {
 
 /// Instance pool for a specific module
 struct InstancePool {
-    instances: tokio::sync::Mutex<Vec<PooledInstance>>,
+    instances: Mutex<Vec<PooledInstance>>,
     semaphore: Arc<Semaphore>,
 }
 
@@ -237,7 +238,7 @@ struct PooledInstance {
 pub struct WasmContext {
     pub event: Option<Event>,
     pub schema: Arc<SchemaRegistry>,
-    pub alerts: Arc<std::sync::Mutex<Vec<AlertRecord>>>,
+    pub alerts: Arc<Mutex<Vec<AlertRecord>>>,
     pub regex_cache: Arc<RwLock<AHashMap<RegexId, regex::Regex>>>,
     pub glob_cache: Arc<RwLock<AHashMap<GlobId, glob::Pattern>>>,
     pub rule_metadata: RuleMetadata,
@@ -259,7 +260,7 @@ impl WasmPredicate {
 
     /// Evaluate an event
     pub async fn eval(&self, event: &Event) -> Result<EvalResult, WasmRuntimeError> {
-        let modules = self.engine.modules.read().await;
+        let modules = self.engine.modules.read();
         let compiled = modules.get(&self.rule_id).ok_or_else(|| {
             WasmRuntimeError::CompilationError(format!("Module not found: {}", self.rule_id))
         })?;
@@ -270,7 +271,7 @@ impl WasmPredicate {
             WasmContext {
                 event: Some(event.clone()),
                 schema: self.engine.schema.clone(),
-                alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                alerts: Arc::new(Mutex::new(Vec::new())),
                 regex_cache: self.engine.regex_cache.clone(),
                 glob_cache: self.engine.glob_cache.clone(),
                 rule_metadata: compiled.metadata.clone(),
@@ -566,8 +567,8 @@ impl WasmEngine {
                     };
 
                     let cache_guard = match cache.try_read() {
-                        Ok(guard) => guard,
-                        Err(_) => return 0,
+                        Some(guard) => guard,
+                        None => return 0,
                     };
 
                     if let Some(re) = cache_guard.get(&re_id) {
@@ -604,9 +605,7 @@ impl WasmEngine {
                         Err(_) => return 0,
                     };
 
-                    let cache_guard = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(cache.read())
-                    });
+                    let cache_guard = cache.read();
 
                     if let Some(pattern) = cache_guard.get(&glob_id) {
                         if pattern.matches(s) {
@@ -653,7 +652,7 @@ impl WasmEngine {
                     };
 
                     // Add to alerts
-                    let mut alerts = ctx.alerts.lock().unwrap();
+                    let mut alerts = ctx.alerts.lock();
                     alerts.push(alert_record);
 
                     0 // Success
@@ -688,7 +687,7 @@ impl WasmEngine {
 
                     // Store captured field in a dedicated capture map
                     // For now, we'll add it to a special alert record that can be retrieved later
-                    let mut alerts = ctx.alerts.lock().unwrap();
+                    let mut alerts = ctx.alerts.lock();
 
                     // Find or create a capture record
                     let capture_record = if alerts.is_empty() {
@@ -787,7 +786,7 @@ impl WasmEngine {
                 WasmContext {
                     event: None,
                     schema: self.schema.clone(),
-                    alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    alerts: Arc::new(Mutex::new(Vec::new())),
                     regex_cache: self.regex_cache.clone(),
                     glob_cache: self.glob_cache.clone(),
                     rule_metadata: compiled.metadata.clone(),
@@ -808,15 +807,15 @@ impl WasmEngine {
         }
 
         let pool = Arc::new(InstancePool {
-            instances: tokio::sync::Mutex::new(instances),
+            instances: Mutex::new(instances),
             semaphore: Arc::new(Semaphore::new(pool_size)),
         });
 
         // Set pool size in metrics
         self.pool_metrics.set_pool_size(pool_size);
 
-        let mut modules = self.modules.write().await;
-        let mut pools = self.instance_pool.write().await;
+        let mut modules = self.modules.write();
+        let mut pools = self.instance_pool.write();
 
         modules.insert(rule_id.clone(), compiled);
         pools.insert(rule_id.clone(), pool);
@@ -833,7 +832,7 @@ impl WasmEngine {
         event: &Event,
     ) -> Result<bool, WasmRuntimeError> {
         let pool = {
-            let pools = self.instance_pool.read().await;
+            let pools = self.instance_pool.read();
             pools.get(rule_id).cloned().ok_or_else(|| {
                 WasmRuntimeError::CompilationError(format!("Module not found: {}", rule_id))
             })?
@@ -846,7 +845,7 @@ impl WasmEngine {
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
 
         let mut instance = {
-            let mut instances = pool.instances.lock().await;
+            let mut instances = pool.instances.lock();
             instances.pop().ok_or_else(|| {
                 WasmRuntimeError::ExecutionError("No available instances in pool".to_string())
             })?
@@ -867,7 +866,7 @@ impl WasmEngine {
         instance.store.data_mut().event = None;
 
         {
-            let mut instances = pool.instances.lock().await;
+            let mut instances = pool.instances.lock();
             instances.push(instance);
         }
         self.pool_metrics.record_release();
@@ -877,12 +876,8 @@ impl WasmEngine {
 
     /// Check if a module is loaded by rule ID.
     pub fn is_module_loaded(&self, rule_id: &str) -> bool {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let pools = self.instance_pool.read().await;
-                pools.contains_key(rule_id)
-            })
-        })
+        let pools = self.instance_pool.read();
+        pools.contains_key(rule_id)
     }
 
     /// Compile and run an ad-hoc Wasm predicate
@@ -903,7 +898,7 @@ impl WasmEngine {
             WasmContext {
                 event: Some(event.clone()),
                 schema: self.schema.clone(),
-                alerts: Arc::new(std::sync::Mutex::new(Vec::new())),
+                alerts: Arc::new(Mutex::new(Vec::new())),
                 regex_cache: self.regex_cache.clone(),
                 glob_cache: self.glob_cache.clone(),
                 rule_metadata: RuleMetadata::new("adhoc", "Ad-hoc Predicate"),
@@ -949,7 +944,7 @@ impl WasmEngine {
         let id = self
             .next_regex_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.regex_cache.write().await;
+        let mut cache = self.regex_cache.write();
         cache.insert(id, re);
         Ok(id)
     }
@@ -964,7 +959,7 @@ impl WasmEngine {
         let id = self
             .next_glob_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.glob_cache.write().await;
+        let mut cache = self.glob_cache.write();
         cache.insert(id, glob);
         Ok(id)
     }
@@ -1056,17 +1051,13 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         let predicate_index: u32 = parts[1].parse().unwrap_or(0);
 
         // Look up required fields from compiled module
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let modules = self.modules.read().await;
-                if let Some(compiled) = modules.get(rule_id) {
-                    if let Some(fields) = compiled.predicate_fields.get(&predicate_index) {
-                        return Ok(fields.clone());
-                    }
-                }
-                Ok(vec![])
-            })
-        })
+        let modules = self.modules.read();
+        if let Some(compiled) = modules.get(rule_id) {
+            if let Some(fields) = compiled.predicate_fields.get(&predicate_index) {
+                return Ok(fields.clone());
+            }
+        }
+        Ok(vec![])
     }
 
     fn has_predicate(&self, predicate_id: &str) -> bool {
@@ -1079,12 +1070,8 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         let rule_id = parts[0];
 
         // Check if the module is loaded
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let pools = self.instance_pool.read().await;
-                pools.contains_key(rule_id)
-            })
-        })
+        let pools = self.instance_pool.read();
+        pools.contains_key(rule_id)
     }
 }
 
