@@ -4,66 +4,9 @@
 //! from the engine layer, enabling better portability and testing.
 
 use std::collections::HashMap;
-use thiserror::Error;
 
-/// Platform capability flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlatformCapability {
-    /// Can trace process execution
-    ProcessTracing,
-    /// Can trace file operations
-    FileTracing,
-    /// Can trace network operations
-    NetworkTracing,
-    /// Can perform inline blocking
-    InlineBlocking,
-    /// Supports LSM hooks
-    LsmHooks,
-    /// Supports kprobes
-    Kprobes,
-    /// Supports tracepoints
-    Tracepoints,
-    /// Supports perf events
-    PerfEvents,
-}
-
-/// Platform information and capabilities
-#[derive(Debug, Clone)]
-pub struct PlatformInfo {
-    /// Platform name (e.g., "linux", "mock")
-    pub name: String,
-    /// Platform version
-    pub version: String,
-    /// Kernel version
-    pub kernel_version: String,
-    /// Supported capabilities
-    pub capabilities: Vec<PlatformCapability>,
-    /// Platform-specific metadata
-    pub metadata: HashMap<String, String>,
-}
-
-impl PlatformInfo {
-    /// Check if a specific capability is supported
-    pub fn has_capability(&self, cap: PlatformCapability) -> bool {
-        self.capabilities.contains(&cap)
-    }
-
-    /// Create mock platform info for testing
-    pub fn mock() -> Self {
-        Self {
-            name: "mock".to_string(),
-            version: "1.0".to_string(),
-            kernel_version: "5.15.0-mock".to_string(),
-            capabilities: vec![
-                PlatformCapability::ProcessTracing,
-                PlatformCapability::FileTracing,
-                PlatformCapability::Kprobes,
-                PlatformCapability::Tracepoints,
-            ],
-            metadata: HashMap::new(),
-        }
-    }
-}
+// Re-export unified platform types from kestrel-schema
+pub use kestrel_schema::{PlatformCapability, PlatformError, PlatformInfo};
 
 /// Event type registry
 ///
@@ -182,24 +125,7 @@ pub trait Platform: Send + Sync {
     fn shutdown(&mut self) -> Result<(), PlatformError>;
 }
 
-/// Platform errors
-#[derive(Debug, Error)]
-pub enum PlatformError {
-    #[error("Capability not supported: {0:?}")]
-    CapabilityNotSupported(PlatformCapability),
 
-    #[error("Platform initialization failed: {0}")]
-    InitializationError(String),
-
-    #[error("Platform shutdown failed: {0}")]
-    ShutdownError(String),
-
-    #[error("Capability probe failed: {0}")]
-    ProbeError(String),
-
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-}
 
 /// Mock platform for testing
 pub struct MockPlatform {

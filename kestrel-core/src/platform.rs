@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use kestrel_event::Event;
 use std::path::PathBuf;
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -22,87 +21,8 @@ use tracing::{info, warn};
 // Platform Capability & Info
 // ============================================================================
 
-/// Platform capability flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlatformCapability {
-    /// Can trace process execution
-    ProcessTracing,
-    /// Can trace file operations
-    FileTracing,
-    /// Can trace network operations
-    NetworkTracing,
-    /// Can perform inline blocking
-    InlineBlocking,
-    /// Supports LSM hooks
-    LsmHooks,
-    /// Supports kprobes
-    Kprobes,
-    /// Supports tracepoints
-    Tracepoints,
-    /// Supports perf events
-    PerfEvents,
-}
-
-/// Platform information and capabilities
-#[derive(Debug, Clone)]
-pub struct PlatformInfo {
-    /// Platform name (e.g., "linux", "macos", "mock")
-    pub name: String,
-    /// Platform version
-    pub version: String,
-    /// Kernel/OS version
-    pub kernel_version: String,
-    /// Supported capabilities
-    pub capabilities: Vec<PlatformCapability>,
-}
-
-impl PlatformInfo {
-    /// Check if a specific capability is supported
-    pub fn has_capability(&self, cap: PlatformCapability) -> bool {
-        self.capabilities.contains(&cap)
-    }
-
-    /// Create mock platform info for testing
-    pub fn mock() -> Self {
-        Self {
-            name: "mock".into(),
-            version: "1.0".into(),
-            kernel_version: "5.15.0-mock".into(),
-            capabilities: vec![
-                PlatformCapability::ProcessTracing,
-                PlatformCapability::FileTracing,
-                PlatformCapability::Kprobes,
-                PlatformCapability::Tracepoints,
-            ],
-        }
-    }
-}
-
-// ============================================================================
-// Errors
-// ============================================================================
-
-/// Platform-related errors
-#[derive(Debug, Error)]
-pub enum PlatformError {
-    #[error("Capability not supported: {0:?}")]
-    CapabilityNotSupported(PlatformCapability),
-
-    #[error("Platform initialization failed: {0}")]
-    InitializationError(String),
-
-    #[error("Platform shutdown failed: {0}")]
-    ShutdownError(String),
-
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    #[error("Event channel closed")]
-    ChannelClosed,
-
-    #[error("Replay error: {0}")]
-    ReplayError(String),
-}
+// Re-export unified platform types from kestrel-schema
+pub use kestrel_schema::{PlatformCapability, PlatformError, PlatformInfo};
 
 // ============================================================================
 // EventCollector Trait
@@ -360,6 +280,7 @@ impl CollectorFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_platform_info_mock() {
@@ -376,6 +297,7 @@ mod tests {
             version: "1.0".into(),
             kernel_version: "5.15.0".into(),
             capabilities: vec![PlatformCapability::LsmHooks, PlatformCapability::Kprobes],
+            metadata: HashMap::new(),
         };
 
         assert!(info.has_capability(PlatformCapability::LsmHooks));

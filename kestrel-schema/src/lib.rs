@@ -5,6 +5,7 @@
 
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 
 mod macros;
@@ -477,6 +478,94 @@ pub struct AlertRecord {
     pub description: Option<String>,
     pub event_handles: Vec<EventHandle>,
     pub fields: AHashMap<String, TypedValue>,
+}
+
+// ============================================================================
+// Platform Types - Unified across core and eBPF crates
+// ============================================================================
+
+/// Capabilities a platform can provide
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlatformCapability {
+    /// Can trace process execution
+    ProcessTracing,
+    /// Can trace file operations
+    FileTracing,
+    /// Can trace network operations
+    NetworkTracing,
+    /// Can perform inline blocking
+    InlineBlocking,
+    /// Supports LSM hooks
+    LsmHooks,
+    /// Supports kprobes
+    Kprobes,
+    /// Supports tracepoints
+    Tracepoints,
+    /// Supports perf events
+    PerfEvents,
+}
+
+/// Platform metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformInfo {
+    /// Platform name (e.g., "linux", "macos", "mock")
+    pub name: String,
+    /// Platform version
+    pub version: String,
+    /// Kernel/OS version
+    pub kernel_version: String,
+    /// Supported capabilities
+    pub capabilities: Vec<PlatformCapability>,
+    /// Platform-specific metadata
+    pub metadata: HashMap<String, String>,
+}
+
+impl PlatformInfo {
+    /// Check if a specific capability is supported
+    pub fn has_capability(&self, cap: PlatformCapability) -> bool {
+        self.capabilities.contains(&cap)
+    }
+
+    /// Create mock platform info for testing
+    pub fn mock() -> Self {
+        Self {
+            name: "mock".into(),
+            version: "1.0".into(),
+            kernel_version: "5.15.0-mock".into(),
+            capabilities: vec![
+                PlatformCapability::ProcessTracing,
+                PlatformCapability::FileTracing,
+                PlatformCapability::Kprobes,
+                PlatformCapability::Tracepoints,
+            ],
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+/// Platform-related errors
+#[derive(Debug, Error)]
+pub enum PlatformError {
+    #[error("Capability not supported: {0:?}")]
+    CapabilityNotSupported(PlatformCapability),
+
+    #[error("Platform initialization failed: {0}")]
+    InitializationError(String),
+
+    #[error("Platform shutdown failed: {0}")]
+    ShutdownError(String),
+
+    #[error("Capability probe failed: {0}")]
+    ProbeError(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Event channel closed")]
+    ChannelClosed,
+
+    #[error("Replay error: {0}")]
+    ReplayError(String),
 }
 
 // ============================================================================

@@ -110,6 +110,7 @@ impl MacOSEventCollector {
                         kestrel_core::PlatformCapability::FileTracing,
                         kestrel_core::PlatformCapability::InlineBlocking,
                     ],
+                    metadata: std::collections::HashMap::new(),
                 },
                 shutdown: None,
                 event_tx: None,

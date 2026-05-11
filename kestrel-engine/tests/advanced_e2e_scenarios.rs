@@ -566,7 +566,12 @@ async fn test_apt_interrupted_sequence_recovery() {
     let e2_timeout = create_event(2, 1502, base + 700_000_000_000, entity); // +700s > 600s maxspan
 
     assert!(engine.process_event_blocking(&e1).unwrap().is_empty());
-    assert!(engine.process_event_blocking(&e2_timeout).unwrap().is_empty()); // Should not complete
+    assert!(
+        engine
+            .process_event_blocking(&e2_timeout)
+            .unwrap()
+            .is_empty()
+    ); // Should not complete
 
     // Second attempt - succeeds
     let e1_retry = create_event(3, 1501, base + 800_000_000_000, entity);

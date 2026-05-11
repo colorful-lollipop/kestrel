@@ -232,7 +232,11 @@ impl Runtime for WasmRuntimeAdapter {
 
     fn has_predicate(&self, predicate_id: &str) -> bool {
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
-        let rule_id = if parts.len() == 2 { parts[0] } else { predicate_id };
+        let rule_id = if parts.len() == 2 {
+            parts[0]
+        } else {
+            predicate_id
+        };
 
         self.inner.is_module_loaded(rule_id)
     }

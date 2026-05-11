@@ -4,11 +4,11 @@
 // //! rule evaluation, alert generation, and enforcement actions.
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use kestrel_core::eventbus::{DefaultPartitioner, Partitioner};
+use kestrel_core::eventbus::{DefaultPartitioner, Partitioner, PublishError};
 use kestrel_core::{
     ActionDecision, ActionExecutor, ActionPolicy, ActionTarget, ActionType, Alert, AlertHandle,
-    AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventBusHandle, EventEvidence,
-    NoOpExecutor, ReplayConfig, ReplaySource, ReplayStats, Severity, TimeManager,
+    AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventBusHandle, NoOpExecutor,
+    ReplayConfig, ReplaySource, ReplayStats, Severity, TimeManager,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
@@ -40,6 +40,12 @@ pub mod runtime;
 pub use runtime::{
     EvalResult, Runtime, RuntimeCapabilities, RuntimeError, RuntimeManager, RuntimeResult,
     RuntimeType,
+};
+
+pub mod processor;
+pub use processor::{
+    CompositeProcessor, EventProcessor, NfaEventProcessor, ProcessResult, ProcessingContext,
+    ProcessorError, SingleEventProcessor, alert_from_sequence_match, alert_from_single_event,
 };
 
 #[cfg(feature = "lua")]
@@ -163,59 +169,6 @@ fn rule_severity_to_severity(severity: RuleSeverity) -> Severity {
     }
 }
 
-/// Create an alert from a sequence match
-fn alert_from_sequence_match(seq_alert: &kestrel_nfa::SequenceAlert) -> Alert {
-    let events: Vec<EventEvidence> = seq_alert
-        .events
-        .iter()
-        .map(|e| EventEvidence {
-            event_type_id: e.event_type_id,
-            timestamp_ns: e.ts_mono_ns,
-            fields: vec![],
-        })
-        .collect();
-
-    let alert_context = serde_json::json!({
-        "sequence_id": seq_alert.sequence_id,
-        "entity_key": seq_alert.entity_key,
-        "captures": seq_alert.captures,
-    });
-
-    Alert {
-        id: format!("{}-{}", seq_alert.rule_id, seq_alert.timestamp_ns),
-        rule_id: seq_alert.rule_id.clone(),
-        rule_name: seq_alert.rule_name.clone(),
-        severity: Severity::High,
-        title: format!("Sequence matched: {}", seq_alert.sequence_id),
-        description: Some(format!(
-            "Entity {} completed sequence {}",
-            seq_alert.entity_key, seq_alert.sequence_id
-        )),
-        timestamp_ns: seq_alert.timestamp_ns,
-        events,
-        context: alert_context,
-    }
-}
-
-/// Create an alert from a single-event rule match
-fn alert_from_single_event(single_rule: &SingleEventRule, event: &Event) -> Alert {
-    Alert {
-        id: format!("{}-{}", single_rule.rule_id, event.ts_mono_ns),
-        rule_id: single_rule.rule_id.clone(),
-        rule_name: single_rule.rule_name.clone(),
-        severity: single_rule.severity,
-        title: format!("Single-event rule matched: {}", single_rule.rule_name),
-        description: single_rule.description.clone(),
-        timestamp_ns: event.ts_mono_ns,
-        events: vec![EventEvidence {
-            event_type_id: event.event_type_id,
-            timestamp_ns: event.ts_mono_ns,
-            fields: vec![],
-        }],
-        context: serde_json::json!({"rule_type": "single_event"}),
-    }
-}
-
 /// Determine action target from event
 fn determine_action_target(event: &Event, schema: &SchemaRegistry) -> ActionTarget {
     let pid = schema
@@ -313,10 +266,7 @@ impl DetectionEngine {
 
         // Initialize schema registry
         let schema = Arc::new(SchemaRegistry::new());
-        kestrel_schema::map_err_string!(
-            register_builtin_linux_schema(schema.as_ref()),
-            EngineError::SchemaError
-        )?;
+        register_builtin_linux_schema(schema.as_ref())?;
         info!("Schema registry initialized");
 
         let (event_sink_tx, event_sink_rx) = mpsc::channel(config.event_bus.channel_size.max(1));
@@ -351,10 +301,7 @@ impl DetectionEngine {
         // Initialize Wasm engine if configured
         #[cfg(feature = "wasm")]
         let wasm_engine = if let Some(wasm_config) = config.wasm_config {
-            let engine = kestrel_schema::map_err_string!(
-                WasmEngine::new(wasm_config, schema.clone()),
-                EngineError::WasmRuntimeError
-            )?;
+            let engine = WasmEngine::new(wasm_config, schema.clone())?;
             info!("Wasm runtime initialized");
             Some(Arc::new(engine))
         } else {
@@ -444,10 +391,8 @@ impl DetectionEngine {
 
     /// Publish an event into the engine pipeline.
     pub async fn publish_event(&self, event: Event) -> Result<(), EngineError> {
-        kestrel_schema::map_err_string!(
-            self.event_bus.handle().publish(event).await,
-            EngineError::EventBusError
-        )
+        self.event_bus.handle().publish(event).await?;
+        Ok(())
     }
 
     /// Cloneable publisher handle for external collectors.
@@ -483,33 +428,23 @@ impl DetectionEngine {
         {
             let compiler_guard = self.eql_compiler.lock().await;
 
-            let compiler = compiler_guard.as_ref().ok_or_else(|| {
-                EngineError::WasmRuntimeError("EQL compiler not initialized".to_string())
-            })?;
+            let compiler = compiler_guard
+                .as_ref()
+                .ok_or_else(|| EngineError::Generic("EQL compiler not initialized".to_string()))?;
 
             let query = compiler
                 .parse(eql)
-                .map_err(|e| EngineError::WasmRuntimeError(format!("EQL parse error: {}", e)))?;
+                .map_err(|e| EngineError::Generic(format!("EQL parse error: {}", e)))?;
 
-            kestrel_schema::map_err_string!(
-                register_builtin_linux_schema(self.schema.as_ref()),
-                EngineError::SchemaError
-            )?;
+            register_builtin_linux_schema(self.schema.as_ref())?;
 
             for event_type in query.event_types() {
                 if self.schema.get_event_type_id(&event_type).is_none() {
-                    self.schema
-                        .register_event_type(EventTypeDef {
-                            name: event_type.clone(),
-                            description: Some(format!("Auto-registered from rule {}", event_type)),
-                            parent: None,
-                        })
-                        .map_err(|e| {
-                            EngineError::WasmRuntimeError(format!(
-                                "Schema registration error: {}",
-                                e
-                            ))
-                        })?;
+                    self.schema.register_event_type(EventTypeDef {
+                        name: event_type.clone(),
+                        description: Some(format!("Auto-registered from rule {}", event_type)),
+                        parent: None,
+                    })?;
                 }
             }
         }
@@ -571,19 +506,20 @@ impl DetectionEngine {
 
         self.ensure_event_types_registered(&definition).await?;
 
-        let wasm_engine = self.wasm_engine.as_ref().ok_or_else(|| {
-            EngineError::WasmRuntimeError("Wasm engine not initialized".to_string())
-        })?;
+        let wasm_engine = self
+            .wasm_engine
+            .as_ref()
+            .ok_or_else(|| EngineError::Generic("Wasm engine not initialized".to_string()))?;
 
         let ir = {
             let mut compiler_guard = self.eql_compiler.lock().await;
-            let compiler = compiler_guard.as_mut().ok_or_else(|| {
-                EngineError::WasmRuntimeError("EQL compiler not initialized".to_string())
-            })?;
+            let compiler = compiler_guard
+                .as_mut()
+                .ok_or_else(|| EngineError::Generic("EQL compiler not initialized".to_string()))?;
 
-            compiler.compile_to_ir(&definition).map_err(|e| {
-                EngineError::WasmRuntimeError(format!("EQL compilation error: {}", e))
-            })?
+            compiler
+                .compile_to_ir(&definition)
+                .map_err(|e| EngineError::Generic(format!("EQL compilation error: {}", e)))?
         };
         let predicate_indices = Self::predicate_indices(&ir);
 
@@ -598,32 +534,30 @@ impl DetectionEngine {
         let mut wasm_generator = WasmCodeGenerator::new();
         let wat = wasm_generator
             .generate(&ir)
-            .map_err(|e| EngineError::WasmRuntimeError(format!("Wasm codegen error: {}", e)))?;
+            .map_err(|e| EngineError::Generic(format!("Wasm codegen error: {}", e)))?;
         let wasm_bytes = wat::parse_str(&wat)
-            .map_err(|e| EngineError::WasmRuntimeError(format!("WAT parsing error: {}", e)))?;
+            .map_err(|e| EngineError::Generic(format!("WAT parsing error: {}", e)))?;
 
-        kestrel_schema::map_err_string!(
-            wasm_engine
-                .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone(), predicate_fields)
-                .await,
-            EngineError::WasmRuntimeError
-        )?;
+        wasm_engine
+            .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone(), predicate_fields)
+            .await?;
 
         match &ir.rule_type {
             IrRuleType::Event { event_type } => {
                 let event_type_id = self.schema.get_event_type_id(event_type).ok_or_else(|| {
-                    EngineError::WasmRuntimeError(format!(
+                    EngineError::Generic(format!(
                         "Event type '{}' not registered in schema",
                         event_type
                     ))
                 })?;
 
-                let predicate = ir.predicates.get("main").ok_or_else(|| {
-                    EngineError::WasmRuntimeError("No main predicate found".to_string())
-                })?;
+                let predicate = ir
+                    .predicates
+                    .get("main")
+                    .ok_or_else(|| EngineError::Generic("No main predicate found".to_string()))?;
 
                 let predicate_index = *predicate_indices.get("main").ok_or_else(|| {
-                    EngineError::WasmRuntimeError("Main predicate index not found".to_string())
+                    EngineError::Generic("Main predicate index not found".to_string())
                 })?;
 
                 let single_rule = SingleEventRule {
@@ -669,10 +603,7 @@ impl DetectionEngine {
         predicate_indices: &HashMap<String, u32>,
     ) -> Result<CompiledSequence, EngineError> {
         let sequence = ir.sequence.as_ref().ok_or_else(|| {
-            EngineError::NfaError(format!(
-                "Missing sequence metadata for rule {}",
-                rule.metadata.id
-            ))
+            EngineError::Generic(format!("Missing sequence metadata for rule {}", rule.metadata.id))
         })?;
 
         let steps = sequence
@@ -683,14 +614,14 @@ impl DetectionEngine {
                     .schema
                     .get_event_type_id(&step.event_type_name)
                     .ok_or_else(|| {
-                        EngineError::NfaError(format!(
+                        EngineError::Generic(format!(
                             "Event type '{}' is not registered for rule {}",
                             step.event_type_name, rule.metadata.id
                         ))
                     })?;
                 let predicate_index =
                     predicate_indices.get(&step.predicate_id).ok_or_else(|| {
-                        EngineError::NfaError(format!(
+                        EngineError::Generic(format!(
                             "Predicate '{}' is not indexed for rule {}",
                             step.predicate_id, rule.metadata.id
                         ))
@@ -709,13 +640,13 @@ impl DetectionEngine {
             .as_ref()
             .map(|predicate_id| {
                 let predicate = ir.predicates.get(predicate_id).ok_or_else(|| {
-                    EngineError::NfaError(format!(
+                    EngineError::Generic(format!(
                         "Until predicate '{}' not found for rule {}",
                         predicate_id, rule.metadata.id
                     ))
                 })?;
                 let predicate_index = predicate_indices.get(predicate_id).ok_or_else(|| {
-                    EngineError::NfaError(format!(
+                    EngineError::Generic(format!(
                         "Until predicate '{}' missing index for rule {}",
                         predicate_id, rule.metadata.id
                     ))
@@ -724,7 +655,7 @@ impl DetectionEngine {
                     .schema
                     .get_event_type_id(&predicate.event_type)
                     .ok_or_else(|| {
-                        EngineError::NfaError(format!(
+                        EngineError::Generic(format!(
                             "Until event type '{}' not registered for rule {}",
                             predicate.event_type, rule.metadata.id
                         ))
@@ -771,17 +702,15 @@ impl DetectionEngine {
                         Ok(output) => output,
                         Err(error) => {
                             error!(rule_id = %rule.metadata.id, %error, "Failed to compile rule");
-                            self.errors_count
-                                .fetch_add(1, Ordering::Relaxed);
+                            self.errors_count.fetch_add(1, Ordering::Relaxed);
                             None
-                        }
+                        },
                     },
                     None => {
                         error!(%rule_id, "Rule not found");
-                        self.errors_count
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.errors_count.fetch_add(1, Ordering::Relaxed);
                         None
-                    }
+                    },
                 }
             })
             .buffer_unordered(8)
@@ -794,14 +723,14 @@ impl DetectionEngine {
             match output {
                 Some(CompileOutput::SingleEvent(rule)) => {
                     single_rules.push(rule);
-                }
+                },
                 Some(CompileOutput::Sequence(seq)) => {
                     if let Err(e) = self.load_sequence(seq).await {
                         error!(error = %e, "Failed to load sequence");
                         self.errors_count.fetch_add(1, Ordering::Relaxed);
                     }
-                }
-                None => {}
+                },
+                None => {},
             }
         }
 
@@ -846,7 +775,7 @@ impl DetectionEngine {
         }
 
         let mut receiver = self.event_batch_rx.lock().await.take().ok_or_else(|| {
-            EngineError::EventBusError("Event batch receiver not available".to_string())
+            EngineError::Generic("Event batch receiver not available".to_string())
         })?;
 
         let single_event_rules = self.single_event_rules.clone();
@@ -1000,7 +929,7 @@ impl DetectionEngine {
                     .clone()
                     .acquire_owned()
                     .await
-                    .map_err(|e| EngineError::EventBusError(format!("semaphore error: {e}")))?;
+                    .map_err(|e| EngineError::Generic(format!("semaphore error: {e}")))?;
                 let rule = single_rule.clone();
                 let wasm_engine = wasm_engine.clone();
                 evaluations.push(async move {
@@ -1012,7 +941,7 @@ impl DetectionEngine {
                             ..
                         } => {
                             let wasm_engine = wasm_engine.ok_or_else(|| {
-                                EngineError::WasmRuntimeError(
+                                EngineError::Generic(
                                     "Wasm engine not initialized for Wasm predicate".to_string(),
                                 )
                             })?;
@@ -1025,6 +954,7 @@ impl DetectionEngine {
                             .await?
                         },
                         CompiledPredicate::AlwaysMatch => true,
+                        #[cfg(feature = "lua")]
                         CompiledPredicate::Lua { .. } => false,
                     };
 
@@ -1038,7 +968,12 @@ impl DetectionEngine {
                     continue;
                 }
 
-                alerts.push(alert_from_single_event(&single_rule, event));
+                alerts.push(alert_from_single_event(
+                    &single_rule.rule_id,
+                    &single_rule.rule_name,
+                    event,
+                    single_rule.severity,
+                ));
                 context
                     .alerts_generated
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1092,29 +1027,19 @@ impl DetectionEngine {
         predicate_index: u32,
         event: &Event,
     ) -> Result<bool, EngineError> {
-        kestrel_schema::map_err_string!(
-            wasm_engine
-                .eval_loaded_predicate(module_id, predicate_index, event)
-                .await,
-            EngineError::WasmRuntimeError
-        )
+        Ok(wasm_engine
+            .eval_loaded_predicate(module_id, predicate_index, event)
+            .await?)
     }
 
-    async fn with_nfa_engines<F>(
-        &self,
-        mut f: F,
-    ) -> Result<(), EngineError>
+    async fn with_nfa_engines<F>(&self, mut f: F) -> Result<(), EngineError>
     where
         F: FnMut(usize, &mut NfaEngine) -> Result<(), kestrel_nfa::NfaError>,
     {
         for (partition_id, nfa_engine) in self.nfa_engines.iter().enumerate() {
             let mut guard = nfa_engine.lock().await;
             if let Some(engine) = guard.as_mut() {
-                f(partition_id, engine).map_err(|e| {
-                    EngineError::NfaError(format!(
-                        "partition {partition_id} operation failed: {e}"
-                    ))
-                })?;
+                f(partition_id, engine)?;
             }
         }
         Ok(())
@@ -1122,10 +1047,8 @@ impl DetectionEngine {
 
     /// Load a compiled sequence into the NFA engine
     pub async fn load_sequence(&self, sequence: CompiledSequence) -> Result<(), EngineError> {
-        self.with_nfa_engines(|_partition_id, engine| {
-            engine.load_sequence(sequence.clone())
-        })
-        .await
+        self.with_nfa_engines(|_partition_id, engine| engine.load_sequence(sequence.clone()))
+            .await
     }
 
     /// Unload a compiled sequence from every partitioned NFA engine.
@@ -1161,26 +1084,40 @@ pub struct EngineStats {
 /// Engine errors
 #[derive(Debug, Error)]
 pub enum EngineError {
-    #[error("Rule manager error: {0}")]
+    #[error("Event bus error")]
+    EventBusError(#[from] PublishError),
+
+    #[cfg(feature = "wasm")]
+    #[error("Wasm runtime error")]
+    WasmRuntimeError(#[from] kestrel_runtime_wasm::WasmRuntimeError),
+
+    #[cfg(feature = "lua")]
+    #[error("Lua runtime error")]
+    LuaRuntimeError(#[from] kestrel_runtime_lua::LuaRuntimeError),
+
+    #[error("NFA error")]
+    NfaError(#[from] kestrel_nfa::NfaError),
+
+    #[error("Rule manager error")]
     RuleManagerError(#[from] kestrel_rules::RuleManagerError),
 
-    #[error("Event bus error: {0}")]
-    EventBusError(String),
+    #[error("Schema error")]
+    SchemaError(#[from] kestrel_schema::SchemaError),
 
-    #[error("Alert output error: {0}")]
-    AlertOutputError(String),
+    #[error("Platform error")]
+    PlatformError(#[from] kestrel_core::PlatformError),
 
-    #[error("Wasm runtime error: {0}")]
-    WasmRuntimeError(String),
-
-    #[error("NFA error: {0}")]
-    NfaError(String),
-
-    #[error("Schema error: {0}")]
-    SchemaError(String),
-
-    #[error("Replay error: {0}")]
+    #[error("Replay error")]
     ReplayError(#[from] kestrel_core::ReplayError),
+
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+
+    #[error("IO error")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Generic error: {0}")]
+    Generic(String),
 }
 
 #[cfg(test)]
@@ -1323,7 +1260,10 @@ mod tests {
 
         for partition_engine in &engine.nfa_engines {
             let mut guard = partition_engine.lock().await;
-            *guard = Some(NfaEngine::new(NfaEngineConfig::default(), Arc::new(TestMockEvaluator { result: true })));
+            *guard = Some(NfaEngine::new(
+                NfaEngineConfig::default(),
+                Arc::new(TestMockEvaluator { result: true }),
+            ));
         }
 
         engine
@@ -1463,10 +1403,7 @@ mod tests {
             .ts_wall(1)
             .entity_key(999)
             .field(pid_field, kestrel_schema::TypedValue::U64(4242))
-            .field(
-                destination_field,
-                kestrel_schema::TypedValue::String("192.168.1.10".into()),
-            )
+            .field(destination_field, kestrel_schema::TypedValue::String("192.168.1.10".into()))
             .field(port_field, kestrel_schema::TypedValue::U64(443))
             .build()
             .unwrap();
@@ -1536,10 +1473,7 @@ mod tests {
         });
 
         engine.start().await.unwrap();
-        engine
-            .publish_event(test_event(1, 42, 1000))
-            .await
-            .unwrap();
+        engine.publish_event(test_event(1, 42, 1000)).await.unwrap();
 
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
