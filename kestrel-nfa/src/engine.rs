@@ -246,8 +246,14 @@ impl NfaEngine {
 
         let mut alerts = Vec::with_capacity(16);
 
-        // TODO: Parallelize sequence evaluation. Currently sequential because
-        // process_sequence_event_optimized takes &mut self.
+        // TODO: Parallelize sequence evaluation.
+        // process_sequence_event_optimized takes &mut self because it updates state_store.
+        // To parallelize:
+        //   Phase 1 (parallel, read-only): For each sequence, evaluate predicates
+        //     and determine matching steps. Collect (sequence_id, step, entity_key) tuples.
+        //   Phase 2 (sequential, write): Apply state transitions in order.
+        //   This requires splitting process_sequence_event_optimized into
+        //   process_sequence_event_read() and process_sequence_event_write().
         for seq_id in &relevant_sequence_ids {
             let seq_id_str = seq_id.as_ref();
             if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id_str) {

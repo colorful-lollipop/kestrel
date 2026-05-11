@@ -17,6 +17,7 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }
+parking_lot = "0.12"
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-nfa = { path = "../kestrel-nfa" }

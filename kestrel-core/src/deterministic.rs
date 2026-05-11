@@ -8,15 +8,12 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info};
 
 use crate::alert::Alert;
-use crate::replay::BinaryLog;
+use crate::replay::JsonLog;
 
 /// Recorded replay results: list of (event_id, alerts) pairs
 type RecordedResults = Arc<Mutex<Vec<(u64, Vec<Alert>)>>>;
 
 pub struct DeterministicVerifier {
-    /// Schema registry for type information (reserved for future use)
-    #[allow(dead_code)]
-    schema: Arc<SchemaRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,8 +62,8 @@ pub struct ReplayVerificationReport {
 }
 
 impl DeterministicVerifier {
-    pub fn new(schema: Arc<SchemaRegistry>) -> Self {
-        Self { schema }
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub async fn verify_determinism<F>(
@@ -134,8 +131,7 @@ impl DeterministicVerifier {
         log_path: PathBuf,
         run_detection: impl Fn(&Event) -> Vec<Alert>,
     ) -> Result<ReplayVerificationResult, Box<dyn std::error::Error>> {
-        let schema = self.schema.clone();
-        let binary_log = BinaryLog::new(schema);
+        let binary_log = JsonLog::new(Arc::new(SchemaRegistry::new()));
         let events = binary_log.read_events(log_path)?;
 
         if events.is_empty() {
@@ -233,9 +229,6 @@ impl Default for ReplayVerificationReport {
 }
 
 pub struct ReplaySource {
-    /// Binary log for replay (reserved for future use)
-    #[allow(dead_code)]
-    log: BinaryLog,
     events: Vec<Event>,
     current_index: usize,
     pub verification_enabled: bool,
@@ -245,12 +238,10 @@ pub struct ReplaySource {
 
 impl ReplaySource {
     pub fn with_verification(
-        log: BinaryLog,
         events: Vec<Event>,
         expected_results: HashMap<u64, Vec<Alert>>,
     ) -> Self {
         Self {
-            log,
             events,
             current_index: 0,
             verification_enabled: true,
@@ -339,16 +330,12 @@ impl ReplaySource {
 }
 
 pub struct DeterministicTestRunner {
-    /// Schema registry for type information (reserved for future use)
-    #[allow(dead_code)]
-    schema: Arc<SchemaRegistry>,
     results: Arc<RwLock<Vec<DeterministicResult>>>,
 }
 
 impl DeterministicTestRunner {
-    pub fn new(schema: Arc<SchemaRegistry>) -> Self {
+    pub fn new() -> Self {
         Self {
-            schema,
             results: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -362,7 +349,7 @@ impl DeterministicTestRunner {
     where
         F: Fn(&[Event]) -> Vec<Alert>,
     {
-        let verifier = DeterministicVerifier::new(self.schema.clone());
+        let verifier = DeterministicVerifier::new();
         let result = verifier.verify_determinism(events, run_detection).await?;
 
         let is_consistent = result.consistent;
@@ -444,8 +431,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deterministic_verifier() {
-        let schema = Arc::new(SchemaRegistry::new());
-        let verifier = DeterministicVerifier::new(schema);
+        let verifier = DeterministicVerifier::new();
 
         let events = create_test_events(20);
         let result = verifier.verify_determinism(&events, run_detection).await;
@@ -458,8 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_test_sequence() {
-        let schema = Arc::new(SchemaRegistry::new());
-        let verifier = DeterministicVerifier::new(schema);
+        let verifier = DeterministicVerifier::new();
 
         let events = verifier.generate_test_sequence(15, 2_000_000_000);
 
@@ -482,8 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deterministic_test_runner() {
-        let schema = Arc::new(SchemaRegistry::new());
-        let runner = DeterministicTestRunner::new(schema);
+        let runner = DeterministicTestRunner::new();
 
         let events = create_test_events(10);
         let result = runner

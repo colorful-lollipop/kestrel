@@ -237,7 +237,8 @@ impl EbpfExecutor {
             action_executor,
             config,
             decision_cache: Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(decision_cache_size).unwrap(),
+                NonZeroUsize::new(decision_cache_size.max(1))
+                    .expect("decision_cache_size.max(1) is always non-zero"),
             ))),
             rate_limiter: Arc::new(RateLimiter::new(max_decisions_per_second)),
             metrics: Arc::new(RwLock::new(EbpfExecutorMetrics::default())),
@@ -736,15 +737,15 @@ use std::num::NonZeroUsize;
 fn now_ns() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
 }
 
 fn now_sec() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 trait EntityKeyExtractor {

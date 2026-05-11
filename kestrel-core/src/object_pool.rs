@@ -4,7 +4,7 @@
 //! in hot paths. This is particularly useful for event processing
 //! where we need to allocate Vecs and other collections frequently.
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A simple object pool for reusable objects
@@ -51,7 +51,7 @@ impl<T: Default> ObjectPool<T> {
     /// Returns the object and a guard that returns it to the pool when dropped.
     pub fn acquire(&self) -> PooledObject<'_, T> {
         let obj = {
-            let mut pool = self.pool.lock().unwrap();
+            let mut pool = self.pool.lock();
             if let Some(obj) = pool.pop() {
                 self.current_size.fetch_sub(1, Ordering::Relaxed);
                 self.total_reused.fetch_add(1, Ordering::Relaxed);
@@ -73,7 +73,7 @@ impl<T: Default> ObjectPool<T> {
     ///
     /// Returns None if the pool lock is poisoned.
     pub fn try_acquire(&self) -> Option<PooledObject<'_, T>> {
-        let mut pool = self.pool.lock().ok()?;
+        let mut pool = self.pool.lock();
         if let Some(obj) = pool.pop() {
             drop(pool);
             self.current_size.fetch_sub(1, Ordering::Relaxed);
@@ -95,19 +95,14 @@ impl<T: Default> ObjectPool<T> {
     /// Return an object to the pool
     ///
     /// If the pool is at capacity, the object is dropped.
-    fn release(&self, _obj: T) {
-        // Only keep objects if we're under the max size
+    fn release(&self, obj: T) {
         let current = self.current_size.load(Ordering::Relaxed);
         if current < self.max_size {
-            // Create a fresh default object for the pool
-            let obj = T::default();
-
-            if let Ok(mut pool) = self.pool.lock() {
-                pool.push(obj);
-                self.current_size.fetch_add(1, Ordering::Relaxed);
-            }
+            let mut pool = self.pool.lock();
+            pool.push(obj);
+            self.current_size.fetch_add(1, Ordering::Relaxed);
         }
-        // If at capacity, _obj is dropped when it goes out of scope
+        // If at capacity, obj is dropped when it goes out of scope
     }
 
     /// Get pool metrics

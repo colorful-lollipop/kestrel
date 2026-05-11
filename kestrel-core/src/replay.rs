@@ -159,13 +159,13 @@ impl From<kestrel_schema::TypedValue> for SerializedValue {
 ///
 /// Stores events in a JSON-based format for compatibility and debugging.
 /// In production, would use more efficient binary serialization.
-pub struct BinaryLog {
+pub struct JsonLog {
     /// Schema registry for type information (reserved for future use)
     #[allow(dead_code)]
     schema: Arc<SchemaRegistry>,
 }
 
-impl BinaryLog {
+impl JsonLog {
     /// Create a new binary log instance
     pub fn new(schema: Arc<SchemaRegistry>) -> Self {
         Self { schema }
@@ -395,7 +395,7 @@ impl ReplaySource {
     pub async fn start(&mut self, event_bus: &EventBus) -> Result<usize, ReplayError> {
         info!(path = %self.config.log_path.display(), "Starting replay");
 
-        let binary_log = BinaryLog::new(self.schema.clone());
+        let binary_log = JsonLog::new(self.schema.clone());
         let mut events = binary_log.read_events(self.config.log_path.clone())?;
 
         if events.is_empty() {
@@ -488,7 +488,7 @@ impl ReplaySource {
         F: Fn(&Event) -> T,
         T: PartialEq + std::fmt::Debug + Clone + serde::Serialize,
     {
-        let binary_log = BinaryLog::new(self.schema.clone());
+        let binary_log = JsonLog::new(self.schema.clone());
         let events = binary_log.read_events(self.config.log_path.clone())?;
 
         if events.is_empty() {
@@ -542,7 +542,7 @@ impl ReplaySource {
     where
         F: Fn(&Event) -> T,
     {
-        let binary_log = BinaryLog::new(self.schema.clone());
+        let binary_log = JsonLog::new(self.schema.clone());
         let events = binary_log.read_events(self.config.log_path.clone())?;
 
         let mut results = Vec::new();
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn test_binary_log_empty() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema);
+        let log = JsonLog::new(schema);
         let events = vec![];
 
         let temp_dir = std::env::temp_dir();
@@ -763,7 +763,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_multiple_times_consistent() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events = create_test_events(50);
 
@@ -808,7 +808,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_with_mock_time_synchronization() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let start_ts = 1000000000u64;
         let events: Vec<Event> = (0..10)
@@ -852,7 +852,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_event_ordering_deterministic() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events: Vec<Event> = (0..20)
             .map(|i| {
@@ -895,7 +895,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_speed_multiplier_affects_timing() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events: Vec<Event> = (0..5)
             .map(|i| {
@@ -977,7 +977,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_with_verification_run() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events: Vec<Event> = (0..10)
             .map(|i| {
@@ -1033,7 +1033,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_and_collect() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events: Vec<Event> = (0..5)
             .map(|i| {
@@ -1081,7 +1081,7 @@ mod tests {
     #[tokio::test]
     async fn test_replay_reset() {
         let schema = create_test_schema();
-        let log = BinaryLog::new(schema.clone());
+        let log = JsonLog::new(schema.clone());
 
         let events: Vec<Event> = (0..5)
             .map(|i| {

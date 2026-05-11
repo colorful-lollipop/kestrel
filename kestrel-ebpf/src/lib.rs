@@ -98,8 +98,8 @@ impl EnforcementDecision {
             ttl_ns,
             timestamp_ns: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64,
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0),
         }
     }
 }

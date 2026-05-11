@@ -181,12 +181,41 @@ impl WasmRuntimeAdapter {
 #[cfg(feature = "wasm")]
 #[async_trait::async_trait]
 impl Runtime for WasmRuntimeAdapter {
-    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> RuntimeResult<EvalResult> {
-        // For now, use ad-hoc evaluation as the primary method
-        // In production, you'd want to check if the module is loaded first
-        Err(RuntimeError::NotAvailable(
-            "Direct predicate evaluation not implemented for Wasm adapter".to_string(),
-        ))
+    async fn evaluate(&self, predicate_id: &str, event: &Event) -> RuntimeResult<EvalResult> {
+        let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
+        let (rule_id, predicate_index) = if parts.len() == 2 {
+            let index = parts[1].parse::<u32>().map_err(|_| {
+                RuntimeError::PredicateNotFound(format!(
+                    "Invalid predicate index in '{}'",
+                    predicate_id
+                ))
+            })?;
+            (parts[0], index)
+        } else {
+            (predicate_id, 0)
+        };
+
+        if !self.has_predicate(predicate_id) {
+            return Err(RuntimeError::NotAvailable(format!(
+                "Predicate '{}' not loaded in Wasm runtime",
+                predicate_id
+            )));
+        }
+
+        match self
+            .inner
+            .eval_loaded_predicate(rule_id, predicate_index, event)
+            .await
+        {
+            Ok(matched) => {
+                if matched {
+                    Ok(EvalResult::matched())
+                } else {
+                    Ok(EvalResult::not_matched())
+                }
+            },
+            Err(e) => Err(RuntimeError::ExecutionError(e.to_string())),
+        }
     }
 
     async fn evaluate_adhoc(&self, bytes: &[u8], event: &Event) -> RuntimeResult<EvalResult> {
@@ -201,10 +230,11 @@ impl Runtime for WasmRuntimeAdapter {
         Ok(vec![])
     }
 
-    fn has_predicate(&self, _predicate_id: &str) -> bool {
-        // Check if module exists in the engine
-        // This is a simplified check - in production, you'd want a proper API
-        true
+    fn has_predicate(&self, predicate_id: &str) -> bool {
+        let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
+        let rule_id = if parts.len() == 2 { parts[0] } else { predicate_id };
+
+        self.inner.is_module_loaded(rule_id)
     }
 
     async fn load_predicate(&self, predicate_id: &str, bytes: &[u8]) -> RuntimeResult<()> {

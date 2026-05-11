@@ -1,11 +1,6 @@
 use kestrel_core::{DeterministicTestRunner, DeterministicVerifier, ReplayVerificationReport};
 use kestrel_event::Event;
-use kestrel_schema::{SchemaRegistry, TypedValue};
-use std::sync::Arc;
-
-fn create_test_schema() -> Arc<SchemaRegistry> {
-    Arc::new(SchemaRegistry::new())
-}
+use kestrel_schema::TypedValue;
 
 fn create_test_events(count: usize) -> Vec<Event> {
     let mut events = Vec::new();
@@ -31,8 +26,7 @@ fn empty_alerts(_events: &[Event]) -> Vec<kestrel_core::Alert> {
 
 #[tokio::test]
 async fn test_deterministic_verifier_basic() {
-    let schema = create_test_schema();
-    let verifier = DeterministicVerifier::new(schema);
+    let verifier = DeterministicVerifier::new();
 
     let events = create_test_events(30);
     let result = verifier.verify_determinism(&events, empty_alerts).await;
@@ -45,8 +39,7 @@ async fn test_deterministic_verifier_basic() {
 
 #[tokio::test]
 async fn test_deterministic_verifier_empty_events() {
-    let schema = create_test_schema();
-    let verifier = DeterministicVerifier::new(schema);
+    let verifier = DeterministicVerifier::new();
 
     let events: Vec<Event> = vec![];
     let result = verifier.verify_determinism(&events, empty_alerts).await;
@@ -59,8 +52,7 @@ async fn test_deterministic_verifier_empty_events() {
 
 #[tokio::test]
 async fn test_generate_test_sequence() {
-    let schema = create_test_schema();
-    let verifier = DeterministicVerifier::new(schema);
+    let verifier = DeterministicVerifier::new();
 
     let events = verifier.generate_test_sequence(15, 2_000_000_000);
 
@@ -74,8 +66,7 @@ async fn test_generate_test_sequence() {
 
 #[tokio::test]
 async fn test_deterministic_test_runner() {
-    let schema = create_test_schema();
-    let runner = DeterministicTestRunner::new(schema);
+    let runner = DeterministicTestRunner::new();
 
     let events = create_test_events(25);
     let result = runner
@@ -91,8 +82,7 @@ async fn test_deterministic_test_runner() {
 
 #[tokio::test]
 async fn test_deterministic_test_runner_multiple_tests() {
-    let schema = create_test_schema();
-    let runner = DeterministicTestRunner::new(schema);
+    let runner = DeterministicTestRunner::new();
 
     let events1 = create_test_events(10);
     let events2 = create_test_events(20);
@@ -114,8 +104,7 @@ async fn test_deterministic_test_runner_multiple_tests() {
 
 #[tokio::test]
 async fn test_deterministic_test_runner_clear() {
-    let schema = create_test_schema();
-    let runner = DeterministicTestRunner::new(schema);
+    let runner = DeterministicTestRunner::new();
 
     let events = create_test_events(10);
     let _ = runner
@@ -217,8 +206,7 @@ async fn test_verification_mismatch() {
 
 #[tokio::test]
 async fn test_deterministic_timing_consistency() {
-    let schema = create_test_schema();
-    let verifier = DeterministicVerifier::new(schema);
+    let verifier = DeterministicVerifier::new();
 
     let events = create_test_events(50);
     let result = verifier
@@ -231,8 +219,7 @@ async fn test_deterministic_timing_consistency() {
 
 #[tokio::test]
 async fn test_deterministic_alert_count_stability() {
-    let schema = create_test_schema();
-    let verifier = DeterministicVerifier::new(schema);
+    let verifier = DeterministicVerifier::new();
 
     let events: Vec<Event> = (0..100)
         .map(|i| {

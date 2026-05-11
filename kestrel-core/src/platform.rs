@@ -274,9 +274,9 @@ impl EventCollector for ReplayEventCollector {
     async fn start(&mut self, event_tx: mpsc::Sender<Event>) -> Result<(), PlatformError> {
         let log_path = self.log_path.clone();
 
-        // Use the existing BinaryLog infrastructure to read events
+        // Use the existing JsonLog infrastructure to read events
         let schema = Arc::new(kestrel_schema::SchemaRegistry::new());
-        let binary_log = crate::BinaryLog::new(schema);
+        let binary_log = crate::JsonLog::new(schema);
 
         let events = binary_log
             .read_events(log_path.clone())

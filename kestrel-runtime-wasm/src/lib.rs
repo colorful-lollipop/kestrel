@@ -869,6 +869,16 @@ impl WasmEngine {
         result
     }
 
+    /// Check if a module is loaded by rule ID.
+    pub fn is_module_loaded(&self, rule_id: &str) -> bool {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let pools = self.instance_pool.read().await;
+                pools.contains_key(rule_id)
+            })
+        })
+    }
+
     /// Compile and run an ad-hoc Wasm predicate
     pub async fn eval_adhoc_predicate(
         &self,

@@ -25,7 +25,7 @@ pub use action::{
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle, EventBusMetricsSnapshot};
-pub use replay::{BinaryLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
+pub use replay::{JsonLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
 pub use time::{MockTimeProvider, RealTimeProvider, TimeManager, TimeProvider};
 
 pub use deterministic::{

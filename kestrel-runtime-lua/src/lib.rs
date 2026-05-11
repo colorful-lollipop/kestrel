@@ -6,7 +6,8 @@
 use ahash::AHashMap;
 use anyhow::Result;
 use mlua::{Function, Lua, RegistryKey};
-use std::sync::{Arc, RwLock as StdRwLock};
+use parking_lot::RwLock;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info};
 
@@ -65,15 +66,15 @@ pub struct LuaEngine {
     lua: Arc<Lua>,
     config: LuaConfig,
     _schema: Arc<SchemaRegistry>,
-    predicates: Arc<StdRwLock<AHashMap<String, LuaPredicate>>>,
-    regex_cache: Arc<StdRwLock<AHashMap<RegexId, regex::Regex>>>,
-    glob_cache: Arc<StdRwLock<AHashMap<GlobId, glob::Pattern>>>,
+    predicates: Arc<RwLock<AHashMap<String, LuaPredicate>>>,
+    regex_cache: Arc<RwLock<AHashMap<RegexId, regex::Regex>>>,
+    glob_cache: Arc<RwLock<AHashMap<GlobId, glob::Pattern>>>,
     next_regex_id: Arc<std::sync::atomic::AtomicU32>,
     next_glob_id: Arc<std::sync::atomic::AtomicU32>,
     /// Current event (wrapped in Arc for thread-safe access)
-    current_event: Arc<StdRwLock<Option<Event>>>,
+    current_event: Arc<RwLock<Option<Event>>>,
     /// Alert collector (stores emitted alerts)
-    current_alerts: Arc<StdRwLock<Vec<EventHandle>>>,
+    current_alerts: Arc<RwLock<Vec<EventHandle>>>,
 }
 
 /// Loaded Lua predicate
@@ -129,13 +130,13 @@ impl LuaEngine {
             lua: Arc::new(lua),
             config,
             _schema: schema,
-            predicates: Arc::new(StdRwLock::new(AHashMap::new())),
-            regex_cache: Arc::new(StdRwLock::new(AHashMap::new())),
-            glob_cache: Arc::new(StdRwLock::new(AHashMap::new())),
+            predicates: Arc::new(RwLock::new(AHashMap::new())),
+            regex_cache: Arc::new(RwLock::new(AHashMap::new())),
+            glob_cache: Arc::new(RwLock::new(AHashMap::new())),
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
-            current_event: Arc::new(StdRwLock::new(None)),
-            current_alerts: Arc::new(StdRwLock::new(Vec::new())),
+            current_event: Arc::new(RwLock::new(None)),
+            current_alerts: Arc::new(RwLock::new(Vec::new())),
         };
 
         // Register Host API functions
@@ -163,7 +164,7 @@ impl LuaEngine {
         let event_ref = current_event.clone();
         let event_get_i64 = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
-                let event_guard = event_ref.read().unwrap();
+                let event_guard = event_ref.read();
                 if let Some(event) = event_guard.as_ref() {
                     let value = event.get_field(field_id);
                     match value {
@@ -192,7 +193,7 @@ impl LuaEngine {
         let event_ref = current_event.clone();
         let event_get_u64 = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
-                let event_guard = event_ref.read().unwrap();
+                let event_guard = event_ref.read();
                 if let Some(event) = event_guard.as_ref() {
                     let value = event.get_field(field_id);
                     match value {
@@ -221,7 +222,7 @@ impl LuaEngine {
         let event_ref = current_event.clone();
         let event_get_str = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
-                let event_guard = event_ref.read().unwrap();
+                let event_guard = event_ref.read();
                 if let Some(event) = event_guard.as_ref() {
                     let value = event.get_field(field_id);
                     match value {
@@ -242,7 +243,7 @@ impl LuaEngine {
         let event_ref = current_event.clone();
         let event_get_bool = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
-                let event_guard = event_ref.read().unwrap();
+                let event_guard = event_ref.read();
                 if let Some(event) = event_guard.as_ref() {
                     let value = event.get_field(field_id);
                     match value {
@@ -265,7 +266,7 @@ impl LuaEngine {
         let re_cache = regex_cache.clone();
         let re_match = lua
             .create_function(move |_lua, (re_id, text): (u32, String)| {
-                let cache = re_cache.read().unwrap();
+                let cache = re_cache.read();
                 if let Some(re) = cache.get(&re_id) {
                     Ok(re.is_match(&text))
                 } else {
@@ -282,7 +283,7 @@ impl LuaEngine {
         let g_cache = glob_cache.clone();
         let glob_match = lua
             .create_function(move |_lua, (glob_id, text): (u32, String)| {
-                let cache = g_cache.read().unwrap();
+                let cache = g_cache.read();
                 if let Some(pattern) = cache.get(&glob_id) {
                     Ok(pattern.matches(&text))
                 } else {
@@ -299,7 +300,7 @@ impl LuaEngine {
         let alerts_ref = current_alerts.clone();
         let alert_emit = lua
             .create_function(move |_lua, event_handle: u32| {
-                let mut alerts = alerts_ref.write().unwrap();
+                let mut alerts = alerts_ref.write();
                 alerts.push(event_handle);
                 Ok(0i32)
             })
@@ -331,7 +332,7 @@ impl LuaEngine {
         let lua = &self.lua;
         let predicate = self.load_predicate_internal(lua, &rule_id, script).await?;
 
-        let mut predicates = self.predicates.write().unwrap();
+        let mut predicates = self.predicates.write();
         predicates.insert(rule_id.clone(), predicate);
 
         info!(rule_id = %rule_id, "Lua predicate loaded successfully");
@@ -376,20 +377,20 @@ impl LuaEngine {
 
     /// Evaluate an event with a predicate
     pub async fn eval(&self, rule_id: &str, event: &Event) -> Result<EvalResult, LuaRuntimeError> {
-        let predicates = self.predicates.read().unwrap();
+        let predicates = self.predicates.read();
         let predicate = predicates
             .get(rule_id)
             .ok_or_else(|| LuaRuntimeError::FunctionNotFound(rule_id.to_string()))?;
 
-        // Set current event (handle lock poisoning gracefully)
-        if let Ok(mut guard) = self.current_event.write() {
-            *guard = Some(event.clone());
-        }
+        // Set current event
+        let mut guard = self.current_event.write();
+        *guard = Some(event.clone());
+        drop(guard);
 
-        // Clear previous alerts (handle lock poisoning gracefully)
-        if let Ok(mut guard) = self.current_alerts.write() {
-            guard.clear();
-        }
+        // Clear previous alerts
+        let mut guard = self.current_alerts.write();
+        guard.clear();
+        drop(guard);
 
         let lua = &self.lua;
 
@@ -401,10 +402,10 @@ impl LuaEngine {
         // Call the predicate
         let result: std::result::Result<bool, mlua::Error> = eval_func.call(());
 
-        // Clear current event after evaluation (handle lock poisoning gracefully)
-        if let Ok(mut guard) = self.current_event.write() {
-            guard.take();
-        }
+        // Clear current event after evaluation
+        let mut guard = self.current_event.write();
+        guard.take();
+        drop(guard);
 
         match result {
             Ok(match_status) => Ok(EvalResult {
@@ -413,10 +414,9 @@ impl LuaEngine {
                 captured_fields: AHashMap::new(),
             }),
             Err(e) => {
-                // Clear current event on error too (handle lock poisoning gracefully)
-                if let Ok(mut guard) = self.current_event.write() {
-                    guard.take();
-                }
+                // Clear current event on error too
+                let mut guard = self.current_event.write();
+                guard.take();
                 Ok(EvalResult {
                     matched: false,
                     error: Some(e.to_string()),
@@ -434,7 +434,7 @@ impl LuaEngine {
         let id = self
             .next_regex_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.regex_cache.write().unwrap();
+        let mut cache = self.regex_cache.write();
         cache.insert(id, re);
         Ok(id)
     }
@@ -447,25 +447,21 @@ impl LuaEngine {
         let id = self
             .next_glob_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut cache = self.glob_cache.write().unwrap();
+        let mut cache = self.glob_cache.write();
         cache.insert(id, glob);
         Ok(id)
     }
 
     /// Check if a predicate is loaded
     pub fn has_predicate(&self, predicate_id: &str) -> bool {
-        if let Ok(predicates) = self.predicates.read() {
-            predicates.contains_key(predicate_id)
-        } else {
-            false
-        }
+        let predicates = self.predicates.read();
+        predicates.contains_key(predicate_id)
     }
 
     /// Unload a predicate from the engine
     pub fn unload_predicate(&self, predicate_id: &str) {
-        if let Ok(mut predicates) = self.predicates.write() {
-            predicates.remove(predicate_id);
-        }
+        let mut predicates = self.predicates.write();
+        predicates.remove(predicate_id);
     }
 
     /// Get runtime capabilities
@@ -501,25 +497,20 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
         predicate_id: &str,
         event: &kestrel_event::Event,
     ) -> kestrel_nfa::NfaResult<bool> {
-        // Set the current event context (handle lock poisoning gracefully)
+        // Set the current event context
         {
-            if let Ok(mut current_event) = self.current_event.write() {
-                *current_event = Some(event.clone());
-            }
+            let mut current_event = self.current_event.write();
+            *current_event = Some(event.clone());
         }
 
-        // Clear previous alerts (handle lock poisoning gracefully)
+        // Clear previous alerts
         {
-            if let Ok(mut alerts) = self.current_alerts.write() {
-                alerts.clear();
-            }
+            let mut alerts = self.current_alerts.write();
+            alerts.clear();
         }
 
-        // Get the predicate (handle lock poisoning gracefully)
-        let predicates = self
-            .predicates
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Get the predicate
+        let predicates = self.predicates.read();
         let _predicate = predicates.get(predicate_id).ok_or_else(|| {
             kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
         })?;
@@ -548,11 +539,10 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
             _ => Ok(false),
         };
 
-        // Clear the event context after evaluation (handle lock poisoning gracefully)
+        // Clear the event context after evaluation
         {
-            if let Ok(mut current_event) = self.current_event.write() {
-                *current_event = None;
-            }
+            let mut current_event = self.current_event.write();
+            *current_event = None;
         }
 
         matched
@@ -570,7 +560,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
     /// Check if a predicate exists
     fn has_predicate(&self, predicate_id: &str) -> bool {
-        let predicates = self.predicates.read().unwrap();
+        let predicates = self.predicates.read();
         predicates.contains_key(predicate_id)
     }
 }
