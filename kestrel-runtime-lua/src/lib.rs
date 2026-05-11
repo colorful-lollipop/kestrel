@@ -6,15 +6,16 @@
 use ahash::AHashMap;
 use anyhow::Result;
 use mlua::{Function, Lua, RegistryKey};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info};
 
 use kestrel_event::Event;
+use kestrel_event::host_api::{HostApiContext, HostApiV1};
 use kestrel_schema::{
-    EvalResult, EventHandle, FieldId, GlobId, RegexId, RuleManifest, RuntimeCapabilities,
-    RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
+    AlertRecord, EvalResult, FieldId, GlobId, RegexId, RuleManifest, RuleMetadata,
+    RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry,
 };
 
 // Re-export types from kestrel-schema for backward compatibility
@@ -74,7 +75,9 @@ pub struct LuaEngine {
     /// Current event (wrapped in Arc for thread-safe access)
     current_event: Arc<RwLock<Option<Event>>>,
     /// Alert collector (stores emitted alerts)
-    current_alerts: Arc<RwLock<Vec<EventHandle>>>,
+    current_alerts: Arc<Mutex<Vec<AlertRecord>>>,
+    /// Current rule metadata for alert construction
+    current_rule_metadata: Arc<RwLock<Option<RuleMetadata>>>,
 }
 
 /// Loaded Lua predicate
@@ -82,6 +85,7 @@ pub struct LuaPredicate {
     _rule_id: String,
     _init_func: Option<Function>,
     eval_func: RegistryKey,
+    metadata: RuleMetadata,
 }
 
 /// Lua runtime errors
@@ -136,7 +140,8 @@ impl LuaEngine {
             next_regex_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             next_glob_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             current_event: Arc::new(RwLock::new(None)),
-            current_alerts: Arc::new(RwLock::new(Vec::new())),
+            current_alerts: Arc::new(Mutex::new(Vec::new())),
+            current_rule_metadata: Arc::new(RwLock::new(None)),
         };
 
         // Register Host API functions
@@ -159,29 +164,26 @@ impl LuaEngine {
         let glob_cache = self.glob_cache.clone();
         let current_event = self.current_event.clone();
         let current_alerts = self.current_alerts.clone();
+        let current_rule_metadata = self.current_rule_metadata.clone();
 
         // event_get_i64
         let event_ref = current_event.clone();
+        let meta_ref = current_rule_metadata.clone();
+        let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let event_get_i64 = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
                 let event_guard = event_ref.read();
-                if let Some(event) = event_guard.as_ref() {
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::I64(v)) => Ok(*v),
-                        Some(TypedValue::U64(v)) => {
-                            if *v > i64::MAX as u64 {
-                                Ok(i64::MAX)
-                            } else {
-                                Ok(*v as i64)
-                            }
-                        },
-                        Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
-                        _ => Ok(0i64),
-                    }
-                } else {
-                    Ok(0i64)
-                }
+                let meta_guard = meta_ref.read();
+                let api = HostApiContext {
+                    event: event_guard.as_ref(),
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: meta_guard.as_ref(),
+                };
+                Ok(api.event_get_i64(field_id).unwrap_or(0i64))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -191,26 +193,22 @@ impl LuaEngine {
 
         // event_get_u64
         let event_ref = current_event.clone();
+        let meta_ref = current_rule_metadata.clone();
+        let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let event_get_u64 = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
                 let event_guard = event_ref.read();
-                if let Some(event) = event_guard.as_ref() {
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::U64(v)) => Ok(*v),
-                        Some(TypedValue::I64(v)) => {
-                            if *v < 0 {
-                                Ok(0)
-                            } else {
-                                Ok(*v as u64)
-                            }
-                        },
-                        Some(TypedValue::Bool(v)) => Ok(if *v { 1 } else { 0 }),
-                        _ => Ok(0),
-                    }
-                } else {
-                    Ok(0)
-                }
+                let meta_guard = meta_ref.read();
+                let api = HostApiContext {
+                    event: event_guard.as_ref(),
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: meta_guard.as_ref(),
+                };
+                Ok(api.event_get_u64(field_id).unwrap_or(0))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -220,18 +218,22 @@ impl LuaEngine {
 
         // event_get_str
         let event_ref = current_event.clone();
+        let meta_ref = current_rule_metadata.clone();
+        let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let event_get_str = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
                 let event_guard = event_ref.read();
-                if let Some(event) = event_guard.as_ref() {
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::String(s)) => Ok(s.to_string()),
-                        _ => Ok(String::new()),
-                    }
-                } else {
-                    Ok(String::new())
-                }
+                let meta_guard = meta_ref.read();
+                let api = HostApiContext {
+                    event: event_guard.as_ref(),
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: meta_guard.as_ref(),
+                };
+                Ok(api.event_get_str(field_id).unwrap_or("").to_string())
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -241,20 +243,22 @@ impl LuaEngine {
 
         // event_get_bool
         let event_ref = current_event.clone();
+        let meta_ref = current_rule_metadata.clone();
+        let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let event_get_bool = lua
             .create_function(move |_lua, (_event_handle, field_id): (u32, u32)| {
                 let event_guard = event_ref.read();
-                if let Some(event) = event_guard.as_ref() {
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::Bool(v)) => Ok(*v),
-                        Some(TypedValue::I64(v)) => Ok(*v != 0),
-                        Some(TypedValue::U64(v)) => Ok(*v != 0),
-                        _ => Ok(false),
-                    }
-                } else {
-                    Ok(false)
-                }
+                let meta_guard = meta_ref.read();
+                let api = HostApiContext {
+                    event: event_guard.as_ref(),
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: meta_guard.as_ref(),
+                };
+                Ok(api.event_get_bool(field_id).unwrap_or(false))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -264,14 +268,18 @@ impl LuaEngine {
 
         // re_match
         let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let re_match = lua
             .create_function(move |_lua, (re_id, text): (u32, String)| {
-                let cache = re_cache.read();
-                if let Some(re) = cache.get(&re_id) {
-                    Ok(re.is_match(&text))
-                } else {
-                    Ok(false)
-                }
+                let api = HostApiContext {
+                    event: None,
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: None,
+                };
+                Ok(api.re_match(re_id, &text))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -281,14 +289,18 @@ impl LuaEngine {
 
         // glob_match
         let g_cache = glob_cache.clone();
+        let re_cache = regex_cache.clone();
+        let alerts_ref = current_alerts.clone();
         let glob_match = lua
             .create_function(move |_lua, (glob_id, text): (u32, String)| {
-                let cache = g_cache.read();
-                if let Some(pattern) = cache.get(&glob_id) {
-                    Ok(pattern.matches(&text))
-                } else {
-                    Ok(false)
-                }
+                let api = HostApiContext {
+                    event: None,
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: None,
+                };
+                Ok(api.glob_match(glob_id, &text))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -297,12 +309,23 @@ impl LuaEngine {
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
         // alert_emit
+        let event_ref = current_event.clone();
+        let meta_ref = current_rule_metadata.clone();
+        let re_cache = regex_cache.clone();
+        let g_cache = glob_cache.clone();
         let alerts_ref = current_alerts.clone();
         let alert_emit = lua
             .create_function(move |_lua, event_handle: u32| {
-                let mut alerts = alerts_ref.write();
-                alerts.push(event_handle);
-                Ok(0i32)
+                let event_guard = event_ref.read();
+                let meta_guard = meta_ref.read();
+                let api = HostApiContext {
+                    event: event_guard.as_ref(),
+                    regex_cache: &*re_cache,
+                    glob_cache: &*g_cache,
+                    alerts: &*alerts_ref,
+                    rule_metadata: meta_guard.as_ref(),
+                };
+                Ok(api.alert_emit(event_handle))
             })
             .map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
 
@@ -330,7 +353,7 @@ impl LuaEngine {
         info!(rule_id = %rule_id, "Loading Lua predicate");
 
         let lua = &self.lua;
-        let predicate = self.load_predicate_internal(lua, &rule_id, script).await?;
+        let predicate = self.load_predicate_internal(lua, &rule_id, script, manifest).await?;
 
         let mut predicates = self.predicates.write();
         predicates.insert(rule_id.clone(), predicate);
@@ -345,6 +368,7 @@ impl LuaEngine {
         lua: &Lua,
         rule_id: &str,
         script: String,
+        manifest: RuleManifest,
     ) -> Result<LuaPredicate, LuaRuntimeError> {
         // Load and execute the script
         lua.load(&script)
@@ -372,6 +396,7 @@ impl LuaEngine {
             _rule_id: rule_id.to_string(),
             _init_func: init_func,
             eval_func: eval_key,
+            metadata: manifest.metadata,
         })
     }
 
@@ -387,8 +412,13 @@ impl LuaEngine {
         *guard = Some(event.clone());
         drop(guard);
 
+        // Set current rule metadata
+        let mut guard = self.current_rule_metadata.write();
+        *guard = Some(predicate.metadata.clone());
+        drop(guard);
+
         // Clear previous alerts
-        let mut guard = self.current_alerts.write();
+        let mut guard = self.current_alerts.lock();
         guard.clear();
         drop(guard);
 
@@ -407,6 +437,11 @@ impl LuaEngine {
         guard.take();
         drop(guard);
 
+        // Clear current rule metadata after evaluation
+        let mut guard = self.current_rule_metadata.write();
+        guard.take();
+        drop(guard);
+
         match result {
             Ok(match_status) => Ok(EvalResult {
                 matched: match_status,
@@ -417,6 +452,11 @@ impl LuaEngine {
                 // Clear current event on error too
                 let mut guard = self.current_event.write();
                 guard.take();
+                drop(guard);
+                // Clear current rule metadata on error too
+                let mut guard = self.current_rule_metadata.write();
+                guard.take();
+                drop(guard);
                 Ok(EvalResult {
                     matched: false,
                     error: Some(e.to_string()),
@@ -511,15 +551,27 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
         // Clear previous alerts
         {
-            let mut alerts = self.current_alerts.write();
+            let mut alerts = self.current_alerts.lock();
             alerts.clear();
         }
 
-        // Get the predicate
-        let predicates = self.predicates.read();
-        let _predicate = predicates.get(predicate_id).ok_or_else(|| {
-            kestrel_nfa::NfaError::PredicateError(format!("Predicate not found: {}", predicate_id))
-        })?;
+        // Get the predicate and its metadata
+        let metadata = {
+            let predicates = self.predicates.read();
+            let predicate = predicates.get(predicate_id).ok_or_else(|| {
+                kestrel_nfa::NfaError::PredicateError(format!(
+                    "Predicate not found: {}",
+                    predicate_id
+                ))
+            })?;
+            predicate.metadata.clone()
+        };
+
+        // Set current rule metadata
+        {
+            let mut meta = self.current_rule_metadata.write();
+            *meta = Some(metadata);
+        }
 
         // Get the Lua state
         let lua = &self.lua;
@@ -551,6 +603,12 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
             *current_event = None;
         }
 
+        // Clear the rule metadata after evaluation
+        {
+            let mut meta = self.current_rule_metadata.write();
+            *meta = None;
+        }
+
         matched
     }
 
@@ -574,7 +632,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_schema::{RuleCapabilities, RuleMetadata};
+    use kestrel_schema::{RuleCapabilities, RuleMetadata, TypedValue};
 
     #[tokio::test]
     async fn test_lua_engine_create() {

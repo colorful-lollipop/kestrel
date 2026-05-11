@@ -11,3 +11,6 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
+regex = { workspace = true }
+glob = { workspace = true }
+parking_lot = "0.12"

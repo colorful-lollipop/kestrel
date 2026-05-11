@@ -10,16 +10,17 @@ use std::sync::Arc;
 use thiserror::Error;
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::Semaphore;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use wasmtime::{
     Caller, Config, Engine, Extern, Instance, InstanceAllocationStrategy, InstancePre, Linker,
     Module, Store,
 };
 
 use kestrel_event::Event;
+use kestrel_event::host_api::{HostApiContext, HostApiV1};
 use kestrel_schema::{
     AlertRecord, EvalResult, FieldId, GlobId, RegexId, RuleCapabilities, RuleManifest,
-    RuleMetadata, RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry, TypedValue,
+    RuleMetadata, RuntimeCapabilities, RuntimeConfig, RuntimeType, SchemaRegistry,
 };
 
 // Re-export types from kestrel-schema for backward compatibility
@@ -398,27 +399,14 @@ impl WasmEngine {
                 "event_get_i64",
                 |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i64 {
                     let ctx = caller.data();
-                    let event = match ctx.event.as_ref() {
-                        Some(e) => e,
-                        None => return 0,
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::I64(v)) => *v,
-                        Some(TypedValue::U64(v)) => {
-                            if *v > i64::MAX as u64 {
-                                warn!(
-                                    field_id = field_id,
-                                    "u64 value overflow when converting to i64"
-                                );
-                                0 // Return 0 on overflow to indicate conversion error
-                            } else {
-                                *v as i64
-                            }
-                        },
-                        _ => 0,
-                    }
+                    api.event_get_i64(field_id).unwrap_or(0)
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -430,27 +418,14 @@ impl WasmEngine {
                 "event_get_u64",
                 |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> u64 {
                     let ctx = caller.data();
-                    let event = match ctx.event.as_ref() {
-                        Some(e) => e,
-                        None => return 0,
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::U64(v)) => *v,
-                        Some(TypedValue::I64(v)) => {
-                            if *v < 0 {
-                                warn!(
-                                    field_id = field_id,
-                                    "negative i64 value cannot be converted to u64"
-                                );
-                                0 // Return 0 on negative values
-                            } else {
-                                *v as u64
-                            }
-                        },
-                        _ => 0,
-                    }
+                    api.event_get_u64(field_id).unwrap_or(0)
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -466,22 +441,19 @@ impl WasmEngine {
                  ptr: u32,
                  len: u32|
                  -> u32 {
-                    let string_value = {
+                    let s = {
                         let ctx = caller.data();
-                        let event = match ctx.event.as_ref() {
-                            Some(e) => e,
-                            None => return 0,
+                        let api = HostApiContext {
+                            event: ctx.event.as_ref(),
+                            regex_cache: &ctx.regex_cache,
+                            glob_cache: &ctx.glob_cache,
+                            alerts: &ctx.alerts,
+                            rule_metadata: Some(&ctx.rule_metadata),
                         };
-
-                        match event.get_field(field_id) {
-                            Some(TypedValue::String(s)) => Some(s.clone()),
-                            _ => None,
+                        match api.event_get_str(field_id) {
+                            Some(value) => value.to_string(),
+                            None => return 0,
                         }
-                    };
-
-                    let s = match string_value {
-                        Some(value) => value,
-                        None => return 0,
                     };
 
                     let mem = match caller.get_export("memory") {
@@ -491,7 +463,7 @@ impl WasmEngine {
 
                     let bytes_to_write = std::cmp::min(len as usize, s.len());
                     if mem
-                        .write(&mut caller, ptr as usize, s.as_bytes()[..bytes_to_write].as_ref())
+                        .write(&mut caller, ptr as usize, &s.as_bytes()[..bytes_to_write])
                         .is_err()
                     {
                         return 0;
@@ -508,35 +480,17 @@ impl WasmEngine {
                 "event_get_bool",
                 |caller: Caller<'_, WasmContext>, _event_handle: u32, field_id: u32| -> i32 {
                     let ctx = caller.data();
-                    let event = match ctx.event.as_ref() {
-                        Some(e) => e,
-                        None => return 0,
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    let value = event.get_field(field_id);
-                    match value {
-                        Some(TypedValue::Bool(v)) => {
-                            if *v {
-                                1
-                            } else {
-                                0
-                            }
-                        },
-                        Some(TypedValue::I64(v)) => {
-                            if *v != 0 {
-                                1
-                            } else {
-                                0
-                            }
-                        },
-                        Some(TypedValue::U64(v)) => {
-                            if *v != 0 {
-                                1
-                            } else {
-                                0
-                            }
-                        },
-                        _ => 0,
+                    if api.event_get_bool(field_id).unwrap_or(false) {
+                        1
+                    } else {
+                        0
                     }
                 },
             )
@@ -548,35 +502,36 @@ impl WasmEngine {
                 "kestrel",
                 "re_match",
                 |mut caller: Caller<'_, WasmContext>, re_id: u32, ptr: u32, len: u32| -> i32 {
-                    let mem = match caller.get_export("memory") {
-                        Some(Extern::Memory(m)) => m,
-                        _ => return 0,
+                    let text = {
+                        let mem = match caller.get_export("memory") {
+                            Some(Extern::Memory(m)) => m,
+                            _ => return 0,
+                        };
+
+                        let mut data = vec![0u8; len as usize];
+                        if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
+                            return 0;
+                        }
+
+                        match std::str::from_utf8(&data) {
+                            Ok(s) => s.to_string(),
+                            Err(_) => return 0,
+                        }
                     };
 
                     let ctx = caller.data();
-                    let cache = ctx.regex_cache.clone();
-
-                    let mut data = vec![0u8; len as usize];
-                    if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
-                        return 0;
-                    }
-
-                    let s = match std::str::from_utf8(&data) {
-                        Ok(s) => s,
-                        Err(_) => return 0,
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    let cache_guard = match cache.try_read() {
-                        Some(guard) => guard,
-                        None => return 0,
-                    };
-
-                    if let Some(re) = cache_guard.get(&re_id) {
-                        if re.is_match(s) {
-                            return 1;
-                        }
+                    if api.re_match(re_id, &text) {
+                        1
+                    } else {
+                        0
                     }
-                    0
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -587,32 +542,36 @@ impl WasmEngine {
                 "kestrel",
                 "glob_match",
                 |mut caller: Caller<'_, WasmContext>, glob_id: u32, ptr: u32, len: u32| -> i32 {
-                    let mem = match caller.get_export("memory") {
-                        Some(Extern::Memory(m)) => m,
-                        _ => return 0,
+                    let text = {
+                        let mem = match caller.get_export("memory") {
+                            Some(Extern::Memory(m)) => m,
+                            _ => return 0,
+                        };
+
+                        let mut data = vec![0u8; len as usize];
+                        if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
+                            return 0;
+                        }
+
+                        match std::str::from_utf8(&data) {
+                            Ok(s) => s.to_string(),
+                            Err(_) => return 0,
+                        }
                     };
 
                     let ctx = caller.data();
-                    let cache = ctx.glob_cache.clone();
-
-                    let mut data = vec![0u8; len as usize];
-                    if mem.read(&mut caller, ptr as usize, &mut data).is_err() {
-                        return 0;
-                    }
-
-                    let s = match std::str::from_utf8(&data) {
-                        Ok(s) => s,
-                        Err(_) => return 0,
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    let cache_guard = cache.read();
-
-                    if let Some(pattern) = cache_guard.get(&glob_id) {
-                        if pattern.matches(s) {
-                            return 1;
-                        }
+                    if api.glob_match(glob_id, &text) {
+                        1
+                    } else {
+                        0
                     }
-                    0
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -623,39 +582,19 @@ impl WasmEngine {
                 "kestrel",
                 "alert_emit",
                 |caller: Caller<'_, WasmContext>, event_handle: u32| -> i32 {
-                    // Get the context data
                     let ctx = caller.data();
-
-                    // Get the event from the context
-                    let event = match ctx.event.as_ref() {
-                        Some(e) => e,
-                        None => {
-                            error!("No event in context for alert_emit");
-                            return -1; // Error
-                        },
+                    let api = HostApiContext {
+                        event: ctx.event.as_ref(),
+                        regex_cache: &ctx.regex_cache,
+                        glob_cache: &ctx.glob_cache,
+                        alerts: &ctx.alerts,
+                        rule_metadata: Some(&ctx.rule_metadata),
                     };
-
-                    // Capture all event fields into the alert
-                    let mut fields = AHashMap::new();
-                    for (field_id, value) in &event.fields {
-                        fields.insert(format!("field_{}", field_id), value.clone());
+                    let result = api.alert_emit(event_handle);
+                    if result < 0 {
+                        error!("No event in context for alert_emit");
                     }
-
-                    // Create alert record with event details
-                    let alert_record = AlertRecord {
-                        rule_id: ctx.rule_metadata.rule_id.clone(),
-                        severity: ctx.rule_metadata.severity.clone(),
-                        title: ctx.rule_metadata.rule_name.clone(),
-                        description: ctx.rule_metadata.description.clone(),
-                        event_handles: vec![event_handle],
-                        fields,
-                    };
-
-                    // Add to alerts
-                    let mut alerts = ctx.alerts.lock();
-                    alerts.push(alert_record);
-
-                    0 // Success
+                    result
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;

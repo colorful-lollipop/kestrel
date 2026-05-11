@@ -9,6 +9,8 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
+use crate::alert_sink::{AlertSink, AlertSinkError};
+
 /// Alert record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
@@ -147,6 +149,24 @@ impl AlertOutput {
     /// Get a handle for emitting alerts
     pub fn handle(&self) -> AlertHandle {
         self.handle.clone()
+    }
+
+    /// Emit an alert through a custom sink.
+    ///
+    /// This is a non-blocking helper that lets existing `AlertOutput` users
+    /// optionally route alerts to any `AlertSink` implementation without
+    /// changing the async channel-based API.
+    pub fn emit_to_sink(
+        alert: &Alert,
+        sink: &dyn AlertSink,
+    ) -> Result<(), AlertError> {
+        sink.emit(alert)
+            .map(|_| ())
+            .map_err(|e| match e {
+                AlertSinkError::Unavailable(_s) => AlertError::OutputClosed,
+                AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+                AlertSinkError::Transport(s) => AlertError::IoError(s),
+            })
     }
 
     /// Output alert to stdout

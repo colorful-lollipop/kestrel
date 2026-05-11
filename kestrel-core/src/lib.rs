@@ -4,10 +4,12 @@
 
 pub mod action;
 pub mod alert;
+pub mod alert_sink;
 pub mod config_reload;
 pub mod deterministic;
 pub mod eventbus;
 pub mod metrics;
+pub mod metrics_reporter;
 pub mod object_pool;
 pub mod platform;
 pub mod replay;
@@ -23,6 +25,10 @@ pub use action::{
     QuarantineExecutor,
 };
 pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidence, Severity};
+pub use alert_sink::{
+    AlertRouter, AlertSink, AlertSinkError, Backpressure, EmitStatus, FileSink, SinkHealth,
+    StdoutSink,
+};
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle, EventBusMetricsSnapshot};
 pub use replay::{JsonLog, ReplayConfig, ReplayError, ReplaySource, ReplayStats};
@@ -40,6 +46,11 @@ pub use config_reload::{
 pub use metrics::{
     EngineMetrics, MetricsSnapshot, PoolMetricsSnapshot, RuleMetrics, UnifiedMetrics,
     UnifiedMetricsSnapshot,
+};
+
+pub use metrics_reporter::{
+    InMemoryMetricsReporter, Label, MetricDescriptor, MetricId, MetricKind, MetricsReporter,
+    NoOpMetricsReporter,
 };
 
 pub use object_pool::{EventVecPool, ObjectPool, PoolManager, PoolMetrics, PooledObject};
