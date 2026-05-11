@@ -161,7 +161,7 @@ pub struct SequenceAlert {
 /// - Track call counts
 /// - Return different results for different predicates
 /// - Simulate evaluation failures
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_helpers {
     use super::*;
     use std::collections::HashMap;

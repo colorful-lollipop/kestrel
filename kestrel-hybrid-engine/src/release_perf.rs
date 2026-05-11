@@ -9,22 +9,7 @@ mod release_perf_tests {
     use std::sync::Arc;
     use std::time::Instant;
 
-    // Mock predicate evaluator
-    struct MockEvaluator;
-
-    #[async_trait::async_trait]
-
-    impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-        async fn evaluate(&self, _p: &str, _e: &kestrel_event::Event) -> kestrel_nfa::NfaResult<bool> {
-            Ok(true)
-        }
-        fn get_required_fields(&self, _p: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-            Ok(vec![1, 2])
-        }
-        fn has_predicate(&self, p: &str) -> bool {
-            !p.is_empty()
-        }
-    }
+    use kestrel_nfa::test_helpers::MockEvaluator;
 
     #[test]
     #[ignore]
@@ -33,7 +18,7 @@ mod release_perf_tests {
 
         // Test 1: Sequence loading throughput
         let config = HybridEngineConfig::default();
-        let evaluator = Arc::new(MockEvaluator);
+        let evaluator = Arc::new(MockEvaluator::default());
         let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
         let start = Instant::now();

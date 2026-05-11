@@ -429,7 +429,10 @@ impl LuaEngine {
     /// Register a compiled regex pattern
     pub async fn register_regex(&self, pattern: &str) -> Result<RegexId, LuaRuntimeError> {
         let re =
-            regex::Regex::new(pattern).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+            kestrel_schema::map_err_string!(
+                regex::Regex::new(pattern),
+                LuaRuntimeError::LoadError
+            )?;
 
         let id = self
             .next_regex_id
@@ -442,7 +445,10 @@ impl LuaEngine {
     /// Register a compiled glob pattern
     pub async fn register_glob(&self, pattern: &str) -> Result<GlobId, LuaRuntimeError> {
         let glob =
-            glob::Pattern::new(pattern).map_err(|e| LuaRuntimeError::LoadError(e.to_string()))?;
+            kestrel_schema::map_err_string!(
+                glob::Pattern::new(pattern),
+                LuaRuntimeError::LoadError
+            )?;
 
         let id = self
             .next_glob_id

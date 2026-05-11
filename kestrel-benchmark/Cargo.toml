@@ -29,6 +29,7 @@ wat = "1.0"
 
 [dev-dependencies]
 test-log = "0.2"
+kestrel-nfa = { path = "../kestrel-nfa", features = ["test-utils"] }
 
 [[bin]]
 name = "kestrel-benchmark"

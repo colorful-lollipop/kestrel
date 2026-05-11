@@ -110,7 +110,7 @@ fn generate_single_event(id: usize) -> kestrel_event::Event {
         .entity_key(entity_key)
         .field(
             1,
-            kestrel_schema::TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10))),
+            kestrel_schema::TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10)).into()),
         )
         .field(2, kestrel_schema::TypedValue::I64(rng.gen()))
         .field(3, kestrel_schema::TypedValue::U64(rng.gen()))

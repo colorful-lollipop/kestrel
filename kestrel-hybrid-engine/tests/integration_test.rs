@@ -10,28 +10,7 @@ use kestrel_hybrid_engine::{
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> Result<bool, kestrel_nfa::NfaError> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> Result<Vec<u32>, kestrel_nfa::NfaError> {
-        Ok(vec![1, 2])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 // Helper function to create a test sequence
 fn create_test_sequence(id: &str, step_count: usize) -> CompiledSequence {
@@ -131,7 +110,7 @@ fn test_rule_complexity_analyzer_complex() {
 #[test]
 fn test_hybrid_engine_load_sequence() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
 
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
@@ -149,7 +128,7 @@ fn test_hybrid_engine_load_sequence() {
 #[test]
 fn test_hybrid_engine_multiple_strategies() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
 
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
@@ -187,7 +166,7 @@ fn test_hybrid_engine_multiple_strategies() {
 #[test]
 fn test_engine_statistics() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
 
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 

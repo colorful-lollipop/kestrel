@@ -137,32 +137,12 @@ mod event_simulator {
     }
 }
 
-/// Mock evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-impl PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(Vec::new())
-    }
-
-    fn has_predicate(&self, _predicate_id: &str) -> bool {
-        true
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 /// 创建测试用的混合引擎
 fn create_test_engine() -> HybridEngine {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     HybridEngine::new(config, evaluator).unwrap()
 }
 

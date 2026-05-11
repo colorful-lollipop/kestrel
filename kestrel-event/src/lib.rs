@@ -100,6 +100,33 @@ impl Event {
     pub fn builder() -> EventBuilder {
         EventBuilder::default()
     }
+
+    /// Get a field value as u32, with a default fallback
+    ///
+    /// Looks up the field by ID, converts to u32 if possible.
+    pub fn get_field_as_u32(&self, field_id: FieldId, default: u32) -> u32 {
+        self.get_field(field_id)
+            .and_then(|value| match value {
+                TypedValue::U64(v) => u32::try_from(*v).ok(),
+                TypedValue::I64(v) if *v >= 0 => u32::try_from(*v).ok(),
+                _ => None,
+            })
+            .unwrap_or(default)
+    }
+
+    /// Get a field value as String, with a default fallback
+    pub fn get_field_as_string(
+        &self,
+        field_id: FieldId,
+        default: impl Into<std::sync::Arc<str>>,
+    ) -> std::sync::Arc<str> {
+        self.get_field(field_id)
+            .and_then(|value| match value {
+                TypedValue::String(s) => Some(std::sync::Arc::clone(s)),
+                _ => None,
+            })
+            .unwrap_or_else(|| default.into())
+    }
 }
 
 /// Event builder for convenient event construction
@@ -188,8 +215,46 @@ pub enum BuildError {
     MissingField(&'static str),
 }
 
+pub mod host_api;
+
 // Re-export kestrel_schema for convenience
 pub use kestrel_schema;
+
+/// Test helpers for constructing events in tests.
+pub mod test_helpers {
+    use super::*;
+
+    /// Create a test event with common defaults
+    pub fn test_event(event_type: u16, entity_key: u128, ts_mono: u64) -> Event {
+        Event::builder()
+            .event_type(event_type)
+            .entity_key(entity_key)
+            .ts_mono(ts_mono)
+            .ts_wall(ts_mono)
+            .build()
+            .expect("test event build should not fail")
+    }
+
+    /// Create a test event with fields
+    pub fn test_event_with_fields(
+        event_type: u16,
+        entity_key: u128,
+        ts_mono: u64,
+        fields: Vec<(FieldId, TypedValue)>,
+    ) -> Event {
+        let mut builder = Event::builder()
+            .event_type(event_type)
+            .entity_key(entity_key)
+            .ts_mono(ts_mono)
+            .ts_wall(ts_mono);
+
+        for (field_id, value) in fields {
+            builder = builder.field(field_id, value);
+        }
+
+        builder.build().expect("test event build should not fail")
+    }
+}
 
 #[cfg(test)]
 mod tests {

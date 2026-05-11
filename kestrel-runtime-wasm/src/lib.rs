@@ -353,8 +353,10 @@ impl WasmEngine {
             engine_config.consume_fuel(true);
         }
 
-        let engine = Engine::new(&engine_config)
-            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+        let engine = kestrel_schema::map_err_string!(
+            Engine::new(&engine_config),
+            WasmRuntimeError::CompilationError
+        )?;
 
         let mut linker = Linker::new(&engine);
 
@@ -364,8 +366,10 @@ impl WasmEngine {
         // Create AOT cache directory if enabled
         if config.enable_aot_cache {
             if let Some(ref cache_dir) = config.aot_cache_dir {
-                std::fs::create_dir_all(cache_dir)
-                    .map_err(|e| WasmRuntimeError::IoError(e.to_string()))?;
+                kestrel_schema::map_err_string!(
+                    std::fs::create_dir_all(cache_dir),
+                    WasmRuntimeError::IoError
+                )?;
             }
         }
 
@@ -749,8 +753,10 @@ impl WasmEngine {
 
         info!(rule_id = %rule_id, "Loading Wasm module");
 
-        let module = Module::from_binary(&self.engine, &wasm_bytes)
-            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+        let module = kestrel_schema::map_err_string!(
+            Module::from_binary(&self.engine, &wasm_bytes),
+            WasmRuntimeError::CompilationError
+        )?;
 
         let instance_pre = self
             .instance_pre(&module)
@@ -887,8 +893,10 @@ impl WasmEngine {
     ) -> Result<bool, WasmRuntimeError> {
         use wasmtime::{Instance, Module, Store};
 
-        let module = Module::from_binary(&self.engine, wasm_bytes)
-            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+        let module = kestrel_schema::map_err_string!(
+            Module::from_binary(&self.engine, wasm_bytes),
+            WasmRuntimeError::CompilationError
+        )?;
 
         let mut store = Store::new(
             &self.engine,
@@ -933,8 +941,10 @@ impl WasmEngine {
 
     /// Register a compiled regex pattern
     pub async fn register_regex(&self, pattern: &str) -> Result<RegexId, WasmRuntimeError> {
-        let re = regex::Regex::new(pattern)
-            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+        let re = kestrel_schema::map_err_string!(
+            regex::Regex::new(pattern),
+            WasmRuntimeError::CompilationError
+        )?;
 
         let id = self
             .next_regex_id
@@ -946,8 +956,10 @@ impl WasmEngine {
 
     /// Register a compiled glob pattern
     pub async fn register_glob(&self, pattern: &str) -> Result<GlobId, WasmRuntimeError> {
-        let glob = glob::Pattern::new(pattern)
-            .map_err(|e| WasmRuntimeError::CompilationError(e.to_string()))?;
+        let glob = kestrel_schema::map_err_string!(
+            glob::Pattern::new(pattern),
+            WasmRuntimeError::CompilationError
+        )?;
 
         let id = self
             .next_glob_id

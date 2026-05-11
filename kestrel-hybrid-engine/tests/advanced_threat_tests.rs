@@ -7,28 +7,7 @@ use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
 use kestrel_schema::{SchemaRegistry, TypedValue};
 use std::sync::Arc;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(vec![1, 2])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 fn create_test_schema() -> Arc<SchemaRegistry> {
     Arc::new(SchemaRegistry::new())
@@ -47,7 +26,7 @@ fn create_test_event(event_type: u16, entity: u128, timestamp_ns: u64, data: &st
 
 fn create_hybrid_engine() -> HybridEngine {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     HybridEngine::new(config, evaluator).unwrap()
 }
 

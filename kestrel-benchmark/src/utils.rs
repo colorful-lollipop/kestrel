@@ -21,7 +21,7 @@ pub fn generate_test_events(count: usize) -> Vec<Event> {
             .ts_mono(ts)
             .ts_wall(ts)
             .entity_key(entity_key)
-            .field(1, TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10))))
+            .field(1, TypedValue::String(format!("/bin/cmd_{}", rng.gen_range(0..10)).into()))
             .field(2, TypedValue::I64(rng.gen()))
             .field(3, TypedValue::U64(rng.gen()))
             .field(4, TypedValue::Bool(rng.gen()))

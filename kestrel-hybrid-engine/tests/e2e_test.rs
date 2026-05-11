@@ -6,28 +6,7 @@ use kestrel_hybrid_engine::{HybridEngine, HybridEngineConfig};
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(vec![1, 2])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 // Helper function to create a test sequence
 fn create_sequence(id: &str, steps: usize) -> CompiledSequence {
@@ -55,7 +34,7 @@ fn create_sequence(id: &str, steps: usize) -> CompiledSequence {
 fn test_e2e_workflow() {
     // 1. Setup hybrid engine
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // 2. Load multiple sequences with different complexities
@@ -107,7 +86,7 @@ fn test_e2e_workflow() {
 #[test]
 fn test_e2e_with_different_complexities() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load sequences with varying complexity
@@ -161,7 +140,7 @@ fn test_e2e_with_different_complexities() {
 fn test_e2e_strategy_consistency() {
     // Test that the same rule type gets consistent strategy
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config.clone(), evaluator).unwrap();
 
     // Load multiple similar sequences
@@ -200,7 +179,7 @@ fn test_e2e_strategy_consistency() {
 fn test_e2e_engine_reusability() {
     // Test that engine can be reused for multiple rule sets
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
 
     // First batch
     let mut engine = HybridEngine::new(config.clone(), evaluator.clone()).unwrap();
@@ -232,7 +211,7 @@ fn test_e2e_engine_reusability() {
 fn test_e2e_event_processing_throughput() {
     // Measure event processing throughput
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load 10 sequences

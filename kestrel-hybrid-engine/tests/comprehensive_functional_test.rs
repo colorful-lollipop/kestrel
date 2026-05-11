@@ -13,28 +13,7 @@ use kestrel_hybrid_engine::{
 use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> Result<bool, kestrel_nfa::NfaError> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> Result<Vec<u32>, kestrel_nfa::NfaError> {
-        Ok(vec![1, 2, 3, 4, 5])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 fn create_base_sequence(id: &str, steps: usize) -> CompiledSequence {
     let seq_steps: Vec<_> = (0..steps)
@@ -424,7 +403,7 @@ fn test_in_operator() {
 #[test]
 fn test_single_step_sequence() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     let seq = create_base_sequence("single-step", 1);
@@ -446,7 +425,7 @@ fn test_single_step_sequence() {
 #[test]
 fn test_two_step_sequence() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     let seq = create_base_sequence("two-step", 2);
@@ -468,7 +447,7 @@ fn test_two_step_sequence() {
 #[test]
 fn test_multi_step_sequence() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     for steps in &[3, 5, 7, 10] {
@@ -544,7 +523,7 @@ fn test_maxspan_variations() {
         };
 
         let config = HybridEngineConfig::default();
-        let evaluator = Arc::new(MockEvaluator);
+        let evaluator = Arc::new(MockEvaluator::default());
         let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
         let result = engine.load_sequence(compiled);
@@ -611,7 +590,7 @@ fn test_multiple_predicates_in_rule() {
 fn test_full_pipeline_simple_rule() {
     // Test complete pipeline with simple rule
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     let seq = create_base_sequence("pipeline-simple", 2);
@@ -640,7 +619,7 @@ fn test_full_pipeline_simple_rule() {
 #[test]
 fn test_full_pipeline_complex_rule() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load multiple complex sequences
@@ -672,7 +651,7 @@ fn test_full_pipeline_complex_rule() {
 #[test]
 fn test_engine_with_many_rules() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load 50 rules
@@ -714,7 +693,7 @@ fn test_engine_with_many_rules() {
 #[test]
 fn test_analyze_strategy_distribution() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load variety of rules

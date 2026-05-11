@@ -26,3 +26,4 @@ kestrel-event = { path = "../kestrel-event" }
 
 [dev-dependencies]
 rand = { workspace = true }
+kestrel-nfa = { path = "../kestrel-nfa", features = ["test-utils"] }

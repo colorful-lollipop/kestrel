@@ -248,10 +248,12 @@ impl Runtime for WasmRuntimeAdapter {
             max_span_ms: None,
         });
 
-        self.inner
-            .load_module(manifest, bytes.to_vec(), ahash::AHashMap::new())
-            .await
-            .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
+        kestrel_schema::map_err_string!(
+            self.inner
+                .load_module(manifest, bytes.to_vec(), ahash::AHashMap::new())
+                .await,
+            RuntimeError::CompilationError
+        )?;
 
         Ok(())
     }
@@ -308,8 +310,10 @@ impl Runtime for LuaRuntimeAdapter {
     }
 
     async fn load_predicate(&self, predicate_id: &str, bytes: &[u8]) -> RuntimeResult<()> {
-        let script = String::from_utf8(bytes.to_vec())
-            .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
+        let script = kestrel_schema::map_err_string!(
+            String::from_utf8(bytes.to_vec()),
+            RuntimeError::CompilationError
+        )?;
 
         let manifest = RuleManifest::new(
             RuleMetadata::new(predicate_id, predicate_id).with_severity("medium"),
@@ -321,10 +325,10 @@ impl Runtime for LuaRuntimeAdapter {
             max_span_ms: None,
         });
 
-        self.inner
-            .load_predicate(manifest, script)
-            .await
-            .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
+        kestrel_schema::map_err_string!(
+            self.inner.load_predicate(manifest, script).await,
+            RuntimeError::CompilationError
+        )?;
 
         Ok(())
     }

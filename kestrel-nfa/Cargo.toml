@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+[features]
+default = []
+test-utils = []
+
 [dependencies]
 # Workspace dependencies
 kestrel-schema = { path = "../kestrel-schema" }

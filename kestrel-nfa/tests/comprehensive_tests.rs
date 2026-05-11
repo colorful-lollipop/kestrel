@@ -10,31 +10,7 @@ use kestrel_nfa::{
 use std::sync::Arc;
 use std::time::Instant;
 
-// Local mock evaluator for integration tests
-struct MockEvaluator {
-    default_result: bool,
-}
-
-impl MockEvaluator {
-    fn new(default_result: bool) -> Self {
-        Self { default_result }
-    }
-}
-
-#[async_trait::async_trait]
-impl PredicateEvaluator for MockEvaluator {
-    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> NfaResult<bool> {
-        Ok(self.default_result)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
-        Ok(Vec::new())
-    }
-
-    fn has_predicate(&self, _predicate_id: &str) -> bool {
-        true
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 fn create_engine() -> NfaEngine {
     let config = NfaEngineConfig::default();

@@ -163,30 +163,81 @@ fn rule_severity_to_severity(severity: RuleSeverity) -> Severity {
     }
 }
 
+/// Create an alert from a sequence match
+fn alert_from_sequence_match(seq_alert: &kestrel_nfa::SequenceAlert) -> Alert {
+    let events: Vec<EventEvidence> = seq_alert
+        .events
+        .iter()
+        .map(|e| EventEvidence {
+            event_type_id: e.event_type_id,
+            timestamp_ns: e.ts_mono_ns,
+            fields: vec![],
+        })
+        .collect();
+
+    let alert_context = serde_json::json!({
+        "sequence_id": seq_alert.sequence_id,
+        "entity_key": seq_alert.entity_key,
+        "captures": seq_alert.captures,
+    });
+
+    Alert {
+        id: format!("{}-{}", seq_alert.rule_id, seq_alert.timestamp_ns),
+        rule_id: seq_alert.rule_id.clone(),
+        rule_name: seq_alert.rule_name.clone(),
+        severity: Severity::High,
+        title: format!("Sequence matched: {}", seq_alert.sequence_id),
+        description: Some(format!(
+            "Entity {} completed sequence {}",
+            seq_alert.entity_key, seq_alert.sequence_id
+        )),
+        timestamp_ns: seq_alert.timestamp_ns,
+        events,
+        context: alert_context,
+    }
+}
+
+/// Create an alert from a single-event rule match
+fn alert_from_single_event(single_rule: &SingleEventRule, event: &Event) -> Alert {
+    Alert {
+        id: format!("{}-{}", single_rule.rule_id, event.ts_mono_ns),
+        rule_id: single_rule.rule_id.clone(),
+        rule_name: single_rule.rule_name.clone(),
+        severity: single_rule.severity,
+        title: format!("Single-event rule matched: {}", single_rule.rule_name),
+        description: single_rule.description.clone(),
+        timestamp_ns: event.ts_mono_ns,
+        events: vec![EventEvidence {
+            event_type_id: event.event_type_id,
+            timestamp_ns: event.ts_mono_ns,
+            fields: vec![],
+        }],
+        context: serde_json::json!({"rule_type": "single_event"}),
+    }
+}
+
 /// Determine action target from event
 fn determine_action_target(event: &Event, schema: &SchemaRegistry) -> ActionTarget {
     let pid = schema
         .get_field_id("process.pid")
-        .and_then(|field_id| event.get_field(field_id))
-        .and_then(|value| value.as_u64())
-        .and_then(|value| u32::try_from(value).ok())
+        .map(|field_id| event.get_field_as_u32(field_id, (event.entity_key & 0xFFFF_FFFF) as u32))
         .unwrap_or((event.entity_key & 0xFFFF_FFFF) as u32);
 
     let executable = schema
         .get_field_id("process.executable")
-        .and_then(|field_id| event.get_field(field_id))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+        .map(|field_id| event.get_field_as_string(field_id, ""))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let file_path = schema
         .get_field_id("file.path")
-        .and_then(|field_id| event.get_field(field_id))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+        .map(|field_id| event.get_field_as_string(field_id, ""))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let network_destination = schema
         .get_field_id("network.destination")
-        .and_then(|field_id| event.get_field(field_id))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+        .map(|field_id| event.get_field_as_string(field_id, ""))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let network_port = schema
         .get_field_id("network.dest_port")
         .and_then(|field_id| event.get_field(field_id))
@@ -262,8 +313,10 @@ impl DetectionEngine {
 
         // Initialize schema registry
         let schema = Arc::new(SchemaRegistry::new());
-        register_builtin_linux_schema(schema.as_ref())
-            .map_err(|e| EngineError::SchemaError(e.to_string()))?;
+        kestrel_schema::map_err_string!(
+            register_builtin_linux_schema(schema.as_ref()),
+            EngineError::SchemaError
+        )?;
         info!("Schema registry initialized");
 
         let (event_sink_tx, event_sink_rx) = mpsc::channel(config.event_bus.channel_size.max(1));
@@ -298,8 +351,10 @@ impl DetectionEngine {
         // Initialize Wasm engine if configured
         #[cfg(feature = "wasm")]
         let wasm_engine = if let Some(wasm_config) = config.wasm_config {
-            let engine = WasmEngine::new(wasm_config, schema.clone())
-                .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))?;
+            let engine = kestrel_schema::map_err_string!(
+                WasmEngine::new(wasm_config, schema.clone()),
+                EngineError::WasmRuntimeError
+            )?;
             info!("Wasm runtime initialized");
             Some(Arc::new(engine))
         } else {
@@ -389,11 +444,10 @@ impl DetectionEngine {
 
     /// Publish an event into the engine pipeline.
     pub async fn publish_event(&self, event: Event) -> Result<(), EngineError> {
-        self.event_bus
-            .handle()
-            .publish(event)
-            .await
-            .map_err(|e| EngineError::EventBusError(e.to_string()))
+        kestrel_schema::map_err_string!(
+            self.event_bus.handle().publish(event).await,
+            EngineError::EventBusError
+        )
     }
 
     /// Cloneable publisher handle for external collectors.
@@ -437,8 +491,10 @@ impl DetectionEngine {
                 .parse(eql)
                 .map_err(|e| EngineError::WasmRuntimeError(format!("EQL parse error: {}", e)))?;
 
-            register_builtin_linux_schema(self.schema.as_ref())
-                .map_err(|e| EngineError::SchemaError(e.to_string()))?;
+            kestrel_schema::map_err_string!(
+                register_builtin_linux_schema(self.schema.as_ref()),
+                EngineError::SchemaError
+            )?;
 
             for event_type in query.event_types() {
                 if self.schema.get_event_type_id(&event_type).is_none() {
@@ -546,10 +602,12 @@ impl DetectionEngine {
         let wasm_bytes = wat::parse_str(&wat)
             .map_err(|e| EngineError::WasmRuntimeError(format!("WAT parsing error: {}", e)))?;
 
-        wasm_engine
-            .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone(), predicate_fields)
-            .await
-            .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))?;
+        kestrel_schema::map_err_string!(
+            wasm_engine
+                .load_module(Self::schema_manifest_for_rule(rule), wasm_bytes.clone(), predicate_fields)
+                .await,
+            EngineError::WasmRuntimeError
+        )?;
 
         match &ir.rule_type {
             IrRuleType::Event { event_type } => {
@@ -910,36 +968,7 @@ impl DetectionEngine {
                 match nfa_engine.process_event(event).await {
                     Ok(sequence_alerts) => {
                         for seq_alert in sequence_alerts {
-                            let events: Vec<EventEvidence> = seq_alert
-                                .events
-                                .iter()
-                                .map(|e| EventEvidence {
-                                    event_type_id: e.event_type_id,
-                                    timestamp_ns: e.ts_mono_ns,
-                                    fields: vec![],
-                                })
-                                .collect();
-
-                            let alert_context = serde_json::json!({
-                                "sequence_id": seq_alert.sequence_id,
-                                "entity_key": seq_alert.entity_key,
-                                "captures": seq_alert.captures,
-                            });
-
-                            alerts.push(Alert {
-                                id: format!("{}-{}", seq_alert.rule_id, seq_alert.timestamp_ns),
-                                rule_id: seq_alert.rule_id.clone(),
-                                rule_name: seq_alert.rule_name.clone(),
-                                severity: Severity::High,
-                                title: format!("Sequence matched: {}", seq_alert.sequence_id),
-                                description: Some(format!(
-                                    "Entity {} completed sequence {}",
-                                    seq_alert.entity_key, seq_alert.sequence_id
-                                )),
-                                timestamp_ns: seq_alert.timestamp_ns,
-                                events,
-                                context: alert_context,
-                            });
+                            alerts.push(alert_from_sequence_match(&seq_alert));
 
                             context
                                 .alerts_generated
@@ -1009,21 +1038,7 @@ impl DetectionEngine {
                     continue;
                 }
 
-                alerts.push(Alert {
-                    id: format!("{}-{}", single_rule.rule_id, event.ts_mono_ns),
-                    rule_id: single_rule.rule_id.clone(),
-                    rule_name: single_rule.rule_name.clone(),
-                    severity: single_rule.severity,
-                    title: format!("Single-event rule matched: {}", single_rule.rule_name),
-                    description: single_rule.description.clone(),
-                    timestamp_ns: event.ts_mono_ns,
-                    events: vec![EventEvidence {
-                        event_type_id: event.event_type_id,
-                        timestamp_ns: event.ts_mono_ns,
-                        fields: vec![],
-                    }],
-                    context: serde_json::json!({"rule_type": "single_event"}),
-                });
+                alerts.push(alert_from_single_event(&single_rule, event));
                 context
                     .alerts_generated
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1077,41 +1092,48 @@ impl DetectionEngine {
         predicate_index: u32,
         event: &Event,
     ) -> Result<bool, EngineError> {
-        wasm_engine
-            .eval_loaded_predicate(module_id, predicate_index, event)
-            .await
-            .map_err(|e| EngineError::WasmRuntimeError(e.to_string()))
+        kestrel_schema::map_err_string!(
+            wasm_engine
+                .eval_loaded_predicate(module_id, predicate_index, event)
+                .await,
+            EngineError::WasmRuntimeError
+        )
+    }
+
+    async fn with_nfa_engines<F>(
+        &self,
+        mut f: F,
+    ) -> Result<(), EngineError>
+    where
+        F: FnMut(usize, &mut NfaEngine) -> Result<(), kestrel_nfa::NfaError>,
+    {
+        for (partition_id, nfa_engine) in self.nfa_engines.iter().enumerate() {
+            let mut guard = nfa_engine.lock().await;
+            if let Some(engine) = guard.as_mut() {
+                f(partition_id, engine).map_err(|e| {
+                    EngineError::NfaError(format!(
+                        "partition {partition_id} operation failed: {e}"
+                    ))
+                })?;
+            }
+        }
+        Ok(())
     }
 
     /// Load a compiled sequence into the NFA engine
     pub async fn load_sequence(&self, sequence: CompiledSequence) -> Result<(), EngineError> {
-        for (partition_id, nfa_engine) in self.nfa_engines.iter().enumerate() {
-            let mut guard = nfa_engine.lock().await;
-            if let Some(engine) = guard.as_mut() {
-                engine.load_sequence(sequence.clone()).map_err(|e| {
-                    EngineError::NfaError(format!(
-                        "partition {partition_id} load_sequence failed: {e}"
-                    ))
-                })?;
-            }
-        }
-
-        Ok(())
+        self.with_nfa_engines(|_partition_id, engine| {
+            engine.load_sequence(sequence.clone())
+        })
+        .await
     }
 
     /// Unload a compiled sequence from every partitioned NFA engine.
     pub async fn unload_sequence(&self, sequence_id: &str) -> Result<(), EngineError> {
-        for (partition_id, nfa_engine) in self.nfa_engines.iter().enumerate() {
-            let mut guard = nfa_engine.lock().await;
-            if let Some(engine) = guard.as_mut() {
-                engine.unload_sequence(sequence_id).map_err(|e| {
-                    EngineError::NfaError(format!(
-                        "partition {partition_id} unload_sequence failed: {e}"
-                    ))
-                })?;
-            }
-        }
-        Ok(())
+        self.with_nfa_engines(|_partition_id, engine| {
+            engine.unload_sequence(sequence_id).map(|_| ())
+        })
+        .await
     }
 
     fn partition_for_event(&self, event: &Event) -> usize {
@@ -1165,6 +1187,7 @@ pub enum EngineError {
 mod tests {
     use super::*;
     use kestrel_event::Event;
+    use kestrel_event::test_helpers::test_event;
     use kestrel_nfa::{CompiledSequence, NfaResult, NfaSequence, SeqStep};
     use tokio::time::Duration;
 
@@ -1308,20 +1331,8 @@ mod tests {
             .await
             .unwrap();
 
-        let first_event = Event::builder()
-            .event_type(1)
-            .ts_mono(1_000)
-            .ts_wall(1_000)
-            .entity_key(42)
-            .build()
-            .unwrap();
-        let second_event = Event::builder()
-            .event_type(2)
-            .ts_mono(2_000)
-            .ts_wall(2_000)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let first_event = test_event(1, 42, 1_000);
+        let second_event = test_event(2, 42, 2_000);
 
         let first_alerts = engine.eval_event(&first_event).await.unwrap();
         assert!(first_alerts.is_empty());
@@ -1526,15 +1537,7 @@ mod tests {
 
         engine.start().await.unwrap();
         engine
-            .publish_event(
-                Event::builder()
-                    .event_type(1)
-                    .ts_mono(1000)
-                    .ts_wall(1000)
-                    .entity_key(42)
-                    .build()
-                    .unwrap(),
-            )
+            .publish_event(test_event(1, 42, 1000))
             .await
             .unwrap();
 
@@ -1585,13 +1588,7 @@ mod tests {
             action_type: None,
         });
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1000)
-            .ts_wall(1000)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1000);
 
         engine.start().await.unwrap();
         engine.publish_event(event).await.unwrap();
@@ -1610,8 +1607,6 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_single_event_rule_eval_always_match() {
-        use kestrel_event::Event;
-
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
         std::fs::create_dir(&rules_dir).unwrap();
@@ -1644,13 +1639,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         let alerts = engine.eval_event(&event).await.unwrap();
 
@@ -1662,8 +1651,6 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_single_event_rule_no_match_different_event_type() {
-        use kestrel_event::Event;
-
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
         std::fs::create_dir(&rules_dir).unwrap();
@@ -1696,13 +1683,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         let alerts = engine.eval_event(&event).await.unwrap();
 
@@ -1712,8 +1693,6 @@ mod tests {
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn test_eval_event_multiple_single_event_rules() {
-        use kestrel_event::Event;
-
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
         std::fs::create_dir(&rules_dir).unwrap();
@@ -1770,13 +1749,7 @@ mod tests {
         engine.push_test_rule(rule2);
         engine.push_test_rule(rule3);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         let alerts = engine.eval_event(&event).await.unwrap();
 
@@ -1791,7 +1764,6 @@ mod tests {
     #[tokio::test]
     async fn test_inline_mode_with_blockable_rule() {
         use kestrel_core::{ActionType, NoOpExecutor};
-        use kestrel_event::Event;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -1830,13 +1802,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         // Process event
         let alerts = engine.eval_event(&event).await.unwrap();
@@ -1855,7 +1821,6 @@ mod tests {
     #[tokio::test]
     async fn test_detect_mode_no_enforcement() {
         use kestrel_core::{ActionType, NoOpExecutor};
-        use kestrel_event::Event;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -1894,13 +1859,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         // Process event
         let alerts = engine.eval_event(&event).await.unwrap();
@@ -1918,7 +1877,6 @@ mod tests {
     #[tokio::test]
     async fn test_non_blockable_rule_no_enforcement() {
         use kestrel_core::{ActionType, NoOpExecutor};
-        use kestrel_event::Event;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -1957,13 +1915,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         // Process event
         let alerts = engine.eval_event(&event).await.unwrap();
@@ -1981,7 +1933,6 @@ mod tests {
     #[tokio::test]
     async fn test_action_type_kill() {
         use kestrel_core::{ActionType, NoOpExecutor};
-        use kestrel_event::Event;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let rules_dir = temp_dir.path().join("rules");
@@ -2020,13 +1971,7 @@ mod tests {
 
         engine.push_test_rule(rule);
 
-        let event = Event::builder()
-            .event_type(1)
-            .ts_mono(1234567890)
-            .ts_wall(1234567890)
-            .entity_key(42)
-            .build()
-            .unwrap();
+        let event = test_event(1, 42, 1234567890);
 
         // Process event
         let alerts = engine.eval_event(&event).await.unwrap();

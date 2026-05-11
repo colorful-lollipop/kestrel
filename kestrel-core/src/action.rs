@@ -139,6 +139,11 @@ impl ActionDecision {
             evidence,
         }
     }
+
+    /// Create a success result for this decision
+    pub fn to_success_result(&self) -> ActionResult {
+        ActionResult::success(self.id.clone(), self.action)
+    }
 }
 
 /// Evidence associated with an action decision
@@ -331,6 +336,30 @@ impl Default for BlockActionConfig {
     }
 }
 
+/// Send a signal to a process
+///
+/// # Safety
+/// Uses libc::kill which is unsafe. Caller must ensure pid is valid.
+fn kill_process_impl(pid: u32, signal: i32) -> Result<(), ActionError> {
+    #[cfg(unix)]
+    {
+        let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+        if result != 0 {
+            let err = std::io::Error::last_os_error();
+            tracing::warn!(pid, signal, error = %err, "Failed to send signal to process");
+            return Err(ActionError::ActionFailed(format!(
+                "kill(pid={}, signal={}) failed: {}", pid, signal, err
+            )));
+        }
+        tracing::debug!(pid, signal, "Sent signal to process");
+    }
+    #[cfg(not(unix))]
+    {
+        tracing::warn!(pid, signal, "Process kill not supported on this platform");
+    }
+    Ok(())
+}
+
 /// Block action executor - handles blocking operations using OS mechanisms
 #[derive(Debug, Clone)]
 pub struct BlockActionExecutor {
@@ -352,23 +381,7 @@ impl BlockActionExecutor {
 
     /// Kill a process by PID
     fn kill_process(&self, pid: u32, signal: i32) -> Result<(), ActionError> {
-        #[cfg(unix)]
-        {
-            let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
-            if result != 0 {
-                let err = std::io::Error::last_os_error();
-                tracing::warn!(pid, signal, error = %err, "Failed to send signal to process");
-                return Err(ActionError::ActionFailed(format!(
-                    "kill(pid={}, signal={}) failed: {}", pid, signal, err
-                )));
-            }
-            tracing::debug!(pid, signal, "Sent signal to process");
-        }
-        #[cfg(not(unix))]
-        {
-            tracing::warn!(pid, signal, "Process kill not supported on this platform");
-        }
-        Ok(())
+        kill_process_impl(pid, signal)
     }
 
     /// Block a file operation (simulated)
@@ -398,20 +411,20 @@ impl ActionExecutor for BlockActionExecutor {
                 // In a real implementation, this would be handled by LSM hooks
                 // at the bprm_check_security point
                 self.kill_process(*pid, self.config.kill_signal)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::FileOp { pid, path } => {
                 self.block_file_operation(*pid, path)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::NetworkOp { pid, addr } => {
                 self.block_network_operation(*pid, addr)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::MemoryOp { pid } => {
                 // Memory operations can be blocked by seccomp or LSM
                 self.kill_process(*pid, self.config.kill_signal)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
         };
 
@@ -573,7 +586,7 @@ impl ActionExecutor for QuarantineExecutor {
         match &decision.target {
             ActionTarget::FileOp { pid, path } => {
                 let report = self.quarantine_file(*pid, path)?;
-                let mut result = ActionResult::success(decision.id.clone(), decision.action);
+                let mut result = decision.to_success_result();
                 result.details = report;
                 tracing::info!(
                     decision_id = %decision.id,
@@ -585,7 +598,7 @@ impl ActionExecutor for QuarantineExecutor {
             ActionTarget::ProcessExec { pid, executable } => {
                 // For process exec quarantine, we can quarantine the executable
                 let report = self.quarantine_file(*pid, executable)?;
-                let mut result = ActionResult::success(decision.id.clone(), decision.action);
+                let mut result = decision.to_success_result();
                 result.details = report;
                 tracing::info!(
                     decision_id = %decision.id,
@@ -643,23 +656,7 @@ impl KillActionExecutor {
 
     /// Kill a process by PID
     fn kill_process(&self, pid: u32, signal: i32) -> Result<(), ActionError> {
-        #[cfg(unix)]
-        {
-            let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
-            if result != 0 {
-                let err = std::io::Error::last_os_error();
-                tracing::warn!(pid, signal, error = %err, "Failed to send signal to process");
-                return Err(ActionError::ActionFailed(format!(
-                    "kill(pid={}, signal={}) failed: {}", pid, signal, err
-                )));
-            }
-            tracing::debug!(pid, signal, "Sent signal to process");
-        }
-        #[cfg(not(unix))]
-        {
-            tracing::warn!(pid, signal, "Process kill not supported on this platform");
-        }
-        Ok(())
+        kill_process_impl(pid, signal)
     }
 }
 
@@ -674,19 +671,19 @@ impl ActionExecutor for KillActionExecutor {
         match &decision.target {
             ActionTarget::ProcessExec { pid, .. } => {
                 self.terminate_process(*pid)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::FileOp { pid, .. } => {
                 self.terminate_process(*pid)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::NetworkOp { pid, .. } => {
                 self.terminate_process(*pid)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
             ActionTarget::MemoryOp { pid } => {
                 self.terminate_process(*pid)?;
-                ActionResult::success(decision.id.clone(), decision.action)
+                decision.to_success_result()
             },
         };
 
@@ -696,7 +693,7 @@ impl ActionExecutor for KillActionExecutor {
             "Process terminated"
         );
 
-        Ok(ActionResult::success(decision.id.clone(), decision.action))
+        Ok(decision.to_success_result())
     }
 
     fn capabilities(&self) -> ActionCapabilities {
@@ -943,7 +940,7 @@ impl ActionExecutor for CompositeActionExecutor {
                     decision_id = %decision.id,
                     "Offline mode: action simulated only"
                 );
-                return Ok(ActionResult::success(decision.id.clone(), decision.action));
+                return Ok(decision.to_success_result());
             },
             (ActionPolicy::Inline, ActionPolicy::Async) => {
                 // Inline executor can handle async actions

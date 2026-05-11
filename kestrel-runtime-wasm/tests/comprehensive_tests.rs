@@ -160,7 +160,7 @@ fn test_full_workflow() {
                 .ts_mono(i * 1_000_000)
                 .ts_wall(i * 1_000_000)
                 .entity_key(i as u128)
-                .field(1, TypedValue::String(format!("process_{}", i)))
+                .field(1, TypedValue::String(format!("process_{}", i).into()))
                 .build()
                 .unwrap();
 

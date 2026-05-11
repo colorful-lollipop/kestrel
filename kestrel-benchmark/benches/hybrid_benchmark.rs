@@ -9,29 +9,7 @@ use kestrel_lazy_dfa::{HotSpotDetector, LazyDfaConfig};
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, NfaSequence, SeqStep};
 use std::sync::Arc;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
-        // Return true for all predicates
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
-        Ok(vec![1, 2])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 /// Benchmark AC-DFA string matching
 fn bench_ac_dfa_matching(c: &mut Criterion) {
@@ -77,7 +55,7 @@ fn bench_nfa_sequence_matching(c: &mut Criterion) {
         };
 
         let config = NfaEngineConfig::default();
-        let evaluator = Arc::new(MockEvaluator);
+        let evaluator = Arc::new(MockEvaluator::default());
         let mut engine = NfaEngine::new(config, evaluator);
         engine.load_sequence(compiled).unwrap();
 
@@ -232,7 +210,7 @@ fn bench_ac_dfa_vs_nfa(c: &mut Criterion) {
     };
 
     let config = NfaEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = NfaEngine::new(config, evaluator);
     engine.load_sequence(compiled).unwrap();
 

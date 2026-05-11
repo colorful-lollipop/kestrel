@@ -16,28 +16,7 @@ use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 use std::sync::Arc;
 use std::time::Instant;
 
-// Mock predicate evaluator for testing
-struct MockEvaluator;
-
-#[async_trait::async_trait]
-
-impl kestrel_nfa::PredicateEvaluator for MockEvaluator {
-    async fn evaluate(
-        &self,
-        _predicate_id: &str,
-        _event: &kestrel_event::Event,
-    ) -> Result<bool, kestrel_nfa::NfaError> {
-        Ok(true)
-    }
-
-    fn get_required_fields(&self, _predicate_id: &str) -> Result<Vec<u32>, kestrel_nfa::NfaError> {
-        Ok(vec![1, 2, 3])
-    }
-
-    fn has_predicate(&self, predicate_id: &str) -> bool {
-        !predicate_id.is_empty()
-    }
-}
+use kestrel_nfa::test_helpers::MockEvaluator;
 
 // Helper to create complex sequence
 fn create_complex_sequence(id: &str, steps: usize, has_until: bool) -> CompiledSequence {
@@ -116,7 +95,7 @@ fn test_regex_rule_analysis() {
 #[test]
 fn test_regex_performance() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Create sequence with regex predicates
@@ -275,7 +254,7 @@ fn test_long_sequence_analysis() {
 #[test]
 fn test_long_sequence_performance() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load sequences of varying lengths
@@ -370,7 +349,7 @@ fn test_until_condition_analysis() {
 #[test]
 fn test_until_condition_performance() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load sequences with until conditions
@@ -410,7 +389,7 @@ fn test_until_condition_performance() {
 #[test]
 fn test_mixed_complexity_rules() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
     let mut engine = HybridEngine::new(config, evaluator).unwrap();
 
     // Load a mix of rule types
@@ -593,7 +572,7 @@ fn test_very_complex_rule() {
 #[test]
 fn test_performance_by_complexity() {
     let config = HybridEngineConfig::default();
-    let evaluator = Arc::new(MockEvaluator);
+    let evaluator = Arc::new(MockEvaluator::default());
 
     println!("\n=== Performance by Complexity ===\n");
 

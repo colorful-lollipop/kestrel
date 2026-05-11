@@ -187,8 +187,10 @@ impl JsonLog {
             writeln!(
                 writer,
                 "{}",
-                serde_json::to_string_pretty(&header)
-                    .map_err(|e| ReplayError::Serialization(e.to_string()))?
+                kestrel_schema::map_err_string!(
+                    serde_json::to_string_pretty(&header),
+                    ReplayError::Serialization
+                )?
             )
             .map_err(ReplayError::Io)?;
 
@@ -211,8 +213,10 @@ impl JsonLog {
         writeln!(
             writer,
             "{}",
-            serde_json::to_string(&header)
-                .map_err(|e| ReplayError::Serialization(e.to_string()))?
+            kestrel_schema::map_err_string!(
+                serde_json::to_string(&header),
+                ReplayError::Serialization
+            )?
         )
         .map_err(ReplayError::Io)?;
 
@@ -235,8 +239,10 @@ impl JsonLog {
             writeln!(
                 writer,
                 "{}",
-                serde_json::to_string(&serialized)
-                    .map_err(|e| ReplayError::Serialization(e.to_string()))?
+                kestrel_schema::map_err_string!(
+                    serde_json::to_string(&serialized),
+                    ReplayError::Serialization
+                )?
             )
             .map_err(ReplayError::Io)?;
         }
@@ -262,8 +268,10 @@ impl JsonLog {
         use std::io::BufRead;
         reader.read_line(&mut first_line)?;
 
-        let header: LogHeader = serde_json::from_str(&first_line)
-            .map_err(|e| ReplayError::Serialization(e.to_string()))?;
+        let header: LogHeader = kestrel_schema::map_err_string!(
+            serde_json::from_str(&first_line),
+            ReplayError::Serialization
+        )?;
 
         if !header.is_valid() {
             return Err(ReplayError::InvalidFormat("Invalid magic bytes or version".to_string()));
@@ -285,8 +293,10 @@ impl JsonLog {
                 continue;
             }
 
-            let serialized: SerializedEvent = serde_json::from_str(&line)
-                .map_err(|e| ReplayError::Serialization(e.to_string()))?;
+            let serialized: SerializedEvent = kestrel_schema::map_err_string!(
+                serde_json::from_str(&line),
+                ReplayError::Serialization
+            )?;
 
             // Convert back to Event
             let fields: smallvec::SmallVec<

@@ -7,6 +7,8 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod macros;
+
 /// Field identifier (u32 for fast lookup)
 pub type FieldId = u32;
 

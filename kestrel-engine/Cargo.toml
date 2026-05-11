@@ -35,3 +35,4 @@ lua = ["kestrel-runtime-lua"]
 
 [dev-dependencies]
 tempfile = "3.13"
+kestrel-nfa = { path = "../kestrel-nfa", features = ["test-utils"] }
