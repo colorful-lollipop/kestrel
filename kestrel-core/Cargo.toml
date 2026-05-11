@@ -19,6 +19,7 @@ parking_lot = { version = "0.12" }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 sha2 = { version = "0.10", features = ["asm"] }
 futures = { version = "0.3", features = ["executor"] }
+libc = "0.2"
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-eql = { path = "../kestrel-eql", optional = true }

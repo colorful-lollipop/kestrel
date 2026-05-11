@@ -215,6 +215,11 @@ impl StateStore {
         }
     }
 
+    /// Get SeqId for a sequence_id string (non-creating)
+    pub fn get_seq_id(&self, sequence_id: &str) -> Option<SeqId> {
+        self.seq_id_map.read().get(sequence_id).copied()
+    }
+
     /// Get or create SeqId for a sequence_id string
     fn get_or_create_seq_id(&self, sequence_id: &str) -> SeqId {
         // Fast path: check if already mapped
@@ -233,8 +238,9 @@ impl StateStore {
         }
 
         let seq_id = self.next_seq_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        map.insert(sequence_id.to_string(), seq_id);
-        self.seq_id_reverse.write().insert(seq_id, sequence_id.to_string());
+        let seq_id_string = sequence_id.to_string();
+        map.insert(seq_id_string.clone(), seq_id);
+        self.seq_id_reverse.write().insert(seq_id, seq_id_string);
         seq_id
     }
 
@@ -275,18 +281,36 @@ impl StateStore {
         shard.remove(&key)
     }
 
-    /// Get a partial match
+    /// Get a partial match (clones the match for ownership)
     pub fn get(
         &self,
         sequence_id: &str,
         entity_key: u128,
         state_id: NfaStateId,
     ) -> Option<PartialMatch> {
-        let seq_id = self.get_or_create_seq_id(sequence_id);
+        let seq_id = self.get_seq_id(sequence_id)?;
         let shard_idx = self.get_shard_index(entity_key);
         let key = (seq_id, entity_key, state_id);
         let shard = self.shards[shard_idx].read();
         shard.get(&key).cloned()
+    }
+
+    /// Access a partial match without cloning (read-only access via closure)
+    pub fn with_match<F, R>(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce(&PartialMatch) -> R,
+    {
+        let seq_id = self.get_seq_id(sequence_id)?;
+        let shard_idx = self.get_shard_index(entity_key);
+        let key = (seq_id, entity_key, state_id);
+        let shard = self.shards[shard_idx].read();
+        shard.get(&key).map(f)
     }
 
     /// Check if inserting would violate quota
@@ -389,6 +413,25 @@ impl StateStore {
     /// Get configuration
     pub fn config(&self) -> &StateStoreConfig {
         &self.config
+    }
+
+    /// Remove all partial matches for a given sequence across all shards
+    pub fn remove_by_sequence(&self, seq_id: SeqId) -> usize {
+        let mut total_removed = 0;
+        for shard in &self.shards {
+            let mut shard_guard = shard.write();
+            let keys_to_remove: Vec<_> = shard_guard
+                .matches
+                .iter()
+                .filter(|(key, _)| key.0 == seq_id)
+                .map(|(key, _)| *key)
+                .collect();
+            for key in keys_to_remove {
+                shard_guard.remove(&key);
+                total_removed += 1;
+            }
+        }
+        total_removed
     }
 }
 

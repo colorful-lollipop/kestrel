@@ -8,8 +8,10 @@
 //! - Time travel debugging
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::time::Instant;
 
 /// Time provider trait
 ///
@@ -34,22 +36,19 @@ pub trait TimeProvider: Send + Sync {
     }
 }
 
+static MONO_BASE: OnceLock<Instant> = OnceLock::new();
+
+fn mono_base() -> Instant {
+    *MONO_BASE.get_or_init(Instant::now)
+}
+
 /// Real time provider using system clock
 #[derive(Debug, Clone)]
 pub struct RealTimeProvider;
 
 impl TimeProvider for RealTimeProvider {
     fn mono_ns(&self) -> u64 {
-        // Use std::time::Instant for monotonic time
-        // Since Instant::elapsed() gives duration since creation,
-        // we need a different approach for absolute monotonic time
-        // For now, use UNIX time as approximation
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0)
+        mono_base().elapsed().as_nanos() as u64
     }
 
     fn wall_ns(&self) -> u64 {

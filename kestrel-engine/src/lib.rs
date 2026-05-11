@@ -23,7 +23,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use thiserror::Error;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -226,7 +226,7 @@ pub struct DetectionEngine {
     wasm_engine: Option<Arc<WasmEngine>>,
 
     #[cfg(feature = "wasm")]
-    eql_compiler: std::sync::Mutex<Option<EqlCompiler>>,
+    eql_compiler: tokio::sync::Mutex<Option<EqlCompiler>>,
 
     partition_count: usize,
     partitioner: Arc<dyn Partitioner>,
@@ -282,7 +282,7 @@ impl DetectionEngine {
 
         // Initialize EQL compiler if Wasm is enabled
         #[cfg(feature = "wasm")]
-        let eql_compiler = std::sync::Mutex::new(if config.wasm_config.is_some() {
+        let eql_compiler = tokio::sync::Mutex::new(if config.wasm_config.is_some() {
             Some(EqlCompiler::new(schema.clone()))
         } else {
             None
@@ -417,13 +417,10 @@ impl DetectionEngine {
         }
     }
 
-    fn ensure_event_types_registered(&self, eql: &str) -> Result<(), EngineError> {
+    async fn ensure_event_types_registered(&self, eql: &str) -> Result<(), EngineError> {
         #[cfg(feature = "wasm")]
         {
-            let compiler_guard = self
-                .eql_compiler
-                .lock().await
-                .map_err(|e| EngineError::WasmRuntimeError(format!("Mutex lock error: {}", e)))?;
+            let compiler_guard = self.eql_compiler.lock().await;
 
             let compiler = compiler_guard.as_ref().ok_or_else(|| {
                 EngineError::WasmRuntimeError("EQL compiler not initialized".to_string())
@@ -506,17 +503,14 @@ impl DetectionEngine {
             },
         };
 
-        self.ensure_event_types_registered(&definition)?;
+        self.ensure_event_types_registered(&definition).await?;
 
         let wasm_engine = self.wasm_engine.as_ref().ok_or_else(|| {
             EngineError::WasmRuntimeError("Wasm engine not initialized".to_string())
         })?;
 
         let ir = {
-            let mut compiler_guard = self
-                .eql_compiler
-                .lock().await
-                .map_err(|e| EngineError::WasmRuntimeError(format!("Mutex lock error: {}", e)))?;
+            let mut compiler_guard = self.eql_compiler.lock().await;
             let compiler = compiler_guard.as_mut().ok_or_else(|| {
                 EngineError::WasmRuntimeError("EQL compiler not initialized".to_string())
             })?;
@@ -528,7 +522,7 @@ impl DetectionEngine {
         let predicate_indices = Self::predicate_indices(&ir);
 
         // Build predicate_fields map from IR
-        let mut predicate_fields = std::collections::HashMap::new();
+        let mut predicate_fields = ahash::AHashMap::new();
         for (pred_id, pred) in &ir.predicates {
             if let Some(&idx) = predicate_indices.get(pred_id) {
                 predicate_fields.insert(idx, pred.required_fields.clone());
@@ -702,6 +696,9 @@ impl DetectionEngine {
 
         let rule_ids = self.rule_manager.list_rules().await;
 
+        // TODO: Parallelize rule compilation. Currently sequential because
+        // compile_single_event_rule modifies self.single_event_rules.
+        // Could collect compiled rules in parallel, then batch-update.
         for rule_id in rule_ids {
             if let Some(rule) = self.rule_manager.get_rule(&rule_id).await {
                 if let Err(error) = self.compile_single_event_rule(&rule).await {
@@ -776,10 +773,10 @@ impl DetectionEngine {
                 }
 
                 let partition_id = partitioner.partition(&batch[0], partition_count);
-                let single_event_rules_snapshot = single_event_rules.load().clone();
+                let rules_guard = single_event_rules.load();
                 let eval_context = EvalContext {
                     nfa_engine: &nfa_engines[partition_id],
-                    single_event_rules: &single_event_rules_snapshot,
+                    single_event_rules: &*rules_guard,
                     #[cfg(feature = "wasm")]
                     wasm_engine: wasm_engine.as_ref(),
                     mode,
@@ -837,11 +834,11 @@ impl DetectionEngine {
     /// Evaluate an event against all loaded rules
     #[tracing::instrument(skip(self, event), fields(event_id = %event.ts_mono_ns, event_type_id = event.event_type_id))]
     pub async fn eval_event(&self, event: &Event) -> Result<Vec<Alert>, EngineError> {
-        let single_event_rules_snapshot = self.single_event_rules.load().clone();
+        let rules_guard = self.single_event_rules.load();
         let partition_id = self.partition_for_event(event);
         let context = EvalContext {
             nfa_engine: &self.nfa_engines[partition_id],
-            single_event_rules: &single_event_rules_snapshot,
+            single_event_rules: &*rules_guard,
             #[cfg(feature = "wasm")]
             wasm_engine: self.wasm_engine.as_ref(),
             mode: self.mode,
@@ -922,6 +919,7 @@ impl DetectionEngine {
         #[cfg(feature = "wasm")]
         {
             let wasm_engine = context.wasm_engine.cloned();
+            let semaphore = Arc::new(Semaphore::new(16));
             let mut evaluations = FuturesUnordered::new();
 
             for single_rule in context.single_event_rules.iter() {
@@ -929,9 +927,15 @@ impl DetectionEngine {
                     continue;
                 }
 
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| EngineError::EventBusError(format!("semaphore error: {e}")))?;
                 let rule = single_rule.clone();
                 let wasm_engine = wasm_engine.clone();
                 evaluations.push(async move {
+                    let _permit = permit;
                     let matched = match &rule.predicate {
                         CompiledPredicate::Wasm {
                             module_id,

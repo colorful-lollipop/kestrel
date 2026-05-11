@@ -352,18 +352,22 @@ impl BlockActionExecutor {
 
     /// Kill a process by PID
     fn kill_process(&self, pid: u32, signal: i32) -> Result<(), ActionError> {
-        // In a real implementation, this would use:
-        // - nix::unistd::kill(pid, signal) on Linux
-        // - std::process::Command on cross-platform
-
-        // For now, we simulate the kill operation
-        // In production, use: kill(pid as nix::unistd::Pid, signal)
-        tracing::info!(pid, signal, "Would send signal to process");
-
-        // Note: Actual implementation requires nix crate or platform-specific code
-        // The nix crate provides: nix::unistd::kill(pid, signal)
-        // Or on Unix: libc::kill(pid, signal)
-
+        #[cfg(unix)]
+        {
+            let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+            if result != 0 {
+                let err = std::io::Error::last_os_error();
+                tracing::warn!(pid, signal, error = %err, "Failed to send signal to process");
+                return Err(ActionError::ActionFailed(format!(
+                    "kill(pid={}, signal={}) failed: {}", pid, signal, err
+                )));
+            }
+            tracing::debug!(pid, signal, "Sent signal to process");
+        }
+        #[cfg(not(unix))]
+        {
+            tracing::warn!(pid, signal, "Process kill not supported on this platform");
+        }
         Ok(())
     }
 
@@ -634,16 +638,27 @@ impl KillActionExecutor {
 
     /// Terminate a process
     fn terminate_process(&self, pid: u32) -> Result<(), ActionError> {
-        // In production, use:
-        // - nix::unistd::kill(pid as nix::unistd::Pid, signal)
-        // - Or libc::kill(pid, signal) on Unix
+        self.kill_process(pid, self.kill_signal)
+    }
 
-        tracing::info!(pid, signal = self.kill_signal, "Would terminate process");
-
-        // Note: Actual implementation:
-        // use nix::unistd::Pid;
-        // nix::unistd::kill(Pid::from_raw(pid as i32), signal)?;
-
+    /// Kill a process by PID
+    fn kill_process(&self, pid: u32, signal: i32) -> Result<(), ActionError> {
+        #[cfg(unix)]
+        {
+            let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+            if result != 0 {
+                let err = std::io::Error::last_os_error();
+                tracing::warn!(pid, signal, error = %err, "Failed to send signal to process");
+                return Err(ActionError::ActionFailed(format!(
+                    "kill(pid={}, signal={}) failed: {}", pid, signal, err
+                )));
+            }
+            tracing::debug!(pid, signal, "Sent signal to process");
+        }
+        #[cfg(not(unix))]
+        {
+            tracing::warn!(pid, signal, "Process kill not supported on this platform");
+        }
         Ok(())
     }
 }
@@ -946,12 +961,11 @@ impl ActionExecutor for CompositeActionExecutor {
         let result = self.route_execute(decision)?;
 
         // Log to audit if available
-        if let Some(ref audit_log) = self.audit_log {
+        if let Some(audit_log) = self.audit_log.clone() {
             let entity_key = decision.target.pid() as u128;
             let audit = ActionAudit::from_decision(decision, entity_key, result.clone());
-            // Note: In production, use tokio::spawn to avoid blocking
-            futures::executor::block_on(async {
-                audit_log.log(audit).await;
+            tokio::spawn(async move {
+                let _ = audit_log.log(audit).await;
             });
         }
 
@@ -1162,9 +1176,15 @@ mod tests {
             vec![],
         );
 
-        let result = executor.execute(&decision).unwrap();
-        assert!(result.success);
-        assert_eq!(result.actual_action, Some(ActionType::Block));
+        let result = executor.execute(&decision);
+        #[cfg(unix)]
+        assert!(result.is_err(), "Expected error for non-existent PID");
+        #[cfg(not(unix))]
+        {
+            let result = result.unwrap();
+            assert!(result.success);
+            assert_eq!(result.actual_action, Some(ActionType::Block));
+        }
     }
 
     #[test]
@@ -1182,9 +1202,15 @@ mod tests {
             vec![],
         );
 
-        let result = executor.execute(&decision).unwrap();
-        assert!(result.success);
-        assert_eq!(result.actual_action, Some(ActionType::Kill));
+        let result = executor.execute(&decision);
+        #[cfg(unix)]
+        assert!(result.is_err(), "Expected error for non-existent PID");
+        #[cfg(not(unix))]
+        {
+            let result = result.unwrap();
+            assert!(result.success);
+            assert_eq!(result.actual_action, Some(ActionType::Kill));
+        }
     }
 
     #[test]

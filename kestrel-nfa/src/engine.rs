@@ -67,7 +67,7 @@ pub struct NfaEngine {
     sequences: AHashMap<String, Arc<NfaSequence>>,
 
     /// Event type index: event_type_id -> sequence IDs that have steps matching this type
-    event_type_index: HashMap<u16, Vec<String>>,
+    event_type_index: HashMap<u16, Vec<Arc<str>>>,
 
     /// Predicate evaluator for evaluating predicates
     predicate_evaluator: Arc<dyn PredicateEvaluator>,
@@ -129,7 +129,7 @@ impl NfaEngine {
                 self.event_type_index
                     .entry(step.event_type_id)
                     .or_default()
-                    .push(compiled.id.clone());
+                    .push(Arc::from(compiled.id.as_str()));
             }
         }
 
@@ -138,7 +138,7 @@ impl NfaEngine {
             self.event_type_index
                 .entry(until_step.event_type_id)
                 .or_default()
-                .push(compiled.id.clone());
+                .push(Arc::from(compiled.id.as_str()));
         }
 
         Ok(())
@@ -206,7 +206,7 @@ impl NfaEngine {
 
             // Remove from event type index
             for (_event_type, seq_ids) in self.event_type_index.iter_mut() {
-                seq_ids.retain(|id| id != sequence_id);
+                seq_ids.retain(|id| id.as_ref() != sequence_id);
             }
 
             // Unregister metrics
@@ -234,8 +234,11 @@ impl NfaEngine {
         // Record event in metrics - use Relaxed ordering for hot path
         self.metrics.read().record_event_relaxed();
 
+        // Create Arc<Event> once for zero-copy cloning across sequences
+        let event_arc = Arc::new(event.clone());
+
         // Collect relevant sequence IDs to process (avoid borrow issues)
-        let relevant_sequence_ids: Vec<String> = self
+        let relevant_sequence_ids: Vec<Arc<str>> = self
             .event_type_index
             .get(&event_type_id)
             .cloned()
@@ -243,17 +246,20 @@ impl NfaEngine {
 
         let mut alerts = Vec::with_capacity(16);
 
+        // TODO: Parallelize sequence evaluation. Currently sequential because
+        // process_sequence_event_optimized takes &mut self.
         for seq_id in &relevant_sequence_ids {
-            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id) {
+            let seq_id_str = seq_id.as_ref();
+            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id_str) {
                 seq_metrics.record_event_relaxed();
             }
 
-            if let Some(seq) = self.sequences.get(seq_id).cloned() {
-                match self.process_sequence_event_optimized(&seq, event).await {
+            if let Some(seq) = self.sequences.get(seq_id_str).cloned() {
+                match self.process_sequence_event_optimized(&seq, &event_arc).await {
                     Ok(Some(match_alerts)) => alerts.extend(match_alerts),
                     Ok(None) => {},
                     Err(e) => {
-                        warn!(sequence_id = %seq_id, error = %e, "Sequence processing failed");
+                        warn!(sequence_id = %seq_id_str, error = %e, "Sequence processing failed");
                     },
                 }
             }
@@ -276,13 +282,10 @@ impl NfaEngine {
     async fn process_sequence_event_optimized(
         &mut self,
         sequence: &NfaSequence,
-        event: &kestrel_event::Event,
+        event: &Arc<kestrel_event::Event>,
     ) -> NfaResult<Option<Vec<SequenceAlert>>> {
         let entity_key = event.entity_key;
         let event_type_id = event.event_type_id;
-
-        // Create Arc<Event> once for zero-copy cloning
-        let event_arc = Arc::new(event.clone());
 
         // Use pre-computed index for O(1) step lookup (ZERO-COPY)
         let relevant_step_indices = sequence.get_relevant_steps(event_type_id);
@@ -334,7 +337,7 @@ impl NfaEngine {
             let state_id = step.state_id;
             if state_id == 0 {
                 // Start a new partial match
-                self.start_partial_match(sequence, event_arc.clone(), entity_key)?;
+                self.start_partial_match(sequence, Arc::clone(event), entity_key)?;
 
                 // Check if this is a single-step sequence (complete immediately)
                 if sequence.step_count() == 1 {
@@ -348,7 +351,7 @@ impl NfaEngine {
                     }
                 }
             } else if let Some(alert) =
-                self.try_advance_partial_matches(sequence, event_arc.clone(), entity_key, state_id)?
+                self.try_advance_partial_matches(sequence, Arc::clone(event), entity_key, state_id)?
             {
                 alerts.push(alert);
             }
@@ -373,15 +376,17 @@ impl NfaEngine {
         let mut max_state: NfaStateId = 0;
         let mut found = false;
         for step in &sequence.steps {
-            if let Some(pm) = self
-                .state_store
-                .get(&sequence.id, entity_key, step.state_id)
-            {
-                if !pm.terminated && pm.current_state >= max_state {
-                    max_state = pm.current_state;
-                    found = true;
-                }
-            }
+            let _ = self.state_store.with_match(
+                &sequence.id,
+                entity_key,
+                step.state_id,
+                |pm| {
+                    if !pm.terminated && pm.current_state >= max_state {
+                        max_state = pm.current_state;
+                        found = true;
+                    }
+                },
+            );
         }
         // Return the next state to advance to (current max + 1), or 0 if no partial match exists
         if found {
@@ -663,10 +668,18 @@ impl NfaEngine {
     }
 
     /// Cleanup all partial matches for a sequence
-    fn cleanup_sequence(&mut self, _sequence_id: &str) {
-        // This would typically involve iterating through all entities and states
-        // and removing partial matches for this sequence
-        // For now, we'll rely on the periodic cleanup to handle this
+    fn cleanup_sequence(&mut self, sequence_id: &str) {
+        // Get the SeqId for this sequence (if it exists)
+        let seq_id = if let Some(id) = self.state_store.get_seq_id(sequence_id) {
+            id
+        } else {
+            return;
+        };
+
+        // Remove all partial matches for this sequence across all shards
+        let removed = self.state_store.remove_by_sequence(seq_id);
+
+        debug!(sequence_id, removed, "Cleaned up sequence partial matches");
     }
 
     /// Perform periodic maintenance (cleanup expired states, etc.)
@@ -813,7 +826,6 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    #[async_trait::async_trait]
     impl PredicateEvaluator for TestPredicateEvaluator {
         async fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> NfaResult<bool> {
             Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
@@ -832,7 +844,6 @@ mod tests {
         predicates: ahash::AHashMap<String, bool>,
     }
 
-    #[async_trait::async_trait]
     #[async_trait::async_trait]
     impl PredicateEvaluator for AsyncTestPredicateEvaluator {
         async fn evaluate(

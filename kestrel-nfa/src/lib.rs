@@ -71,7 +71,7 @@ pub trait PredicateEvaluator: Send + Sync {
 /// when the same predicate is used in multiple sequences.
 pub struct CachedPredicateEvaluator {
     inner: Arc<dyn PredicateEvaluator>,
-    cache: parking_lot::Mutex<ahash::AHashMap<String, bool>>,
+    cache: parking_lot::Mutex<ahash::AHashMap<(Arc<str>, u64), bool>>,
 }
 
 impl CachedPredicateEvaluator {
@@ -92,20 +92,20 @@ impl CachedPredicateEvaluator {
 #[async_trait]
 impl PredicateEvaluator for CachedPredicateEvaluator {
     async fn evaluate(&self, predicate_id: &str, event: &Event) -> NfaResult<bool> {
-        // Create cache key from predicate_id and event timestamp
-        let cache_key = format!("{}:{}", predicate_id, event.ts_mono_ns);
+        let pred_id: Arc<str> = Arc::from(predicate_id);
+        let key = (pred_id.clone(), event.ts_mono_ns);
 
         // Check cache first
         {
             let cache = self.cache.lock();
-            if let Some(&result) = cache.get(&cache_key) {
+            if let Some(&result) = cache.get(&key) {
                 return Ok(result);
             }
         }
 
         // Evaluate and cache result
         let result = self.inner.evaluate(predicate_id, event).await?;
-        self.cache.lock().insert(cache_key, result);
+        self.cache.lock().insert(key, result);
         Ok(result)
     }
 

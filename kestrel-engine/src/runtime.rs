@@ -219,7 +219,7 @@ impl Runtime for WasmRuntimeAdapter {
         });
 
         self.inner
-            .load_module(manifest, bytes.to_vec(), std::collections::HashMap::new())
+            .load_module(manifest, bytes.to_vec(), ahash::AHashMap::new())
             .await
             .map_err(|e| RuntimeError::CompilationError(e.to_string()))?;
 
