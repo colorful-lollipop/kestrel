@@ -67,13 +67,13 @@ fn main() {
 
     // Warmup
     for _ in 0..10000 {
-        let _ = nfa_engine.process_event_blocking(&event);
+        let _ = nfa_engine.process_event_blocking(Arc::new(event.clone()));
     }
 
     // Benchmark NFA
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = nfa_engine.process_event_blocking(&event);
+        let _ = nfa_engine.process_event_blocking(Arc::new(event.clone()));
     }
     let nfa_duration = start.elapsed();
     let nfa_ns_per_op = nfa_duration.as_nanos() / iterations;

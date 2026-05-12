@@ -86,16 +86,16 @@ fn test_ransomware_attack_detection() {
     let base_time = 1_000_000_000;
 
     let event1 = create_test_event(1001, base_time, entity_key);
-    assert!(engine.process_event_blocking(&event1).unwrap().is_empty());
+    assert!(engine.process_event_blocking(Arc::new(event1.clone())).unwrap().is_empty());
 
     let event2 = create_test_event(1002, base_time + 1_000_000, entity_key);
-    assert!(engine.process_event_blocking(&event2).unwrap().is_empty());
+    assert!(engine.process_event_blocking(Arc::new(event2.clone())).unwrap().is_empty());
 
     let event3 = create_test_event(1002, base_time + 2_000_000, entity_key);
-    assert!(engine.process_event_blocking(&event3).unwrap().is_empty());
+    assert!(engine.process_event_blocking(Arc::new(event3.clone())).unwrap().is_empty());
 
     let event4 = create_test_event(1003, base_time + 3_000_000, entity_key);
-    let alerts = engine.process_event_blocking(&event4).unwrap();
+    let alerts = engine.process_event_blocking(Arc::new(event4.clone())).unwrap();
 
     assert_eq!(alerts.len(), 1, "Should detect ransomware attack!");
     assert_eq!(alerts[0].sequence_id, "ransomware_detection");
@@ -136,25 +136,25 @@ fn test_apt_lateral_movement_detection() {
 
     assert!(
         engine
-            .process_event_blocking(&create_test_event(2001, base_time, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(2001, base_time, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(2002, base_time + 30_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(2002, base_time + 30_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(2003, base_time + 60_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(2003, base_time + 60_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
 
     let alerts = engine
-        .process_event_blocking(&create_test_event(2004, base_time + 90_000_000, entity_key))
+        .process_event_blocking(Arc::new(create_test_event(2004, base_time + 90_000_000, entity_key).clone()))
         .unwrap();
     assert_eq!(alerts.len(), 1, "Should detect APT lateral movement!");
 }
@@ -194,25 +194,25 @@ fn test_insider_data_exfiltration() {
 
     assert!(
         engine
-            .process_event_blocking(&create_test_event(3001, base_time, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(3001, base_time, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(3002, base_time + 120_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(3002, base_time + 120_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(3003, base_time + 180_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(3003, base_time + 180_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
 
     let alerts = engine
-        .process_event_blocking(&create_test_event(3004, base_time + 300_000_000, entity_key))
+        .process_event_blocking(Arc::new(create_test_event(3004, base_time + 300_000_000, entity_key).clone()))
         .unwrap();
     assert_eq!(alerts.len(), 1, "Should detect insider exfiltration!");
 }
@@ -252,25 +252,25 @@ fn test_supply_chain_attack() {
 
     assert!(
         engine
-            .process_event_blocking(&create_test_event(4001, base_time, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(4001, base_time, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(4002, base_time + 600_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(4002, base_time + 600_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(4003, base_time + 1_800_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(4003, base_time + 1_800_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
 
     let alerts = engine
-        .process_event_blocking(&create_test_event(4004, base_time + 2_400_000_000, entity_key))
+        .process_event_blocking(Arc::new(create_test_event(4004, base_time + 2_400_000_000, entity_key).clone()))
         .unwrap();
     assert_eq!(alerts.len(), 1, "Should detect supply chain attack!");
 }
@@ -310,25 +310,25 @@ fn test_cryptomining_detection() {
 
     assert!(
         engine
-            .process_event_blocking(&create_test_event(5001, base_time, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(5001, base_time, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(5002, base_time + 10_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(5002, base_time + 10_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(5003, base_time + 20_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(5003, base_time + 20_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
 
     let alerts = engine
-        .process_event_blocking(&create_test_event(5004, base_time + 30_000_000, entity_key))
+        .process_event_blocking(Arc::new(create_test_event(5004, base_time + 30_000_000, entity_key).clone()))
         .unwrap();
     assert_eq!(alerts.len(), 1, "Should detect cryptomining!");
 }
@@ -368,25 +368,25 @@ fn test_multi_stage_web_attack() {
 
     assert!(
         engine
-            .process_event_blocking(&create_test_event(6001, base_time, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(6001, base_time, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(6002, base_time + 30_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(6002, base_time + 30_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
         engine
-            .process_event_blocking(&create_test_event(6003, base_time + 60_000_000, entity_key))
+            .process_event_blocking(Arc::new(create_test_event(6003, base_time + 60_000_000, entity_key).clone()))
             .unwrap()
             .is_empty()
     );
 
     let alerts = engine
-        .process_event_blocking(&create_test_event(6004, base_time + 90_000_000, entity_key))
+        .process_event_blocking(Arc::new(create_test_event(6004, base_time + 90_000_000, entity_key).clone()))
         .unwrap();
     assert_eq!(alerts.len(), 1, "Should detect multi-stage web attack!");
 }

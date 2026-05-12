@@ -8,10 +8,11 @@ authors = ["Kestrel Team"]
 [dependencies]
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
-kestrel-nfa = { path = "../kestrel-nfa" }
+kestrel-nfa = { path = "../kestrel-nfa", features = ["test-utils"] }
 kestrel-engine = { path = "../kestrel-engine", features = ["wasm", "lua"] }
 kestrel-core = { path = "../kestrel-core" }
 kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm" }
+kestrel-runtime-lua = { path = "../kestrel-runtime-lua" }
 kestrel-ac-dfa = { path = "../kestrel-ac-dfa" }
 kestrel-lazy-dfa = { path = "../kestrel-lazy-dfa" }
 kestrel-hybrid-engine = { path = "../kestrel-hybrid-engine" }
@@ -26,6 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 wat = "1.0"
+ahash = { workspace = true }
 
 [dev-dependencies]
 test-log = "0.2"
@@ -34,6 +36,22 @@ kestrel-nfa = { path = "../kestrel-nfa", features = ["test-utils"] }
 [[bin]]
 name = "kestrel-benchmark"
 path = "src/main.rs"
+
+[[bench]]
+name = "event_processing"
+harness = false
+
+[[bench]]
+name = "nfa_sequence"
+harness = false
+
+[[bench]]
+name = "predicate_evaluation"
+harness = false
+
+[[bench]]
+name = "field_access"
+harness = false
 
 [[bench]]
 name = "hybrid_benchmark"

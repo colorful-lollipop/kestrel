@@ -890,11 +890,12 @@ impl DetectionEngine {
         );
 
         let mut alerts = Vec::new();
+        let event_arc = Arc::new(event.clone());
 
         {
             let mut guard = context.nfa_engine.lock().await;
             if let Some(nfa_engine) = guard.as_mut() {
-                match nfa_engine.process_event(event).await {
+                match nfa_engine.process_event(&*event_arc).await {
                     Ok(sequence_alerts) => {
                         for seq_alert in sequence_alerts {
                             alerts.push(alert_from_sequence_match(&seq_alert));

@@ -36,6 +36,11 @@ pub struct NfaEngineConfig {
 
     /// Budget exceeded action: "fail_open" (skip rule), "fail_closed" (return error), "degrade" (simplify)
     pub budget_action: BudgetAction,
+
+    /// Minimum number of sequences to evaluate in parallel
+    /// 0 = always use parallel evaluation (if runtime available)
+    /// 1+ = only parallelize when relevant sequences >= threshold
+    pub parallel_threshold: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +60,7 @@ impl Default for NfaEngineConfig {
             max_sequences: 1000,
             max_evaluations_per_sec: 100_000,
             max_eval_time_ns: 1_000_000,
+            parallel_threshold: 4,
             budget_action: BudgetAction::FailOpen,
         }
     }
@@ -73,7 +79,7 @@ pub struct NfaEngine {
     predicate_evaluator: Arc<dyn PredicateEvaluator>,
 
     /// State store for partial matches
-    state_store: StateStore,
+    state_store: Arc<StateStore>,
 
     /// Metrics
     metrics: Arc<RwLock<NfaMetrics>>,
@@ -89,7 +95,7 @@ impl NfaEngine {
     /// Create a new NFA engine
     pub fn new(config: NfaEngineConfig, predicate_evaluator: Arc<dyn PredicateEvaluator>) -> Self {
         let metrics = Arc::new(RwLock::new(NfaMetrics::new()));
-        let state_store = StateStore::new(config.state_store.clone());
+        let state_store = Arc::new(StateStore::new(config.state_store.clone()));
 
         Self {
             sequences: AHashMap::default(),
@@ -222,6 +228,13 @@ impl NfaEngine {
     /// - Uses thread-local buffer to avoid allocations
     /// - Zero-copy sequence references (no clone)
     /// - Lock-free metrics for hot path
+    /// Process an event through the NFA engine
+    ///
+    /// TWO-PHASE EVALUATION:
+    /// - Phase 1 (parallel/concurrent): Evaluate predicates across sequences.
+    ///   This phase is read-only with respect to engine state.
+    /// - Phase 2 (sequential): Apply state transitions, budget checks, and metrics
+    ///   updates in deterministic order.
     pub async fn process_event(
         &mut self,
         event: &kestrel_event::Event,
@@ -244,33 +257,58 @@ impl NfaEngine {
             .cloned()
             .unwrap_or_default();
 
-        let mut alerts = Vec::with_capacity(16);
-
-        // TODO: Parallelize sequence evaluation.
-        // process_sequence_event_optimized takes &mut self because it updates state_store.
-        // To parallelize:
-        //   Phase 1 (parallel, read-only): For each sequence, evaluate predicates
-        //     and determine matching steps. Collect (sequence_id, step, entity_key) tuples.
-        //   Phase 2 (sequential, write): Apply state transitions in order.
-        //   This requires splitting process_sequence_event_optimized into
-        //   process_sequence_event_read() and process_sequence_event_write().
-        for seq_id in &relevant_sequence_ids {
-            let seq_id_str = seq_id.as_ref();
-            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(seq_id_str) {
-                seq_metrics.record_event_relaxed();
-            }
-
-            if let Some(seq) = self.sequences.get(seq_id_str).cloned() {
-                match self.process_sequence_event_optimized(&seq, &event_arc).await {
-                    Ok(Some(match_alerts)) => alerts.extend(match_alerts),
-                    Ok(None) => {},
-                    Err(e) => {
-                        warn!(sequence_id = %seq_id_str, error = %e, "Sequence processing failed");
-                    },
+        // Phase 1: Evaluate predicates (parallel if threshold met and tokio runtime available)
+        let evaluations = if relevant_sequence_ids.len() >= self.config.parallel_threshold
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
+            // Spawn evaluation tasks for true parallelism across CPU cores
+            let mut handles = Vec::with_capacity(relevant_sequence_ids.len());
+            for seq_id in relevant_sequence_ids {
+                if let Some(seq) = self.sequences.get(seq_id.as_ref()).cloned() {
+                    let evaluator = Arc::clone(&self.predicate_evaluator);
+                    let event = Arc::clone(&event_arc);
+                    let store = Arc::clone(&self.state_store);
+                    let handle = tokio::task::spawn(async move {
+                        evaluate_sequence_phase1(seq, event, evaluator, store, entity_key).await
+                    });
+                    handles.push(handle);
                 }
             }
-        }
+            let results = futures::future::join_all(handles).await;
+            let mut evaluations = Vec::with_capacity(results.len());
+            for r in results {
+                // JoinHandle yields Result<NfaResult<SequenceEvaluation>, JoinError>
+                evaluations.push(
+                    r.map_err(|e| NfaError::PredicateError(e.to_string()))??
+                );
+            }
+            evaluations
+        } else {
+            // Sequential/concurrent evaluation using join_all (no spawn required)
+            let futures: Vec<_> = relevant_sequence_ids
+                .iter()
+                .filter_map(|seq_id| {
+                    let seq = self.sequences.get(seq_id.as_ref()).cloned()?;
+                    Some(evaluate_sequence_phase1(
+                        seq,
+                        Arc::clone(&event_arc),
+                        Arc::clone(&self.predicate_evaluator),
+                        Arc::clone(&self.state_store),
+                        entity_key,
+                    ))
+                })
+                .collect();
+            let results = futures::future::join_all(futures).await;
+            let mut evaluations = Vec::with_capacity(results.len());
+            for r in results {
+                evaluations.push(r?);
+            }
+            evaluations
+        };
 
+        // Phase 2: Apply state transitions sequentially for determinism
+        let mut alerts = self.apply_evaluations(evaluations, &event_arc).await?;
+        alerts.shrink_to_fit();
         Ok(alerts)
     }
 
@@ -282,194 +320,95 @@ impl NfaEngine {
         futures::executor::block_on(self.process_event(event))
     }
 
-    /// Optimized sequence event processing using pre-computed indices
+    /// Apply evaluated sequence transitions in deterministic order (Phase 2).
     ///
-    /// PERFORMANCE: Uses event_type_to_steps pre-computed index for O(1) lookup
-    async fn process_sequence_event_optimized(
+    /// This method is single-threaded to maintain state consistency.
+    /// Transitions are sorted by sequence_id to ensure deterministic ordering.
+    async fn apply_evaluations(
         &mut self,
-        sequence: &NfaSequence,
+        mut evaluations: Vec<SequenceEvaluation>,
         event: &Arc<kestrel_event::Event>,
-    ) -> NfaResult<Option<Vec<SequenceAlert>>> {
-        let entity_key = event.entity_key;
-        let event_type_id = event.event_type_id;
+    ) -> NfaResult<Vec<SequenceAlert>> {
+        // Sort by sequence_id for deterministic ordering
+        evaluations.sort_by(|a, b| a.sequence_id.cmp(&b.sequence_id));
 
-        // Use pre-computed index for O(1) step lookup (ZERO-COPY)
-        let relevant_step_indices = sequence.get_relevant_steps(event_type_id);
+        let mut alerts = Vec::with_capacity(evaluations.len());
 
-        if relevant_step_indices.is_empty() {
-            return Ok(None);
-        }
-
-        let mut alerts = Vec::with_capacity(1); // Most sequences generate 0 or 1 alerts
-        let _timestamp_ns = event.ts_mono_ns;
-
-        // Check for until condition first
-        if let Some(until_step) = &sequence.until_step {
-            if until_step.event_type_id == event_type_id
-                && self.step_matches(event, until_step, &sequence.id).await?
-            {
-                // Until condition matched - terminate all partial matches for this entity
-                self.terminate_entity_partial_matches(sequence, entity_key)?;
-                return Ok(None);
+        for eval in evaluations {
+            // Record sequence-level event metric
+            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(&eval.sequence_id) {
+                seq_metrics.record_event_relaxed();
             }
-        }
 
-        // Determine expected state based on existing partial matches
-        let expected_state = self.get_expected_state(sequence, entity_key)?;
-        trace!(
-            sequence_id = %sequence.id,
-            entity_key = entity_key,
-            event_type_id = event_type_id,
-            expected_state = expected_state,
-            "Processing sequence event"
-        );
+            let mut action = eval.action;
 
-        // Find step at expected state that passes predicate
-        // Iterate through pre-computed indices instead of filtering
-        let mut step_to_process = None;
-        for &step_idx in relevant_step_indices {
-            if let Some(step) = sequence.steps.get(step_idx) {
-                if step.state_id == expected_state
-                    && self.step_matches(event, step, &sequence.id).await?
-                {
-                    step_to_process = Some(step);
+            // Apply budget checks sequentially (matches original behavior)
+            for (_predicate_id, eval_time_ns) in &eval.predicate_evals {
+                if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(&eval.sequence_id) {
+                    seq_metrics.record_evaluation(*eval_time_ns);
+                }
+
+                if self.check_budget(&eval.sequence_id, *eval_time_ns) {
+                    match self.config.budget_action {
+                        BudgetAction::FailOpen | BudgetAction::Degrade => {
+                            trace!(
+                                sequence_id = %eval.sequence_id,
+                                "Suppressing transition due to budget exceeded"
+                            );
+                            action = EvaluatedAction::None;
+                        },
+                        BudgetAction::FailClosed => {
+                            warn!(sequence_id = %eval.sequence_id, "Rule budget exceeded (fail-closed)");
+                            return Err(NfaError::QuotaExceeded {
+                                rule_id: eval.sequence_id.clone(),
+                                reason: "Budget exceeded during sequential application".to_string(),
+                            });
+                        },
+                    }
                     break;
                 }
             }
-        }
 
-        // Process the found step
-        if let Some(step) = step_to_process {
-            let state_id = step.state_id;
-            if state_id == 0 {
-                // Start a new partial match
-                self.start_partial_match(sequence, Arc::clone(event), entity_key)?;
-
-                // Check if this is a single-step sequence (complete immediately)
-                if sequence.step_count() == 1 {
-                    // Single-step sequence - generate alert immediately
-                    if let Some(pm) = self.state_store.get(&sequence.id, entity_key, 0) {
-                        let alert = self.generate_alert(sequence, pm)?;
-                        alerts.push(alert);
-
-                        // Remove the partial match
-                        self.state_store.remove(&sequence.id, entity_key, 0);
+            // Apply the state transition
+            match action {
+                EvaluatedAction::None => {},
+                EvaluatedAction::Terminate => {
+                    if let Some(seq) = self.sequences.get(&eval.sequence_id).cloned() {
+                        self.terminate_entity_partial_matches(&seq, eval.entity_key)?;
                     }
-                }
-            } else if let Some(alert) =
-                self.try_advance_partial_matches(sequence, Arc::clone(event), entity_key, state_id)?
-            {
-                alerts.push(alert);
+                },
+                EvaluatedAction::StartNew => {
+                    if let Some(seq) = self.sequences.get(&eval.sequence_id).cloned() {
+                        self.start_partial_match(&seq, Arc::clone(event), eval.entity_key)?;
+
+                        // Check if this is a single-step sequence (complete immediately)
+                        if seq.step_count() == 1 {
+                            if let Some(pm) = self.state_store.get(&eval.sequence_id, eval.entity_key, 0) {
+                                let alert = self.generate_alert(&seq, pm)?;
+                                alerts.push(alert);
+                                self.state_store.remove(&eval.sequence_id, eval.entity_key, 0);
+                            }
+                        }
+                    }
+                },
+                EvaluatedAction::AdvanceTo(state_id) => {
+                    if let Some(seq) = self.sequences.get(&eval.sequence_id).cloned() {
+                        if let Some(alert) = self.try_advance_partial_matches(
+                            &seq,
+                            Arc::clone(event),
+                            eval.entity_key,
+                            state_id,
+                        )? {
+                            alerts.push(alert);
+                        }
+                    }
+                },
             }
         }
 
-        Ok(if alerts.is_empty() {
-            None
-        } else {
-            Some(alerts)
-        })
+        Ok(alerts)
     }
 
-    /// Get the expected next state for an entity in a sequence
-    /// Returns 0 if no partial match exists, otherwise returns state_id to advance to
-    fn get_expected_state(
-        &self,
-        sequence: &NfaSequence,
-        entity_key: u128,
-    ) -> NfaResult<NfaStateId> {
-        // Find the maximum current_state among partial matches for this entity
-        // and return the next state to advance to
-        let mut max_state: NfaStateId = 0;
-        let mut found = false;
-        for step in &sequence.steps {
-            let _ = self.state_store.with_match(
-                &sequence.id,
-                entity_key,
-                step.state_id,
-                |pm| {
-                    if !pm.terminated && pm.current_state >= max_state {
-                        max_state = pm.current_state;
-                        found = true;
-                    }
-                },
-            );
-        }
-        // Return the next state to advance to (current max + 1), or 0 if no partial match exists
-        if found {
-            Ok(max_state.saturating_add(1))
-        } else {
-            Ok(0)
-        }
-    }
-
-    /// Check if a step matches an event
-    async fn step_matches(
-        &self,
-        event: &kestrel_event::Event,
-        step: &SeqStep,
-        sequence_id: &str,
-    ) -> NfaResult<bool> {
-        let start_time = std::time::Instant::now();
-
-        let result = match self
-            .predicate_evaluator
-            .evaluate(&step.predicate_id, event)
-            .await
-        {
-            Ok(matches) => Ok(matches),
-            Err(e) => {
-                warn!(
-                    predicate_id = %step.predicate_id,
-                    error = %e,
-                    "Predicate evaluation failed"
-                );
-                Err(e)
-            },
-        };
-
-        let eval_time_ns = start_time.elapsed().as_nanos() as u64;
-
-        // Record evaluation time
-        if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(sequence_id) {
-            seq_metrics.record_evaluation(eval_time_ns);
-        }
-
-        // Check budget
-        if self.check_budget(sequence_id, eval_time_ns) {
-            match &self.config.budget_action {
-                BudgetAction::FailOpen => {
-                    trace!(
-                        sequence_id = sequence_id,
-                        "Skipping rule due to budget exceeded (fail-open)"
-                    );
-                    Ok(false)
-                },
-                BudgetAction::FailClosed => {
-                    warn!(sequence_id = sequence_id, "Rule budget exceeded (fail-closed)");
-                    Err(NfaError::QuotaExceeded {
-                        rule_id: sequence_id.to_string(),
-                        reason: format!(
-                            "Budget exceeded: evals={}",
-                            self.budget_tracker
-                                .read()
-                                .get(sequence_id)
-                                .map(|(_, c, _)| c)
-                                .copied()
-                                .unwrap_or(0)
-                        ),
-                    })
-                },
-                BudgetAction::Degrade => {
-                    trace!(sequence_id = sequence_id, "Degrading rule evaluation (expensive)");
-                    Ok(false)
-                },
-            }
-        } else {
-            result
-        }
-    }
-
-    /// Start a new partial match for a sequence
     fn start_partial_match(
         &mut self,
         sequence: &NfaSequence,
@@ -808,7 +747,143 @@ impl From<(&kestrel_eql::ir::IrRule, &str)> for CompiledSequence {
     }
 }
 
-#[cfg(test)]
+// =============================================================================
+// Two-Phase Evaluation Types and Functions
+// =============================================================================
+
+/// The type of state transition determined during Phase 1 evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvaluatedAction {
+    /// No state transition needed.
+    None,
+    /// Terminate all partial matches for this entity (until condition matched).
+    Terminate,
+    /// Start a new partial match at state 0.
+    StartNew,
+    /// Advance an existing partial match to the given state.
+    AdvanceTo(NfaStateId),
+}
+
+/// Result of Phase 1 evaluation for a single sequence.
+#[derive(Debug, Clone)]
+struct SequenceEvaluation {
+    sequence_id: String,
+    entity_key: u128,
+    action: EvaluatedAction,
+    /// Per-predicate evaluation results: (predicate_id, eval_time_ns)
+    predicate_evals: Vec<(String, u64)>,
+}
+
+/// Phase 1: Evaluate predicates for a single sequence.
+///
+/// This function is pure read-only with respect to engine state.
+/// It may run in parallel with other sequence evaluations.
+async fn evaluate_sequence_phase1(
+    sequence: Arc<NfaSequence>,
+    event: Arc<kestrel_event::Event>,
+    predicate_evaluator: Arc<dyn PredicateEvaluator>,
+    state_store: Arc<StateStore>,
+    entity_key: u128,
+) -> NfaResult<SequenceEvaluation> {
+    let event_type_id = event.event_type_id;
+    let mut predicate_evals = Vec::with_capacity(2);
+
+    // Check until condition first (same order as original sequential code)
+    if let Some(until_step) = &sequence.until_step {
+        if until_step.event_type_id == event_type_id {
+            let start = std::time::Instant::now();
+            let matched = predicate_evaluator
+                .evaluate(&until_step.predicate_id, &event)
+                .await?;
+            predicate_evals.push((
+                until_step.predicate_id.clone(),
+                start.elapsed().as_nanos() as u64,
+            ));
+
+            if matched {
+                return Ok(SequenceEvaluation {
+                    sequence_id: sequence.id.clone(),
+                    entity_key,
+                    action: EvaluatedAction::Terminate,
+                    predicate_evals,
+                });
+            }
+        }
+    }
+
+    // Determine expected state based on existing partial matches (read-only)
+    let expected_state = get_expected_state(&state_store, &sequence, entity_key)?;
+
+    // Find step at expected state that passes predicate
+    let relevant_step_indices = sequence.get_relevant_steps(event_type_id);
+    for &step_idx in relevant_step_indices {
+        if let Some(step) = sequence.steps.get(step_idx) {
+            if step.state_id == expected_state {
+                let start = std::time::Instant::now();
+                let matched = predicate_evaluator
+                    .evaluate(&step.predicate_id, &event)
+                    .await?;
+                predicate_evals.push((
+                    step.predicate_id.clone(),
+                    start.elapsed().as_nanos() as u64,
+                ));
+
+                if matched {
+                    let action = if step.state_id == 0 {
+                        EvaluatedAction::StartNew
+                    } else {
+                        EvaluatedAction::AdvanceTo(step.state_id)
+                    };
+                    return Ok(SequenceEvaluation {
+                        sequence_id: sequence.id.clone(),
+                        entity_key,
+                        action,
+                        predicate_evals,
+                    });
+                }
+                break; // Only one step at expected state
+            }
+        }
+    }
+
+    Ok(SequenceEvaluation {
+        sequence_id: sequence.id.clone(),
+        entity_key,
+        action: EvaluatedAction::None,
+        predicate_evals,
+    })
+}
+
+/// Get the expected next state for an entity in a sequence.
+///
+/// Returns 0 if no partial match exists, otherwise returns state_id to advance to.
+fn get_expected_state(
+    state_store: &StateStore,
+    sequence: &NfaSequence,
+    entity_key: u128,
+) -> NfaResult<NfaStateId> {
+    let mut max_state: NfaStateId = 0;
+    let mut found = false;
+    for step in &sequence.steps {
+        let _ = state_store.with_match(
+            &sequence.id,
+            entity_key,
+            step.state_id,
+            |pm| {
+                if !pm.terminated && pm.current_state >= max_state {
+                    max_state = pm.current_state;
+                    found = true;
+                }
+            },
+        );
+    }
+    if found {
+        Ok(max_state.saturating_add(1))
+    } else {
+        Ok(0)
+    }
+}
+
 mod tests {
     use super::*;
 
@@ -1215,6 +1290,224 @@ mod tests {
         }
     }
 
+    // =========================================================================
+    // Two-Phase Parallel Evaluation Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_parallel_sequential_equivalence_multi_sequence() {
+        let mut parallel_evaluator = TestPredicateEvaluator::new();
+        parallel_evaluator.set_result("p1".to_string(), true);
+        parallel_evaluator.set_result("p2".to_string(), true);
+        parallel_evaluator.set_result("p3".to_string(), true);
+        parallel_evaluator.set_result("p4".to_string(), true);
+
+        let mut sequential_evaluator = TestPredicateEvaluator::new();
+        sequential_evaluator.set_result("p1".to_string(), true);
+        sequential_evaluator.set_result("p2".to_string(), true);
+        sequential_evaluator.set_result("p3".to_string(), true);
+        sequential_evaluator.set_result("p4".to_string(), true);
+
+        let parallel_evaluator: Arc<dyn PredicateEvaluator> = Arc::new(parallel_evaluator);
+        let sequential_evaluator: Arc<dyn PredicateEvaluator> = Arc::new(sequential_evaluator);
+
+        let mut parallel_engine = NfaEngine::new(
+            NfaEngineConfig {
+                parallel_threshold: 0,
+                ..Default::default()
+            },
+            parallel_evaluator,
+        );
+        let mut sequential_engine = NfaEngine::new(
+            NfaEngineConfig {
+                parallel_threshold: 9999,
+                ..Default::default()
+            },
+            sequential_evaluator,
+        );
+
+        // Load multiple sequences with different event types
+        let seqs = vec![
+            ("seq_a", vec![(1, "p1"), (2, "p2")]),
+            ("seq_b", vec![(1, "p3"), (3, "p4")]),
+            ("seq_c", vec![(2, "p1")]),
+        ];
+
+        for (id, steps) in seqs {
+            let seq_steps: Vec<_> = steps
+                .into_iter()
+                .enumerate()
+                .map(|(i, (et, pred))| SeqStep::new(i as u16, pred.to_string(), et))
+                .collect();
+            let seq = NfaSequence::new(id.to_string(), 100, seq_steps, Some(10_000), None);
+            let compiled = CompiledSequence {
+                id: id.to_string(),
+                sequence: seq,
+                rule_id: format!("rule-{}", id),
+                rule_name: id.to_string(),
+            };
+            parallel_engine.load_sequence(compiled.clone()).unwrap();
+            sequential_engine.load_sequence(compiled).unwrap();
+        }
+
+        // Feed interleaved events
+        let events = vec![
+            create_test_event(1, 1_000),
+            create_test_event(1, 2_000),
+            create_test_event(2, 3_000),
+            create_test_event(3, 4_000),
+            create_test_event(2, 5_000),
+        ];
+
+        let mut parallel_alerts = Vec::new();
+        let mut sequential_alerts = Vec::new();
+
+        for event in events {
+            parallel_alerts.extend(parallel_engine.process_event(&event).await.unwrap());
+            sequential_alerts.extend(sequential_engine.process_event(&event).await.unwrap());
+        }
+
+        // Same number of alerts
+        assert_eq!(
+            parallel_alerts.len(),
+            sequential_alerts.len(),
+            "Parallel and sequential should produce same number of alerts"
+        );
+
+        // Same alert contents (sorted by sequence_id for stability)
+        let mut parallel_sorted = parallel_alerts.clone();
+        let mut sequential_sorted = sequential_alerts.clone();
+        parallel_sorted.sort_by(|a, b| a.sequence_id.cmp(&b.sequence_id));
+        sequential_sorted.sort_by(|a, b| a.sequence_id.cmp(&b.sequence_id));
+
+        for (p, s) in parallel_sorted.iter().zip(sequential_sorted.iter()) {
+            assert_eq!(p.sequence_id, s.sequence_id);
+            assert_eq!(p.entity_key, s.entity_key);
+            assert_eq!(p.events.len(), s.events.len());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parallel_sequential_equivalence_single_entity() {
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("p1".to_string(), true);
+        evaluator.set_result("p2".to_string(), true);
+        evaluator.set_result("p3".to_string(), true);
+
+        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(evaluator);
+        let mut parallel_engine = NfaEngine::new(
+            NfaEngineConfig {
+                parallel_threshold: 0,
+                ..Default::default()
+            },
+            Arc::clone(&evaluator),
+        );
+        let mut sequential_engine = NfaEngine::new(
+            NfaEngineConfig {
+                parallel_threshold: 9999,
+                ..Default::default()
+            },
+            evaluator,
+        );
+
+        // One 3-step sequence
+        let seq = NfaSequence::new(
+            "three_step".to_string(),
+            100,
+            vec![
+                SeqStep::new(0, "p1".to_string(), 1),
+                SeqStep::new(1, "p2".to_string(), 2),
+                SeqStep::new(2, "p3".to_string(), 3),
+            ],
+            Some(10_000),
+            None,
+        );
+        let compiled = CompiledSequence {
+            id: "three_step".to_string(),
+            sequence: seq,
+            rule_id: "rule1".to_string(),
+            rule_name: "Three Step".to_string(),
+        };
+        parallel_engine.load_sequence(compiled.clone()).unwrap();
+        sequential_engine.load_sequence(compiled).unwrap();
+
+        let events = vec![
+            create_test_event(1, 1_000),
+            create_test_event(2, 2_000),
+            create_test_event(3, 3_000),
+        ];
+
+        for event in &events {
+            let p = parallel_engine.process_event(event).await.unwrap();
+            let s = sequential_engine.process_event(event).await.unwrap();
+            assert_eq!(
+                p.len(),
+                s.len(),
+                "Event type {} should produce same alert count",
+                event.event_type_id
+            );
+        }
+
+        // Final alert should be identical
+        let p_final = parallel_engine.process_event(&create_test_event(3, 4_000)).await.unwrap();
+        let s_final = sequential_engine.process_event(&create_test_event(3, 4_000)).await.unwrap();
+        assert_eq!(p_final.len(), s_final.len());
+    }
+
+    #[tokio::test]
+    async fn test_parallel_determinism_same_event_same_result() {
+        let mut evaluator = TestPredicateEvaluator::new();
+        evaluator.set_result("p1".to_string(), true);
+        evaluator.set_result("p2".to_string(), true);
+
+        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(evaluator);
+        let mut engine = NfaEngine::new(
+            NfaEngineConfig {
+                parallel_threshold: 0,
+                ..Default::default()
+            },
+            evaluator,
+        );
+
+        // Load 10 single-step sequences all matching event type 1
+        for i in 0..10 {
+            let seq = NfaSequence::new(
+                format!("seq_{}", i),
+                100,
+                vec![SeqStep::new(0, "p1".to_string(), 1)],
+                Some(5_000),
+                None,
+            );
+            let compiled = CompiledSequence {
+                id: format!("seq_{}", i),
+                sequence: seq,
+                rule_id: format!("rule{}", i),
+                rule_name: format!("Rule {}", i),
+            };
+            engine.load_sequence(compiled).unwrap();
+        }
+
+        // Process events with different entity keys deterministically
+        let mut all_counts = Vec::new();
+        for i in 0u128..20 {
+            let e = kestrel_event::Event::builder()
+                .event_type(1)
+                .ts_mono(1_000)
+                .ts_wall(1_000)
+                .entity_key(i.wrapping_add(1))
+                .build()
+                .unwrap();
+            let alerts = engine.process_event(&e).await.unwrap();
+            all_counts.push(alerts.len());
+        }
+
+        // Every run should produce exactly 10 alerts (one per sequence)
+        assert!(
+            all_counts.iter().all(|&c| c == 10),
+            "All parallel runs should produce 10 alerts"
+        );
+    }
+
     fn create_test_event(event_type: u16, timestamp_ns: u64) -> kestrel_event::Event {
         kestrel_event::Event::builder()
             .event_type(event_type)
@@ -1225,3 +1518,4 @@ mod tests {
             .expect("Failed to build test event")
     }
 }
+// TEST MARKER

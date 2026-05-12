@@ -96,7 +96,7 @@ pub fn run_nfa_benchmarks() {
 
     for event in &events {
         let start = std::time::Instant::now();
-        let _ = nfa_engine.process_event_blocking(event);
+        let _ = nfa_engine.process_event_blocking(Arc::new(event.clone()));
         latencies.push(start.elapsed());
     }
 

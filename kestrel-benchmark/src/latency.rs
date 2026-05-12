@@ -146,7 +146,7 @@ impl PredicateEvaluator for NoOpPredicateEvaluator {
 
     println!("  Warming up...");
     for event in &events[..100] {
-        let _ = nfa_engine.process_event_blocking(event);
+        let _ = nfa_engine.process_event_blocking(Arc::new(event.clone()));
     }
 
     let mut latencies = Vec::with_capacity(2000);
@@ -154,7 +154,7 @@ impl PredicateEvaluator for NoOpPredicateEvaluator {
     println!("  Measuring NFA processing latency (2000 events)...");
     for event in &events[100..1200] {
         let start = std::time::Instant::now();
-        let _ = nfa_engine.process_event_blocking(event);
+        let _ = nfa_engine.process_event_blocking(Arc::new(event.clone()));
         latencies.push(start.elapsed());
     }
 

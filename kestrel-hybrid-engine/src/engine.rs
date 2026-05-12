@@ -224,7 +224,7 @@ impl HybridEngine {
         // (In a full implementation, we'd track which rules matched)
 
         // Process through NFA engine (or DFA when available)
-        let nfa_alerts = self.nfa_engine.process_event_blocking(event)?;
+        let nfa_alerts = self.nfa_engine.process_event_blocking(Arc::new(event.clone()))?;
         alerts.extend(nfa_alerts);
 
         // Check for hot sequences and convert to DFA

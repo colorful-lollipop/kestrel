@@ -102,7 +102,7 @@ async fn test_apt_reconnaissance_phase() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -136,7 +136,7 @@ async fn test_apt_initial_compromise() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -169,7 +169,7 @@ async fn test_apt_lateral_movement() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -203,7 +203,7 @@ async fn test_apt_data_collection() {
 
         let mut alerts = vec![];
         for e in &events {
-            alerts.extend(engine.process_event_blocking(e).unwrap());
+            alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
         }
 
         if i == 0 {
@@ -239,7 +239,7 @@ async fn test_apt_exfiltration() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -278,8 +278,8 @@ async fn test_apt_persistence_mechanisms() {
     let e1 = create_event(1, 601, base, entity);
     let e2 = create_event(2, 602, base + 10_000_000_000, entity);
 
-    assert!(engine.process_event_blocking(&e1).unwrap().is_empty());
-    let alerts = engine.process_event_blocking(&e2).unwrap();
+    assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
     assert_eq!(alerts.len(), 1);
     assert!(alerts[0].rule_id.contains("registry-run-keys"));
 }
@@ -311,7 +311,7 @@ async fn test_apt_defense_evasion() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -344,7 +344,7 @@ async fn test_apt_command_control() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -377,7 +377,7 @@ async fn test_apt_privilege_escalation_chain() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -410,7 +410,7 @@ async fn test_apt_discovery_phase() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -443,7 +443,7 @@ async fn test_apt_impact_actions() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -476,7 +476,7 @@ async fn test_apt_credential_access() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -511,7 +511,7 @@ async fn test_apt_multiple_techniques() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 3);
@@ -542,7 +542,7 @@ async fn test_apt_long_running_operation() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -565,10 +565,10 @@ async fn test_apt_interrupted_sequence_recovery() {
     let e1 = create_event(1, 1501, base, entity);
     let e2_timeout = create_event(2, 1502, base + 700_000_000_000, entity); // +700s > 600s maxspan
 
-    assert!(engine.process_event_blocking(&e1).unwrap().is_empty());
+    assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
     assert!(
         engine
-            .process_event_blocking(&e2_timeout)
+            .process_event_blocking(Arc::new(e2_timeout.clone()))
             .unwrap()
             .is_empty()
     ); // Should not complete
@@ -578,9 +578,9 @@ async fn test_apt_interrupted_sequence_recovery() {
     let e2_retry = create_event(4, 1502, base + 805_000_000_000, entity);
     let e3_retry = create_event(5, 1503, base + 810_000_000_000, entity);
 
-    assert!(engine.process_event_blocking(&e1_retry).unwrap().is_empty());
-    assert!(engine.process_event_blocking(&e2_retry).unwrap().is_empty());
-    let alerts = engine.process_event_blocking(&e3_retry).unwrap();
+    assert!(engine.process_event_blocking(Arc::new(e1_retry.clone())).unwrap().is_empty());
+    assert!(engine.process_event_blocking(Arc::new(e2_retry.clone())).unwrap().is_empty());
+    let alerts = engine.process_event_blocking(Arc::new(e3_retry.clone())).unwrap();
     assert_eq!(alerts.len(), 1);
 }
 
@@ -602,8 +602,8 @@ async fn test_apt_concurrent_attacks() {
         let e1 = create_event(i as u64 * 2 + 1, 1601, base, entity);
         let e2 = create_event(i as u64 * 2 + 2, 1602, base + 10_000_000_000, entity);
 
-        engine.process_event_blocking(&e1).unwrap();
-        engine.process_event_blocking(&e2).unwrap();
+        engine.process_event_blocking(Arc::new(e1.clone())).unwrap();
+        engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
     }
 }
 
@@ -635,8 +635,8 @@ async fn test_apt_mitre_attack_mapping() {
         let e1 = create_event(1, event_type_1, base, entity);
         let e2 = create_event(2, event_type_2, base + 5_000_000_000, entity);
 
-        assert!(engine.process_event_blocking(&e1).unwrap().is_empty());
-        let alerts = engine.process_event_blocking(&e2).unwrap();
+        assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+        let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
         assert_eq!(alerts.len(), 1, "MITRE {} should trigger", technique);
         assert!(alerts[0].rule_id.contains(technique));
     }
@@ -669,7 +669,7 @@ async fn test_apt_kill_chain_coverage() {
         let event_type = steps[0].2;
 
         let e = create_event(1, event_type, base, entity);
-        let alerts = engine.process_event_blocking(&e).unwrap();
+        let alerts = engine.process_event_blocking(Arc::new(e.clone())).unwrap();
         assert_eq!(alerts.len(), 1, "Kill chain phase {} should trigger", phase);
     }
 }
@@ -701,7 +701,7 @@ async fn test_apt_timeline_reconstruction() {
 
     let mut alerts = vec![];
     for e in &events {
-        alerts.extend(engine.process_event_blocking(e).unwrap());
+        alerts.extend(engine.process_event_blocking(Arc::new(e.clone())).unwrap());
     }
 
     assert_eq!(alerts.len(), 1);
@@ -743,8 +743,8 @@ async fn test_apt_cross_entity_correlation() {
             *entity,
         );
 
-        assert!(engine.process_event_blocking(&e1).unwrap().is_empty());
-        let alerts = engine.process_event_blocking(&e2).unwrap();
+        assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+        let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].entity_key, *entity);
     }

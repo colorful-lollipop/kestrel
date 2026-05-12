@@ -67,10 +67,10 @@ fn test_lotl_powershell_encode_command() {
     let base = 1_000_000_000u64;
 
     let e1 = create_hunting_event(1001, entity, base);
-    assert!(nfa.process_event_blocking(&e1).unwrap().is_empty());
+    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
 
     let e2 = create_hunting_event(1002, entity, base + 10_000_000);
-    let alerts = nfa.process_event_blocking(&e2).unwrap();
+    let alerts = nfa.process_event_blocking(Arc::new(e2.clone())).unwrap();
     assert_eq!(alerts.len(), 1);
 }
 
@@ -101,8 +101,8 @@ fn test_lotl_certutil_download() {
     let e1 = create_hunting_event(1003, entity, base);
     let e2 = create_hunting_event(1004, entity, base + 50_000_000);
 
-    assert!(nfa.process_event_blocking(&e1).unwrap().is_empty());
-    assert_eq!(nfa.process_event_blocking(&e2).unwrap().len(), 1);
+    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert_eq!(nfa.process_event_blocking(Arc::new(e2.clone())).unwrap().len(), 1);
 }
 
 #[test]
@@ -130,12 +130,12 @@ fn test_lotl_mshta_javascript() {
     let base = 3_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1005, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1005, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1006, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1006, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -167,12 +167,12 @@ fn test_lotl_rundll32_suspicious_export() {
     let base = 4_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1007, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1007, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1008, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1008, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -204,12 +204,12 @@ fn test_lotl_regsvr32_scrobj() {
     let base = 5_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1009, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1009, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1010, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1010, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -241,12 +241,12 @@ fn test_lotl_wmic_process_creation() {
     let base = 6_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1011, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1011, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1012, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1012, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -278,12 +278,12 @@ fn test_lotl_cscript_wscript_execution() {
     let base = 7_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1013, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1013, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1014, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1014, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -319,12 +319,12 @@ fn test_credential_mimikatz_execution() {
     let base = 10_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1015, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1015, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1016, entity, base + 5_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1016, entity, base + 5_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -356,12 +356,12 @@ fn test_credential_lsass_access() {
     let base = 11_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1017, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1017, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1018, entity, base + 1_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1018, entity, base + 1_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -393,12 +393,12 @@ fn test_credential_sam_database_access() {
     let base = 12_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1019, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1019, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1020, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1020, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -431,17 +431,17 @@ fn test_credential_ntds_dit_extraction() {
     let base = 13_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1021, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1021, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1022, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1022, entity, base + 100_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1023, entity, base + 200_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1023, entity, base + 200_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -474,17 +474,17 @@ fn test_credential_kerberoasting() {
     let base = 14_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1024, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1024, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1025, entity, base + 500_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1025, entity, base + 500_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1026, entity, base + 1_000_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1026, entity, base + 1_000_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -520,12 +520,12 @@ fn test_persistence_registry_run_keys() {
     let base = 20_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1027, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1027, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1028, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1028, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -557,12 +557,12 @@ fn test_persistence_scheduled_task_creation() {
     let base = 21_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1029, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1029, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1030, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1030, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -594,12 +594,12 @@ fn test_persistence_wmi_event_subscription() {
     let base = 22_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1031, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1031, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1032, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1032, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -631,12 +631,12 @@ fn test_persistence_service_creation() {
     let base = 23_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1033, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1033, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1034, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1034, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -668,12 +668,12 @@ fn test_persistence_dll_search_order_hijacking() {
     let base = 24_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1035, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1035, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1036, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1036, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -709,12 +709,12 @@ fn test_lateral_psexec_usage() {
     let base = 30_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1037, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1037, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1038, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1038, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -746,12 +746,12 @@ fn test_lateral_wmi_exec() {
     let base = 31_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1039, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1039, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1040, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1040, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -783,12 +783,12 @@ fn test_lateral_winrm_remote_execution() {
     let base = 32_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1041, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1041, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1042, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1042, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -820,12 +820,12 @@ fn test_lateral_remote_scheduled_task() {
     let base = 33_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1043, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1043, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1044, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1044, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -857,12 +857,12 @@ fn test_lateral_smb_admin_share() {
     let base = 34_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1045, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1045, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1046, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1046, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -900,22 +900,22 @@ fn test_evasion_process_hollowing() {
     let base = 40_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1047, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1047, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1048, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1048, entity, base + 100_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1049, entity, base + 200_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1049, entity, base + 200_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1050, entity, base + 300_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1050, entity, base + 300_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -948,17 +948,17 @@ fn test_evasion_process_doppelganging() {
     let base = 41_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1051, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1051, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1052, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1052, entity, base + 100_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1053, entity, base + 200_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1053, entity, base + 200_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -991,17 +991,17 @@ fn test_evasion_amsi_bypass() {
     let base = 42_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1054, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1054, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1055, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1055, entity, base + 100_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1056, entity, base + 200_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1056, entity, base + 200_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1033,12 +1033,12 @@ fn test_evasion_etw_tampering() {
     let base = 43_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1057, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1057, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1058, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1058, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1070,12 +1070,12 @@ fn test_evasion_sxsppl_bypass() {
     let base = 44_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1059, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1059, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1060, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1060, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1111,12 +1111,12 @@ fn test_exfil_compression_archive() {
     let base = 50_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1061, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1061, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1062, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1062, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1148,12 +1148,12 @@ fn test_exfil_cloud_storage_upload() {
     let base = 51_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1063, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1063, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1064, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1064, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1185,12 +1185,12 @@ fn test_exfil_dns_tunneling() {
     let base = 52_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1065, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1065, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1066, entity, base + 50_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1066, entity, base + 50_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1222,12 +1222,12 @@ fn test_exfil_https_c2_beacon() {
     let base = 53_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1067, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1067, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1068, entity, base + 300_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1068, entity, base + 300_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1259,12 +1259,12 @@ fn test_exfil_smtp_data_transfer() {
     let base = 54_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1069, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1069, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1070, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1070, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1300,12 +1300,12 @@ fn test_anomaly_unusual_process_parent() {
     let base = 60_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1071, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1071, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1072, entity, base + 500_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1072, entity, base + 500_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1337,12 +1337,12 @@ fn test_anomaly_unusual_network_connection() {
     let base = 61_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1073, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1073, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1074, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1074, entity, base + 100_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1375,17 +1375,17 @@ fn test_anomaly_mass_file_deletion() {
     let base = 63_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1077, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1077, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1078, entity, base + 500_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1078, entity, base + 500_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1079, entity, base + 1_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1079, entity, base + 1_000_000).clone()))
             .unwrap()
             .len(),
         1
@@ -1418,17 +1418,17 @@ fn test_anomaly_privilege_escalation_attempt() {
     let base = 64_000_000_000u64;
 
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1080, entity, base))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1080, entity, base).clone()))
             .unwrap()
             .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(&create_hunting_event(1081, entity, base + 100_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1081, entity, base + 100_000_000).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_hunting_event(1082, entity, base + 200_000_000))
+        nfa.process_event_blocking(Arc::new(create_hunting_event(1082, entity, base + 200_000_000).clone()))
             .unwrap()
             .len(),
         1

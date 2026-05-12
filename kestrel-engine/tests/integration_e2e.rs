@@ -113,7 +113,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts1 = nfa.process_event_blocking(&event1).unwrap();
+    let alerts1 = nfa.process_event_blocking(Arc::new(event1.clone())).unwrap();
     println!("Event 1: sudo execution (PID 54321)");
     println!("  Timestamp: {} ns", event1.ts_mono_ns);
     println!("  Process: sudo");
@@ -136,7 +136,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts2 = nfa.process_event_blocking(&event2).unwrap();
+    let alerts2 = nfa.process_event_blocking(Arc::new(event2.clone())).unwrap();
     println!("Event 2: chmod execution (PID 54321, +1s)");
     println!("  Timestamp: {} ns", event2.ts_mono_ns);
     println!("  Process: chmod");
@@ -159,7 +159,7 @@ async fn test_e2e_linux_privilege_escalation() {
         .build()
         .unwrap();
 
-    let alerts3 = nfa.process_event_blocking(&event3).unwrap();
+    let alerts3 = nfa.process_event_blocking(Arc::new(event3.clone())).unwrap();
     println!("Event 3: /etc/shadow access (PID 54321, +4s)");
     println!("  Timestamp: {} ns", event3.ts_mono_ns);
     println!("  File: /etc/shadow");
@@ -329,7 +329,7 @@ async fn test_e2e_ransomware_detection() {
     // Process attack sequence
     let mut final_alerts = Vec::new();
     for (i, event) in events.iter().enumerate() {
-        let alerts = nfa.process_event_blocking(event).unwrap();
+        let alerts = nfa.process_event_blocking(Arc::new(event.clone())).unwrap();
         println!("Event {}: type={}, alerts={}", i + 1, event.event_type_id, alerts.len());
 
         if !alerts.is_empty() {
@@ -421,7 +421,7 @@ async fn test_e2e_entity_isolation() {
         .build()
         .unwrap();
 
-    nfa.process_event_blocking(&event1).unwrap();
+    nfa.process_event_blocking(Arc::new(event1.clone())).unwrap();
     println!("✓ Event 1: sudo (PID 11111)");
 
     // Process 2: chmod (PID 22222 - DIFFERENT ENTITY)
@@ -436,7 +436,7 @@ async fn test_e2e_entity_isolation() {
         .build()
         .unwrap();
 
-    nfa.process_event_blocking(&event2).unwrap();
+    nfa.process_event_blocking(Arc::new(event2.clone())).unwrap();
     println!("✓ Event 2: chmod (PID 22222)");
 
     // Process 2: /etc/shadow access (PID 22222)
@@ -450,7 +450,7 @@ async fn test_e2e_entity_isolation() {
         .build()
         .unwrap();
 
-    let alerts = nfa.process_event_blocking(&event3).unwrap();
+    let alerts = nfa.process_event_blocking(Arc::new(event3.clone())).unwrap();
     println!("✓ Event 3: /etc/shadow (PID 22222)");
 
     // Should NOT alert because events are from different entities

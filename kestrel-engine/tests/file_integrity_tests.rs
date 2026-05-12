@@ -59,7 +59,7 @@ fn test_fim_etc_passwd_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40001, 0xE001u128, 1_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40001, 0xE001u128, 1_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -83,7 +83,7 @@ fn test_fim_etc_shadow_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40002, 0xE002u128, 2_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40002, 0xE002u128, 2_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -107,7 +107,7 @@ fn test_fim_sudoers_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40003, 0xE003u128, 3_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40003, 0xE003u128, 3_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -131,7 +131,7 @@ fn test_fim_ssh_config_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40004, 0xE004u128, 4_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40004, 0xE004u128, 4_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -155,7 +155,7 @@ fn test_fim_crontab_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40005, 0xE005u128, 5_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40005, 0xE005u128, 5_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -179,7 +179,7 @@ fn test_fim_systemd_service_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40006, 0xE006u128, 6_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40006, 0xE006u128, 6_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -203,7 +203,7 @@ fn test_fim_kernel_module_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40007, 0xE007u128, 7_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40007, 0xE007u128, 7_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -227,7 +227,7 @@ fn test_fim_ld_preload_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40008, 0xE008u128, 8_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40008, 0xE008u128, 8_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -255,7 +255,7 @@ fn test_fim_web_root_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40009, 0xE010u128, 10_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40009, 0xE010u128, 10_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -279,7 +279,7 @@ fn test_fim_application_binary_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40010, 0xE011u128, 11_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40010, 0xE011u128, 11_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -303,7 +303,7 @@ fn test_fim_library_injection() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40011, 0xE012u128, 12_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40011, 0xE012u128, 12_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -327,7 +327,7 @@ fn test_fim_configuration_file_change() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40012, 0xE013u128, 13_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40012, 0xE013u128, 13_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -351,7 +351,7 @@ fn test_fim_database_file_access() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40013, 0xE014u128, 14_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40013, 0xE014u128, 14_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -379,7 +379,7 @@ fn test_fim_auth_log_deletion() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40014, 0xE020u128, 20_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40014, 0xE020u128, 20_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -403,7 +403,7 @@ fn test_fim_syslog_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40015, 0xE021u128, 21_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40015, 0xE021u128, 21_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -427,7 +427,7 @@ fn test_fim_audit_log_tampering() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40016, 0xE022u128, 22_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40016, 0xE022u128, 22_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -451,7 +451,7 @@ fn test_fim_wtmp_utmp_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40017, 0xE023u128, 23_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40017, 0xE023u128, 23_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -479,7 +479,7 @@ fn test_fim_initd_script_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40018, 0xE030u128, 30_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40018, 0xE030u128, 30_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -503,7 +503,7 @@ fn test_fim_rc_local_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40019, 0xE031u128, 31_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40019, 0xE031u128, 31_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -527,7 +527,7 @@ fn test_fim_profile_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40020, 0xE032u128, 32_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40020, 0xE032u128, 32_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -551,7 +551,7 @@ fn test_fim_bashrc_modification() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40021, 0xE033u128, 33_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40021, 0xE033u128, 33_000_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -582,12 +582,12 @@ fn test_fim_mass_file_deletion() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(&create_fim_event(40022, 0xE040u128, 40_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40022, 0xE040u128, 40_000_000_000u64).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40023, 0xE040u128, 40_010_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40023, 0xE040u128, 40_010_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -614,12 +614,12 @@ fn test_fim_mass_file_encryption() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(&create_fim_event(40024, 0xE041u128, 41_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40024, 0xE041u128, 41_000_000_000u64).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40025, 0xE041u128, 41_005_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40025, 0xE041u128, 41_005_000_000u64).clone()))
             .unwrap()
             .len(),
         1
@@ -646,12 +646,12 @@ fn test_fim_extension_change_pattern() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(&create_fim_event(40026, 0xE042u128, 42_000_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40026, 0xE042u128, 42_000_000_000u64).clone()))
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(&create_fim_event(40027, 0xE042u128, 42_010_000_000u64))
+        nfa.process_event_blocking(Arc::new(create_fim_event(40027, 0xE042u128, 42_010_000_000u64).clone()))
             .unwrap()
             .len(),
         1

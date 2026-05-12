@@ -227,7 +227,7 @@ fn bench_ac_dfa_vs_nfa(c: &mut Criterion) {
     });
 
     group.bench_function("nfa", |b| {
-        b.iter(|| black_box(engine.process_event_blocking(&event)));
+        b.iter(|| black_box(engine.process_event_blocking(Arc::new(event.clone()))));
     });
 
     group.finish();
