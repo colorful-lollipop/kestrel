@@ -12,10 +12,28 @@ use crate::state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 use crate::store::{StateStore, StateStoreConfig};
 use crate::{CompiledSequence, NfaError, NfaResult, PredicateEvaluator, SequenceAlert};
 use ahash::AHashMap;
+use kestrel_event::Event;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
+
+/// Trait to accept either `&Event` or `Arc<Event>` in `process_event_blocking`.
+pub trait EventRef {
+    fn as_event_ref(&self) -> &Event;
+}
+
+impl EventRef for Event {
+    fn as_event_ref(&self) -> &Event { self }
+}
+
+impl EventRef for &Event {
+    fn as_event_ref(&self) -> &Event { self }
+}
+
+impl EventRef for Arc<Event> {
+    fn as_event_ref(&self) -> &Event { &**self }
+}
 
 /// Configuration for the NFA engine
 #[derive(Debug, Clone)]
@@ -315,9 +333,9 @@ impl NfaEngine {
     /// Synchronous compatibility wrapper for non-async callers.
     pub fn process_event_blocking(
         &mut self,
-        event: &kestrel_event::Event,
+        event: impl EventRef,
     ) -> NfaResult<Vec<SequenceAlert>> {
-        futures::executor::block_on(self.process_event(event))
+        futures::executor::block_on(self.process_event(event.as_event_ref()))
     }
 
     /// Apply evaluated sequence transitions in deterministic order (Phase 2).
