@@ -7,7 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use kestrel_core::eventbus::{DefaultPartitioner, Partitioner, PublishError};
 use kestrel_core::{
     ActionDecision, ActionExecutor, ActionPolicy, ActionTarget, ActionType, Alert, AlertHandle,
-    AlertOutput, AlertOutputConfig, EventBus, EventBusConfig, EventBusHandle, NoOpExecutor,
+    AlertOutput, AlertOutputConfig, AlertSink, EventBus, EventBusConfig, EventBusHandle, NoOpExecutor,
     ReplayConfig, ReplaySource, ReplayStats, Severity, TimeManager,
 };
 use kestrel_event::Event;
@@ -72,8 +72,11 @@ pub struct EngineConfig {
     /// Event bus configuration
     pub event_bus: EventBusConfig,
 
-    /// Alert output configuration
+    /// Alert output configuration (legacy, used when `alert_sink` is `None`)
     pub alert_output: AlertOutputConfig,
+
+    /// Optional pluggable alert sink. When provided, takes precedence over `alert_output`.
+    pub alert_sink: Option<Arc<dyn AlertSink>>,
 
     /// Rule manager configuration
     pub rules_dir: std::path::PathBuf,
@@ -97,6 +100,7 @@ impl Default for EngineConfig {
         Self {
             event_bus: EventBusConfig::default(),
             alert_output: AlertOutputConfig::default(),
+            alert_sink: None,
             rules_dir: std::path::PathBuf::from("./rules"),
             mode: EngineMode::Detect,
             action_executor: None,
@@ -220,7 +224,7 @@ fn determine_action_target(event: &Event, schema: &SchemaRegistry) -> ActionTarg
 /// Detection engine
 pub struct DetectionEngine {
     event_bus: EventBus,
-    _alert_output: AlertOutput,
+    _alert_output: Option<AlertOutput>,
     alert_handle: AlertHandle,
     event_batch_rx: Mutex<Option<mpsc::Receiver<Vec<Event>>>>,
     processing_started: AtomicBool,
@@ -273,9 +277,15 @@ impl DetectionEngine {
         let event_bus = EventBus::new_with_sink(config.event_bus.clone(), event_sink_tx);
         info!("Event bus initialized with engine sink");
 
-        let alert_output = AlertOutput::new(config.alert_output);
-        let alert_handle = alert_output.handle();
-        info!("Alert output initialized");
+        let (alert_handle, alert_output) = if let Some(sink) = config.alert_sink {
+            info!("Alert sink initialized (pluggable)");
+            (AlertHandle::from_sink(sink), None)
+        } else {
+            let alert_output = AlertOutput::new(config.alert_output);
+            let handle = alert_output.handle();
+            info!("Alert output initialized (legacy)");
+            (handle, Some(alert_output))
+        };
 
         // Initialize rule manager
         let rule_config = kestrel_rules::RuleManagerConfig {

@@ -13,6 +13,7 @@ test-utils = []
 
 [dependencies]
 # Workspace dependencies
+kestrel-core = { path = "../kestrel-core" }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-eql = { path = "../kestrel-eql" }

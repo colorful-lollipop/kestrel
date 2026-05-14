@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::sync::Arc;
 
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -85,28 +86,81 @@ impl Default for AlertOutputConfig {
 }
 
 /// Alert output handle
-#[derive(Debug, Clone)]
+///
+/// Supports both channel-based (`AlertOutput`) and sink-based (`AlertSink`)
+/// backends for backward compatibility and pluggable routing.
+#[derive(Clone)]
 pub struct AlertHandle {
-    sender: mpsc::Sender<Alert>,
+    inner: AlertHandleInner,
+}
+
+#[derive(Clone)]
+enum AlertHandleInner {
+    Channel(mpsc::Sender<Alert>),
+    Sink(Arc<dyn AlertSink>),
+}
+
+impl std::fmt::Debug for AlertHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.inner {
+            AlertHandleInner::Channel(_) => {
+                f.debug_struct("AlertHandle").field("type", &"channel").finish()
+            }
+            AlertHandleInner::Sink(_) => {
+                f.debug_struct("AlertHandle").field("type", &"sink").finish()
+            }
+        }
+    }
 }
 
 impl AlertHandle {
+    /// Create a handle backed by an [`AlertSink`].
+    pub fn from_sink(sink: Arc<dyn AlertSink>) -> Self {
+        Self {
+            inner: AlertHandleInner::Sink(sink),
+        }
+    }
+
     /// Emit an alert
     pub async fn emit(&self, alert: Alert) -> Result<(), AlertError> {
-        self.sender
-            .send(alert)
-            .await
-            .map_err(|_| AlertError::OutputClosed)?;
-        Ok(())
+        match &self.inner {
+            AlertHandleInner::Channel(sender) => {
+                sender
+                    .send(alert)
+                    .await
+                    .map_err(|_| AlertError::OutputClosed)?;
+                Ok(())
+            }
+            AlertHandleInner::Sink(sink) => sink
+                .emit(&alert)
+                .map(|_| ())
+                .map_err(|e| match e {
+                    AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
+                    AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+                    AlertSinkError::Transport(s) => AlertError::IoError(s),
+                }),
+        }
     }
 
     /// Try to emit without blocking
     pub fn try_emit(&self, alert: Alert) -> Result<(), AlertError> {
-        self.sender.try_send(alert).map_err(|e| match e {
-            mpsc::error::TrySendError::Full(_) => AlertError::OutputFull,
-            mpsc::error::TrySendError::Closed(_) => AlertError::OutputClosed,
-        })?;
-        Ok(())
+        match &self.inner {
+            AlertHandleInner::Channel(sender) => {
+                sender.try_send(alert).map_err(|e| match e {
+                    mpsc::error::TrySendError::Full(_) => AlertError::OutputFull,
+                    mpsc::error::TrySendError::Closed(_) => AlertError::OutputClosed,
+                })?;
+                Ok(())
+            }
+            AlertHandleInner::Sink(sink) => sink
+                .emit(&alert)
+                .map(|_| ())
+                .map_err(|e| match e {
+                    AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
+                    AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+                    AlertSinkError::Transport(s) => AlertError::IoError(s),
+                }),
+        }
     }
 }
 
@@ -121,7 +175,9 @@ impl AlertOutput {
     pub fn new(config: AlertOutputConfig) -> Self {
         let (sender, mut receiver) = mpsc::channel(config.channel_size);
 
-        let handle = AlertHandle { sender };
+        let handle = AlertHandle {
+            inner: AlertHandleInner::Channel(sender),
+        };
 
         let _handle = tokio::spawn(async move {
             while let Some(alert) = receiver.recv().await {

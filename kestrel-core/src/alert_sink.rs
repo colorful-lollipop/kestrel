@@ -213,6 +213,52 @@ impl AlertRouter {
     }
 }
 
+impl AlertSink for AlertRouter {
+    fn emit(
+        &self,
+        alert: &Alert,
+    ) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
+        let mut overall = EmitStatus::Acknowledged;
+        let mut max_bp = Backpressure::Normal;
+        for (_name, sink) in &self.sinks {
+            let (status, bp) = sink.emit(alert)?;
+            if matches!(status, EmitStatus::Dropped(_)) {
+                overall = status;
+            }
+            max_bp = max_bp.max(bp);
+        }
+        Ok((overall, max_bp))
+    }
+
+    fn health(&self) -> SinkHealth {
+        let mut healthy = true;
+        let mut max_lag = 0;
+        let mut total_errors = 0;
+        let mut total_dropped = 0;
+        for (_name, sink) in &self.sinks {
+            let h = sink.health();
+            healthy &= h.healthy;
+            max_lag = max_lag.max(h.lag_ms);
+            total_errors += h.consecutive_errors;
+            total_dropped += h.alerts_dropped;
+        }
+        SinkHealth {
+            healthy,
+            lag_ms: max_lag,
+            consecutive_errors: total_errors,
+            alerts_dropped: total_dropped,
+            last_error: None,
+        }
+    }
+
+    fn shutdown(&self) -> Result<(), AlertSinkError> {
+        for (_name, sink) in &self.sinks {
+            sink.shutdown()?;
+        }
+        Ok(())
+    }
+}
+
 impl Default for AlertRouter {
     fn default() -> Self {
         Self::new()

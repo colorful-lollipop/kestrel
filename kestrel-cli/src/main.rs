@@ -9,8 +9,9 @@
 use anyhow::Result;
 #[cfg(feature = "ebpf")]
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
 use tracing::{Level, info};
@@ -23,6 +24,36 @@ use tracing_subscriber::FmtSubscriber;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum AlertOutputType {
+    /// Output alerts to stdout
+    Stdout,
+    /// Output alerts to a file
+    File,
+    /// Drop all alerts (no output)
+    Null,
+}
+
+/// Alert output configuration for the CLI.
+#[derive(Debug, clap::Args)]
+pub struct AlertOutputArgs {
+    /// Alert output format
+    #[arg(long, value_enum, default_value = "stdout")]
+    pub alert_output: AlertOutputType,
+
+    /// Alert output file path (when format is file)
+    #[arg(long)]
+    pub alert_file: Option<PathBuf>,
+
+    /// Pretty-print JSON alerts
+    #[arg(long)]
+    pub pretty_alerts: bool,
+
+    /// Additional alert sinks (comma-separated: kafka://host:port/topic,es://host:port/index)
+    #[arg(long)]
+    pub alert_sinks: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -44,6 +75,10 @@ enum Commands {
         /// Log level
         #[arg(short, long, default_value = "info")]
         log_level: String,
+
+        /// Alert output configuration
+        #[command(flatten)]
+        alert_config: AlertOutputArgs,
     },
 
     /// Validate rules without running detection
@@ -73,6 +108,10 @@ enum Commands {
         /// Replay speed multiplier (0 = as fast as possible)
         #[arg(long, default_value = "0")]
         speed: f64,
+
+        /// Alert output configuration
+        #[command(flatten)]
+        alert_config: AlertOutputArgs,
     },
 }
 
@@ -86,9 +125,10 @@ async fn main() -> Result<()> {
             ebpf_object,
             collector,
             log_level,
+            alert_config,
         } => {
             setup_logging(&log_level)?;
-            run_engine(rules, ebpf_object, &collector).await?;
+            run_engine(rules, ebpf_object, &collector, &alert_config).await?;
         },
         Commands::Validate { rules } => {
             setup_logging("info")?;
@@ -98,9 +138,14 @@ async fn main() -> Result<()> {
             setup_logging("info")?;
             list_rules(rules).await?;
         },
-        Commands::Replay { rules, log, speed } => {
+        Commands::Replay {
+            rules,
+            log,
+            speed,
+            alert_config,
+        } => {
             setup_logging("info")?;
-            replay_log(rules, log, speed).await?;
+            replay_log(rules, log, speed, &alert_config).await?;
         },
     }
 
@@ -118,16 +163,53 @@ fn setup_logging(level: &str) -> Result<()> {
     Ok(())
 }
 
+/// Build an [`AlertRouter`] from CLI alert output arguments.
+fn create_alert_router(
+    config: &AlertOutputArgs,
+) -> anyhow::Result<kestrel_core::AlertRouter> {
+    let mut router = kestrel_core::AlertRouter::new();
+
+    match config.alert_output {
+        AlertOutputType::Stdout => {
+            router.add_sink(
+                "stdout",
+                Arc::new(kestrel_core::StdoutSink::new(config.pretty_alerts)),
+            );
+        }
+        AlertOutputType::File => {
+            let path = config
+                .alert_file
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("--alert-file required when --alert-output=file"))?;
+            router.add_sink("file", Arc::new(kestrel_core::FileSink::new(path)?));
+        }
+        AlertOutputType::Null => {
+            // No sinks = alerts are dropped
+        }
+    }
+
+    Ok(router)
+}
+
 async fn run_engine(
     rules_dir: PathBuf,
     ebpf_object: Option<PathBuf>,
     collector_type: &str,
+    alert_args: &AlertOutputArgs,
 ) -> Result<()> {
     info!("Starting Kestrel detection engine");
     info!(rules_dir = %rules_dir.display(), "Loading rules from");
 
+    let alert_router = create_alert_router(alert_args)?;
+    let alert_sink: Option<Arc<dyn kestrel_core::AlertSink>> = if alert_router.health().is_empty() {
+        None
+    } else {
+        Some(Arc::new(alert_router))
+    };
+
     let config = kestrel_engine::EngineConfig {
         rules_dir,
+        alert_sink,
         ..Default::default()
     };
 
@@ -316,15 +398,24 @@ async fn validate_rules(rules_dir: PathBuf) -> Result<()> {
     Ok(())
 }
 
-async fn replay_log(rules_dir: PathBuf, log_path: PathBuf, speed: f64) -> Result<()> {
+async fn replay_log(
+    rules_dir: PathBuf,
+    log_path: PathBuf,
+    speed: f64,
+    alert_args: &AlertOutputArgs,
+) -> Result<()> {
     info!(rules_dir = %rules_dir.display(), log_path = %log_path.display(), speed, "Starting replay");
+
+    let alert_router = create_alert_router(alert_args)?;
+    let alert_sink: Option<Arc<dyn kestrel_core::AlertSink>> = if alert_router.health().is_empty() {
+        None
+    } else {
+        Some(Arc::new(alert_router))
+    };
 
     let config = kestrel_engine::EngineConfig {
         rules_dir,
-        alert_output: kestrel_core::AlertOutputConfig {
-            stdout: true,
-            ..Default::default()
-        },
+        alert_sink,
         ..Default::default()
     };
 

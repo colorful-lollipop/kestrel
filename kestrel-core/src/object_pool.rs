@@ -4,8 +4,11 @@
 //! in hot paths. This is particularly useful for event processing
 //! where we need to allocate Vecs and other collections frequently.
 
+use crate::metrics_reporter::{MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter};
 use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 /// A simple object pool for reusable objects
 ///
@@ -22,19 +25,48 @@ pub struct ObjectPool<T: Default> {
     total_created: AtomicUsize,
     /// Total number of objects reused (for metrics)
     total_reused: AtomicUsize,
+    /// Metrics reporter
+    metrics_reporter: Arc<dyn MetricsReporter>,
+    m_acquires: MetricId,
+    m_misses: MetricId,
+    m_wait_time_ns: MetricId,
 }
 
 impl<T: Default> ObjectPool<T> {
-    /// Create a new object pool with the given capacity
+    /// Create a new object pool with the given capacity and metrics reporter.
     ///
     /// # Arguments
     /// * `initial_capacity` - Initial number of objects to pre-allocate
     /// * `max_size` - Maximum number of objects to keep in the pool
-    pub fn new(initial_capacity: usize, max_size: usize) -> Self {
+    /// * `metrics_reporter` - Metrics reporter for pool metrics
+    pub fn with_metrics_reporter(
+        initial_capacity: usize,
+        max_size: usize,
+        metrics_reporter: Arc<dyn MetricsReporter>,
+    ) -> Self {
         let mut pool = Vec::with_capacity(initial_capacity);
         for _ in 0..initial_capacity {
             pool.push(T::default());
         }
+
+        let m_acquires = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_acquires_total",
+            help: "Total acquires from the object pool",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_misses = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_misses_total",
+            help: "Total misses from the object pool (new objects created)",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_wait_time_ns = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_wait_time_ns",
+            help: "Total wait time for pool lock in nanoseconds",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
 
         Self {
             pool: Mutex::new(pool),
@@ -42,7 +74,20 @@ impl<T: Default> ObjectPool<T> {
             current_size: AtomicUsize::new(initial_capacity),
             total_created: AtomicUsize::new(initial_capacity),
             total_reused: AtomicUsize::new(0),
+            metrics_reporter,
+            m_acquires,
+            m_misses,
+            m_wait_time_ns,
         }
+    }
+
+    /// Create a new object pool with the given capacity
+    ///
+    /// # Arguments
+    /// * `initial_capacity` - Initial number of objects to pre-allocate
+    /// * `max_size` - Maximum number of objects to keep in the pool
+    pub fn new(initial_capacity: usize, max_size: usize) -> Self {
+        Self::with_metrics_reporter(initial_capacity, max_size, Arc::new(NoOpMetricsReporter))
     }
 
     /// Acquire an object from the pool
@@ -50,15 +95,22 @@ impl<T: Default> ObjectPool<T> {
     /// If the pool is empty, creates a new object.
     /// Returns the object and a guard that returns it to the pool when dropped.
     pub fn acquire(&self) -> PooledObject<'_, T> {
+        let start = Instant::now();
         let obj = {
             let mut pool = self.pool.lock();
+            let wait_ns = start.elapsed().as_nanos() as u64;
+            self.metrics_reporter.counter_inc(self.m_wait_time_ns, wait_ns);
+
             if let Some(obj) = pool.pop() {
                 self.current_size.fetch_sub(1, Ordering::Relaxed);
                 self.total_reused.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_acquires, 1);
                 obj
             } else {
                 drop(pool);
                 self.total_created.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_acquires, 1);
+                self.metrics_reporter.counter_inc(self.m_misses, 1);
                 T::default()
             }
         };
@@ -73,11 +125,16 @@ impl<T: Default> ObjectPool<T> {
     ///
     /// Returns None if the pool lock is poisoned.
     pub fn try_acquire(&self) -> Option<PooledObject<'_, T>> {
+        let start = Instant::now();
         let mut pool = self.pool.lock();
+        let wait_ns = start.elapsed().as_nanos() as u64;
+        self.metrics_reporter.counter_inc(self.m_wait_time_ns, wait_ns);
+
         if let Some(obj) = pool.pop() {
             drop(pool);
             self.current_size.fetch_sub(1, Ordering::Relaxed);
             self.total_reused.fetch_add(1, Ordering::Relaxed);
+            self.metrics_reporter.counter_inc(self.m_acquires, 1);
             Some(PooledObject {
                 obj: Some(obj),
                 pool: self,
@@ -85,6 +142,8 @@ impl<T: Default> ObjectPool<T> {
         } else {
             drop(pool);
             self.total_created.fetch_add(1, Ordering::Relaxed);
+            self.metrics_reporter.counter_inc(self.m_acquires, 1);
+            self.metrics_reporter.counter_inc(self.m_misses, 1);
             Some(PooledObject {
                 obj: Some(T::default()),
                 pool: self,
@@ -195,12 +254,36 @@ impl<'a, T: Default> Drop for PooledObject<'a, T> {
 pub type EventVecPool = ObjectPool<Vec<kestrel_event::Event>>;
 
 impl EventVecPool {
-    /// Create a new pool for event vectors with specified capacity
-    pub fn for_events(initial_capacity: usize, max_size: usize, vec_capacity: usize) -> Self {
+    /// Create a new pool for event vectors with specified capacity and metrics reporter
+    pub fn for_events_with_reporter(
+        initial_capacity: usize,
+        max_size: usize,
+        vec_capacity: usize,
+        metrics_reporter: Arc<dyn MetricsReporter>,
+    ) -> Self {
         let mut pool = Vec::with_capacity(initial_capacity);
         for _ in 0..initial_capacity {
             pool.push(Vec::with_capacity(vec_capacity));
         }
+
+        let m_acquires = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_acquires_total",
+            help: "Total acquires from the object pool",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_misses = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_misses_total",
+            help: "Total misses from the object pool (new objects created)",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_wait_time_ns = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_pool_wait_time_ns",
+            help: "Total wait time for pool lock in nanoseconds",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
 
         Self {
             pool: Mutex::new(pool),
@@ -208,7 +291,21 @@ impl EventVecPool {
             current_size: AtomicUsize::new(initial_capacity),
             total_created: AtomicUsize::new(initial_capacity),
             total_reused: AtomicUsize::new(0),
+            metrics_reporter,
+            m_acquires,
+            m_misses,
+            m_wait_time_ns,
         }
+    }
+
+    /// Create a new pool for event vectors with specified capacity
+    pub fn for_events(initial_capacity: usize, max_size: usize, vec_capacity: usize) -> Self {
+        Self::for_events_with_reporter(
+            initial_capacity,
+            max_size,
+            vec_capacity,
+            Arc::new(NoOpMetricsReporter),
+        )
     }
 }
 

@@ -4,6 +4,7 @@
 //! It supports batching, backpressure, and partitioning.
 
 use crate::BackpressureConfig;
+use crate::metrics_reporter::{MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter};
 use kestrel_event::Event;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -120,6 +121,10 @@ pub struct EventBusHandle {
     metrics: Arc<EventBusMetrics>,
     backpressure_config: BackpressureConfig,
     partitioner: Arc<dyn Partitioner>,
+    metrics_reporter: Arc<dyn MetricsReporter>,
+    m_events_received: MetricId,
+    m_events_dropped: MetricId,
+    m_backpressure_count: MetricId,
 }
 
 impl std::fmt::Debug for EventBusHandle {
@@ -146,10 +151,12 @@ impl EventBusHandle {
         match sender.send(event).await {
             Ok(()) => {
                 self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_events_received, 1);
                 Ok(())
             },
             Err(_) => {
                 self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_events_dropped, 1);
                 Err(PublishError::Closed)
             },
         }
@@ -164,6 +171,7 @@ impl EventBusHandle {
             self.metrics
                 .backpressure_count
                 .fetch_add(1, Ordering::Relaxed);
+            self.metrics_reporter.counter_inc(self.m_backpressure_count, 1);
 
             let timeout_duration = Duration::from_millis(
                 self.backpressure_config.backpressure_timeout.as_millis() as u64,
@@ -172,6 +180,7 @@ impl EventBusHandle {
                 Ok(Ok(permit)) => {
                     permit.send(event);
                     self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                    self.metrics_reporter.counter_inc(self.m_events_received, 1);
                     return Ok(());
                 },
                 _ => return Err(PublishError::BackpressureTimeout),
@@ -180,6 +189,7 @@ impl EventBusHandle {
 
         sender.send(event).await.map_err(|_| PublishError::Closed)?;
         self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+        self.metrics_reporter.counter_inc(self.m_events_received, 1);
         Ok(())
     }
 
@@ -191,10 +201,12 @@ impl EventBusHandle {
         match sender.try_send(event) {
             Ok(()) => {
                 self.metrics.events_received.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_events_received, 1);
                 Ok(())
             },
             Err(e) => {
                 self.metrics.events_dropped.fetch_add(1, Ordering::Relaxed);
+                self.metrics_reporter.counter_inc(self.m_events_dropped, 1);
                 match e {
                     mpsc::error::TrySendError::Full(_) => Err(PublishError::Full),
                     mpsc::error::TrySendError::Closed(_) => Err(PublishError::Closed),
@@ -219,14 +231,44 @@ pub struct EventBus {
     _handles: Vec<tokio::task::JoinHandle<()>>,
     handle: EventBusHandle,
     shutdown: Arc<AtomicBool>,
+    metrics_reporter: Arc<dyn MetricsReporter>,
 }
 
 impl EventBus {
-    /// Create a new event bus with the given configuration
+    /// Create a new event bus with the given configuration and metrics reporter.
     /// The `sink` parameter provides the downstream consumer (e.g., DetectionEngine)
-    pub fn new_with_sink(config: EventBusConfig, sink: mpsc::Sender<Vec<Event>>) -> Self {
+    pub fn new_with_sink_and_reporter(
+        config: EventBusConfig,
+        sink: mpsc::Sender<Vec<Event>>,
+        metrics_reporter: Arc<dyn MetricsReporter>,
+    ) -> Self {
         let metrics = Arc::new(EventBusMetrics::default());
         let partition_count = config.partitions.max(1);
+
+        let m_events_received = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_eventbus_events_received_total",
+            help: "Total events received by the event bus",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_events_processed = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_eventbus_events_processed_total",
+            help: "Total events processed by the event bus",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_events_dropped = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_eventbus_events_dropped_total",
+            help: "Total events dropped by the event bus",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
+        let m_backpressure_count = metrics_reporter.register(MetricDescriptor {
+            name: "kestrel_eventbus_backpressure_events_total",
+            help: "Total backpressure events in the event bus",
+            kind: MetricKind::Counter,
+            labels: vec![],
+        });
 
         let mut senders = Vec::with_capacity(partition_count);
         let mut receivers = Vec::with_capacity(partition_count);
@@ -248,6 +290,11 @@ impl EventBus {
             metrics: metrics.clone(),
             backpressure_config: config.backpressure.clone(),
             partitioner,
+            metrics_reporter: metrics_reporter.clone(),
+            m_events_received,
+            m_events_processed,
+            m_events_dropped,
+            m_backpressure_count,
         };
 
         let mut handles = Vec::new();
@@ -258,6 +305,8 @@ impl EventBus {
             let metrics_clone = metrics.clone();
             let shutdown_clone = shutdown.clone();
             let sink_tx = sink.clone();
+            let reporter_clone = metrics_reporter.clone();
+            let m_processed = m_events_processed;
 
             let handle_task = tokio::spawn(async move {
                 Self::worker_partition(
@@ -268,6 +317,8 @@ impl EventBus {
                     metrics_clone,
                     shutdown_clone,
                     config.batch_timeout_ms,
+                    reporter_clone,
+                    m_processed,
                 )
                 .await;
             });
@@ -286,14 +337,21 @@ impl EventBus {
             _handles: handles,
             handle,
             shutdown,
+            metrics_reporter,
         }
     }
 
-    /// Create a new event bus with a default consumer that counts processed events
+    /// Create a new event bus with the given configuration
+    /// The `sink` parameter provides the downstream consumer (e.g., DetectionEngine)
+    pub fn new_with_sink(config: EventBusConfig, sink: mpsc::Sender<Vec<Event>>) -> Self {
+        Self::new_with_sink_and_reporter(config, sink, Arc::new(NoOpMetricsReporter))
+    }
+
+    /// Create a new event bus with a metrics reporter.
     ///
     /// This is useful for testing and simple use cases where you don't need a custom sink.
-    /// For production use, prefer `new_with_sink()` to connect to a downstream consumer.
-    pub fn new(config: EventBusConfig) -> Self {
+    /// For production use, prefer `new_with_sink_and_reporter()` to connect to a downstream consumer.
+    pub fn new_with_reporter(config: EventBusConfig, metrics_reporter: Arc<dyn MetricsReporter>) -> Self {
         let (sink_tx, mut sink_rx) = mpsc::channel(1);
 
         // Spawn a background consumer that simply receives and drops events
@@ -304,7 +362,15 @@ impl EventBus {
             }
         });
 
-        Self::new_with_sink(config, sink_tx)
+        Self::new_with_sink_and_reporter(config, sink_tx, metrics_reporter)
+    }
+
+    /// Create a new event bus with a default consumer that counts processed events
+    ///
+    /// This is useful for testing and simple use cases where you don't need a custom sink.
+    /// For production use, prefer `new_with_sink()` to connect to a downstream consumer.
+    pub fn new(config: EventBusConfig) -> Self {
+        Self::new_with_reporter(config, Arc::new(NoOpMetricsReporter))
     }
 
     /// Subscribe to events from the bus
@@ -320,7 +386,7 @@ impl EventBus {
     }
 
     /// Worker partition that batches and delivers events
-    #[tracing::instrument(skip(receiver, sink_tx, metrics, shutdown), fields(partition_id))]
+    #[tracing::instrument(skip(receiver, sink_tx, metrics, shutdown, reporter), fields(partition_id))]
     async fn worker_partition(
         partition_id: usize,
         mut receiver: mpsc::Receiver<Event>,
@@ -329,6 +395,8 @@ impl EventBus {
         metrics: Arc<EventBusMetrics>,
         shutdown: Arc<AtomicBool>,
         batch_timeout_ms: u64,
+        reporter: Arc<dyn MetricsReporter>,
+        m_events_processed: MetricId,
     ) {
         let mut batch = Vec::with_capacity(batch_size);
         let mut last_send = tokio::time::Instant::now();
@@ -356,6 +424,7 @@ impl EventBus {
                         metrics
                             .events_processed
                             .fetch_add(batch_len as u64, Ordering::Relaxed);
+                        reporter.counter_inc(m_events_processed, batch_len as u64);
                         debug!(
                             partition = partition_id,
                             batch_size = batch_len,
@@ -394,6 +463,7 @@ impl EventBus {
                                     );
                                 } else {
                                     metrics.events_processed.fetch_add(batch_len as u64, Ordering::Relaxed);
+                                    reporter.counter_inc(m_events_processed, batch_len as u64);
                                     last_send = tokio::time::Instant::now();
                                 }
                                 batch = Vec::with_capacity(batch_size);
@@ -415,6 +485,7 @@ impl EventBus {
             metrics
                 .events_processed
                 .fetch_add(batch_len as u64, Ordering::Relaxed);
+            reporter.counter_inc(m_events_processed, batch_len as u64);
         }
 
         debug!(partition = partition_id, "Worker partition shutting down");
