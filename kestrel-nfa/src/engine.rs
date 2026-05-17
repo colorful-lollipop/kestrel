@@ -715,15 +715,8 @@ impl NfaEngine {
 
     /// Cleanup all partial matches for a sequence
     fn cleanup_sequence(&mut self, sequence_id: &str) {
-        // Get the SeqId for this sequence (if it exists)
-        let seq_id = if let Some(id) = self.state_store.get_seq_id(sequence_id) {
-            id
-        } else {
-            return;
-        };
-
         // Remove all partial matches for this sequence across all shards
-        let removed = self.state_store.remove_by_sequence(seq_id);
+        let removed = self.state_store.remove_by_sequence(sequence_id);
 
         debug!(sequence_id, removed, "Cleaned up sequence partial matches");
     }

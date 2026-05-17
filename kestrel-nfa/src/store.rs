@@ -117,7 +117,7 @@ pub trait StateStoreBackend: Send + Sync {
     async fn total_matches(&self) -> usize;
 
     /// Remove all partial matches for a given sequence.
-    async fn remove_by_sequence(&self, seq_id: SeqId) -> usize;
+    async fn remove_by_sequence(&self, sequence_id: &str) -> usize;
 }
 
 /// A shard of the state store
@@ -472,7 +472,12 @@ impl StateStore {
     }
 
     /// Remove all partial matches for a given sequence across all shards
-    pub fn remove_by_sequence(&self, seq_id: SeqId) -> usize {
+    pub fn remove_by_sequence(&self, sequence_id: &str) -> usize {
+        let seq_id = if let Some(id) = self.get_seq_id(sequence_id) {
+            id
+        } else {
+            return 0;
+        };
         let mut total_removed = 0;
         for shard in &self.shards {
             let mut shard_guard = shard.write();
@@ -540,8 +545,8 @@ impl StateStoreBackend for StateStore {
         self.total_matches()
     }
 
-    async fn remove_by_sequence(&self, seq_id: SeqId) -> usize {
-        self.remove_by_sequence(seq_id)
+    async fn remove_by_sequence(&self, sequence_id: &str) -> usize {
+        self.remove_by_sequence(sequence_id)
     }
 }
 

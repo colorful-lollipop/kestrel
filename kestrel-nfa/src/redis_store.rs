@@ -6,7 +6,7 @@
 //! - Connection pooling via deadpool-redis
 
 use crate::state::{NfaStateId, PartialMatch};
-use crate::{NfaError, NfaResult, SeqId};
+use crate::{NfaError, NfaResult};
 use async_trait::async_trait;
 use redis::AsyncCommands;
 
@@ -99,7 +99,7 @@ impl crate::store::StateStoreBackend for RedisStateStore {
             .map_err(|e| NfaError::StateStoreError(format!("Redis pool: {}", e)))?;
 
         let ttl_seconds =
-            ((match_state.maxspan_ms() + self.config.ttl_buffer_ms) / 1000).max(1) as usize;
+            ((match_state.maxspan_ms.unwrap_or(30_000) + self.config.ttl_buffer_ms) / 1000).max(1) as usize;
 
         redis::pipe()
             .atomic()
@@ -176,8 +176,8 @@ impl crate::store::StateStoreBackend for RedisStateStore {
         0
     }
 
-    async fn remove_by_sequence(&self, seq_id: SeqId) -> usize {
-        let pattern = format!("{}:match:{}:*", self.config.key_prefix, seq_id);
+    async fn remove_by_sequence(&self, sequence_id: &str) -> usize {
+        let pattern = format!("{}:match:{}:*", self.config.key_prefix, sequence_id);
         let mut conn = match self.pool.get().await {
             Ok(c) => c,
             Err(_) => return 0,
@@ -279,7 +279,7 @@ mod tests {
         let store = maybe_redis_store().await.expect("Redis not available");
         let mut pm = create_test_partial_match("ttl_seq", 999, 0);
         // Override maxspan to 1 ms so TTL is very short
-        pm.maxspan_ms_override = Some(1);
+        pm.maxspan_ms = Some(1);
 
         store.insert(pm).await.unwrap();
 
@@ -303,10 +303,7 @@ mod tests {
         store.insert(create_test_partial_match("seq_a", 2, 0)).await.unwrap();
         store.insert(create_test_partial_match("seq_b", 1, 0)).await.unwrap();
 
-        let removed = store.remove_by_sequence(0).await; // seq_a maps to SeqId 0 in this basic impl
-        // Note: remove_by_sequence uses SeqId, but Redis keys use sequence_id string.
-        // The basic implementation scans for the numeric seq_id in the key pattern,
-        // which won't match "seq_a". This test documents current behavior.
-        let _ = removed;
+        let removed = store.remove_by_sequence("seq_a").await;
+        assert_eq!(removed, 2, "Expected 2 matches for seq_a to be removed");
     }
 }
