@@ -9,10 +9,10 @@ struct TestPredicateEvaluator;
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_event::PredicateResult<bool> {
         Ok(true)
     }
-    fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(vec![])
     }
     fn has_predicate(&self, _id: &str) -> bool {
@@ -54,7 +54,11 @@ async fn test_process_injection_sequence() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = Event::builder()
         .event_type(1002)
@@ -63,7 +67,11 @@ async fn test_process_injection_sequence() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event_blocking(Arc::new(e2.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e2.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e3 = Event::builder()
         .event_type(1003)
@@ -114,7 +122,9 @@ async fn test_file_exfiltration_sequence() {
             .unwrap();
         if i < 2 {
             assert!(
-                nfa.process_event_blocking(Arc::new(e.clone())).unwrap().is_empty(),
+                nfa.process_event_blocking(Arc::new(e.clone()))
+                    .unwrap()
+                    .is_empty(),
                 "Step {} should be partial match",
                 i + 1
             );
@@ -165,7 +175,9 @@ async fn test_c2_beaconing_pattern() {
 
         if i < 4 {
             assert!(
-                nfa.process_event_blocking(Arc::new(e.clone())).unwrap().is_empty(),
+                nfa.process_event_blocking(Arc::new(e.clone()))
+                    .unwrap()
+                    .is_empty(),
                 "Beacon {} should be partial",
                 i + 1
             );
@@ -208,7 +220,11 @@ async fn test_maxspan_enforcement() {
         .entity_key(entity)
         .build()
         .unwrap();
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = Event::builder()
         .event_type(4002)
@@ -258,8 +274,16 @@ async fn test_entity_isolation() {
         .entity_key(0xBBBB)
         .build()
         .unwrap();
-    assert!(nfa.process_event_blocking(Arc::new(e1a.clone())).unwrap().is_empty());
-    assert!(nfa.process_event_blocking(Arc::new(e1b.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1a.clone()))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1b.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2a = Event::builder()
         .event_type(5002)

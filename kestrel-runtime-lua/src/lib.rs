@@ -353,7 +353,9 @@ impl LuaEngine {
         info!(rule_id = %rule_id, "Loading Lua predicate");
 
         let lua = &self.lua;
-        let predicate = self.load_predicate_internal(lua, &rule_id, script, manifest).await?;
+        let predicate = self
+            .load_predicate_internal(lua, &rule_id, script, manifest)
+            .await?;
 
         let mut predicates = self.predicates.write();
         predicates.insert(rule_id.clone(), predicate);
@@ -468,11 +470,10 @@ impl LuaEngine {
 
     /// Register a compiled regex pattern
     pub async fn register_regex(&self, pattern: &str) -> Result<RegexId, LuaRuntimeError> {
-        let re =
-            kestrel_schema::map_err_string!(
-                regex::Regex::new(pattern),
-                LuaRuntimeError::LoadError
-            )?;
+        let re = kestrel_schema::map_err_string!(
+            regex::Regex::new(pattern),
+            LuaRuntimeError::LoadError
+        )?;
 
         let id = self
             .next_regex_id
@@ -484,11 +485,10 @@ impl LuaEngine {
 
     /// Register a compiled glob pattern
     pub async fn register_glob(&self, pattern: &str) -> Result<GlobId, LuaRuntimeError> {
-        let glob =
-            kestrel_schema::map_err_string!(
-                glob::Pattern::new(pattern),
-                LuaRuntimeError::LoadError
-            )?;
+        let glob = kestrel_schema::map_err_string!(
+            glob::Pattern::new(pattern),
+            LuaRuntimeError::LoadError
+        )?;
 
         let id = self
             .next_glob_id
@@ -533,7 +533,7 @@ impl LuaEngine {
 /// This allows the Lua runtime to be used as a predicate evaluator
 /// for the NFA sequence engine, enabling dual runtime support (Wasm + Lua).
 #[async_trait::async_trait]
-impl kestrel_nfa::PredicateEvaluator for LuaEngine {
+impl kestrel_event::PredicateEvaluator for LuaEngine {
     /// Evaluate a predicate against an event
     ///
     /// The predicate_id should be in the format "rule_id" where:
@@ -542,7 +542,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
         &self,
         predicate_id: &str,
         event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
+    ) -> kestrel_event::PredicateResult<bool> {
         // Set the current event context
         {
             let mut current_event = self.current_event.write();
@@ -559,7 +559,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
         let metadata = {
             let predicates = self.predicates.read();
             let predicate = predicates.get(predicate_id).ok_or_else(|| {
-                kestrel_nfa::NfaError::PredicateError(format!(
+                kestrel_event::PredicateError::EvaluationFailed(format!(
                     "Predicate not found: {}",
                     predicate_id
                 ))
@@ -578,7 +578,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
         // Get the pred_eval function
         let pred_eval: mlua::Function = lua.globals().get("pred_eval").map_err(|e| {
-            kestrel_nfa::NfaError::PredicateError(format!(
+            kestrel_event::PredicateError::EvaluationFailed(format!(
                 "Failed to get pred_eval function: {}",
                 e
             ))
@@ -586,7 +586,10 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
 
         // Call the predicate with event_handle=0 (we only support one event at a time)
         let result: mlua::Value = pred_eval.call(0u32).map_err(|e| {
-            kestrel_nfa::NfaError::PredicateError(format!("Failed to call pred_eval: {}", e))
+            kestrel_event::PredicateError::EvaluationFailed(format!(
+                "Failed to call pred_eval: {}",
+                e
+            ))
         })?;
 
         // Convert result to boolean
@@ -616,7 +619,7 @@ impl kestrel_nfa::PredicateEvaluator for LuaEngine {
     ///
     /// For Lua predicates, we return an empty vec since we don't track
     /// field dependencies statically (Lua is dynamic).
-    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         // Lua is dynamically typed, so we can't determine required fields statically
         // Returning empty vec means "potentially all fields"
         Ok(Vec::new())

@@ -333,6 +333,171 @@ impl RuleManager {
     pub async fn rule_count(&self) -> usize {
         self.rules.read().await.len()
     }
+
+    /// Reload all rules from the configured directory atomically.
+    ///
+    /// New rules are loaded into a temporary map and then swapped atomically
+    /// with the current rules. This ensures that rules are never in an inconsistent state.
+    pub async fn reload_all(&self) -> Result<ReloadStats, RuleManagerError> {
+        info!(dir = %self.config.rules_dir.display(), "Reloading rules");
+
+        let mut new_rules = HashMap::new();
+        let mut stats = ReloadStats::default();
+
+        if !self.config.rules_dir.exists() {
+            warn!("Rules directory does not exist: {}", self.config.rules_dir.display());
+            return Ok(stats);
+        }
+
+        let entries = std::fs::read_dir(&self.config.rules_dir)
+            .map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
+
+        for entry in entries {
+            let entry =
+                entry.map_err(|e| RuleManagerError::IoError(self.config.rules_dir.clone(), e))?;
+            let path = entry.path();
+
+            let load_result = if path.is_dir() {
+                self.load_rule_package_returning_rule(&path).await
+            } else {
+                self.load_rule_file_returning_rule(&path).await
+            };
+
+            match load_result {
+                Ok(rule) => {
+                    let rule_id = rule.metadata.id.clone();
+                    if new_rules.contains_key(&rule_id) {
+                        stats.failed += 1;
+                        error!(rule_id = %rule_id, path = %path.display(), "Duplicate rule ID");
+                    } else {
+                        new_rules.insert(rule_id, rule);
+                        stats.loaded += 1;
+                    }
+                },
+                Err(e) => {
+                    stats.failed += 1;
+                    error!(path = %path.display(), error = %e, "Failed to load rule");
+                },
+            }
+        }
+
+        // Compare with existing rules
+        let existing_rules = self.rules.read().await;
+        let existing_ids: std::collections::HashSet<_> = existing_rules.keys().collect();
+        let new_ids: std::collections::HashSet<_> = new_rules.keys().collect();
+
+        stats.added = new_ids.difference(&existing_ids).count();
+        stats.removed = existing_ids.difference(&new_ids).count();
+        stats.unchanged = existing_ids.intersection(&new_ids).count();
+
+        // Atomically swap the rules
+        drop(existing_rules);
+        let mut rules = self.rules.write().await;
+        *rules = new_rules;
+        drop(rules);
+
+        info!(
+            loaded = stats.loaded,
+            added = stats.added,
+            removed = stats.removed,
+            unchanged = stats.unchanged,
+            failed = stats.failed,
+            "Rule reload complete"
+        );
+
+        Ok(stats)
+    }
+
+    /// Load a single rule file and return the Rule
+    async fn load_rule_file_returning_rule(&self, path: &Path) -> Result<Rule, RuleManagerError> {
+        let _permit = self
+            .load_semaphore
+            .acquire()
+            .await
+            .map_err(|_| RuleManagerError::LoadLimitExceeded)?;
+
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .ok_or_else(|| RuleManagerError::InvalidRuleFormat(path.to_path_buf()))?;
+
+        match extension {
+            "json" => {
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| RuleManagerError::IoError(path.to_path_buf(), e))?;
+                let metadata: RuleMetadata = serde_json::from_str(&content)
+                    .map_err(|e| RuleManagerError::ParseError(path.to_path_buf(), e.to_string()))?;
+                Ok(Rule {
+                    metadata: metadata.clone(),
+                    definition: RuleDefinition::Eql(content),
+                })
+            },
+            "yaml" | "yml" => {
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| RuleManagerError::IoError(path.to_path_buf(), e))?;
+                let metadata: RuleMetadata = serde_yaml::from_str(&content)
+                    .map_err(|e| RuleManagerError::ParseError(path.to_path_buf(), e.to_string()))?;
+                Ok(Rule {
+                    metadata: metadata.clone(),
+                    definition: RuleDefinition::Eql(content),
+                })
+            },
+            "eql" => {
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| RuleManagerError::IoError(path.to_path_buf(), e))?;
+                let id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let metadata = RuleMetadata {
+                    id: id.clone(),
+                    name: id.clone(),
+                    description: None,
+                    version: "1.0.0".to_string(),
+                    author: None,
+                    tags: vec![],
+                    severity: Severity::Medium,
+                };
+                Ok(Rule {
+                    metadata,
+                    definition: RuleDefinition::Eql(content),
+                })
+            },
+            _ => Err(RuleManagerError::InvalidRuleFormat(path.to_path_buf())),
+        }
+    }
+
+    /// Load a directory-based rule package and return the Rule.
+    async fn load_rule_package_returning_rule(
+        &self,
+        path: &Path,
+    ) -> Result<Rule, RuleManagerError> {
+        let _permit = self
+            .load_semaphore
+            .acquire()
+            .await
+            .map_err(|_| RuleManagerError::LoadLimitExceeded)?;
+
+        let manifest_path = path.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(RuleManagerError::InvalidRuleFormat(path.to_path_buf()));
+        }
+
+        let manifest_content = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| RuleManagerError::IoError(manifest_path.clone(), e))?;
+        let manifest: RuleManifest = serde_json::from_str(&manifest_content)
+            .map_err(|e| RuleManagerError::ParseError(manifest_path.clone(), e.to_string()))?;
+
+        let metadata = RuleMetadata::try_from(manifest)
+            .map_err(|e| RuleManagerError::ParseError(manifest_path.clone(), e))?;
+
+        let definition = self.load_rule_package_definition(path)?;
+        Ok(Rule {
+            metadata,
+            definition,
+        })
+    }
 }
 
 /// Rule loading statistics
@@ -340,6 +505,16 @@ impl RuleManager {
 pub struct LoadStats {
     pub loaded: usize,
     pub failed: usize,
+}
+
+/// Rule reload statistics
+#[derive(Debug, Default, Clone)]
+pub struct ReloadStats {
+    pub loaded: usize,
+    pub failed: usize,
+    pub added: usize,
+    pub removed: usize,
+    pub unchanged: usize,
 }
 
 /// Rule manager errors

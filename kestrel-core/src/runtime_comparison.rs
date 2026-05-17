@@ -45,8 +45,7 @@ impl RuntimeConsistencyChecker {
     pub fn new(
         #[cfg(feature = "wasm")] wasm_config: Option<WasmConfig>,
         #[cfg(feature = "lua")] lua_config: Option<LuaConfig>,
-    #[allow(dead_code)]
-    schema: Arc<SchemaRegistry>,
+        #[allow(dead_code)] schema: Arc<SchemaRegistry>,
     ) -> Result<Self, RuntimeComparisonError> {
         #[cfg(feature = "wasm")]
         let wasm_engine = if let Some(config) = wasm_config {

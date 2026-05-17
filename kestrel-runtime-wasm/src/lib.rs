@@ -5,10 +5,10 @@
 
 use ahash::AHashMap;
 use anyhow::Result;
+use parking_lot::{Mutex, RwLock};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
-use parking_lot::{Mutex, RwLock};
 use tokio::sync::Semaphore;
 use tracing::{error, info};
 use wasmtime::{
@@ -527,11 +527,7 @@ impl WasmEngine {
                         alerts: &ctx.alerts,
                         rule_metadata: Some(&ctx.rule_metadata),
                     };
-                    if api.re_match(re_id, &text) {
-                        1
-                    } else {
-                        0
-                    }
+                    if api.re_match(re_id, &text) { 1 } else { 0 }
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -567,11 +563,7 @@ impl WasmEngine {
                         alerts: &ctx.alerts,
                         rule_metadata: Some(&ctx.rule_metadata),
                     };
-                    if api.glob_match(glob_id, &text) {
-                        1
-                    } else {
-                        0
-                    }
+                    if api.glob_match(glob_id, &text) { 1 } else { 0 }
                 },
             )
             .map_err(|e| WasmRuntimeError::ExecutionError(e.to_string()))?;
@@ -676,7 +668,8 @@ impl WasmEngine {
         });
 
         // Load the module with the generated manifest
-        self.load_module(manifest, wasm_bytes, AHashMap::new()).await?;
+        self.load_module(manifest, wasm_bytes, AHashMap::new())
+            .await?;
         Ok(())
     }
 
@@ -944,7 +937,7 @@ impl Clone for WasmEngine {
 /// This allows the Wasm runtime to be used as a predicate evaluator
 /// for the NFA sequence engine.
 #[async_trait::async_trait]
-impl kestrel_nfa::PredicateEvaluator for WasmEngine {
+impl kestrel_event::PredicateEvaluator for WasmEngine {
     /// Evaluate a predicate against an event
     ///
     /// The predicate_id should be in the format "rule_id:predicate_id" where:
@@ -954,11 +947,11 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
         &self,
         predicate_id: &str,
         event: &kestrel_event::Event,
-    ) -> kestrel_nfa::NfaResult<bool> {
+    ) -> kestrel_event::PredicateResult<bool> {
         // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
         if parts.len() != 2 {
-            return Err(kestrel_nfa::NfaError::PredicateError(format!(
+            return Err(kestrel_event::PredicateError::EvaluationFailed(format!(
                 "Invalid predicate_id format: {}, expected 'rule_id:predicate_index'",
                 predicate_id
             )));
@@ -966,20 +959,23 @@ impl kestrel_nfa::PredicateEvaluator for WasmEngine {
 
         let rule_id = parts[0];
         let predicate_index: u32 = parts[1].parse().map_err(|_| {
-            kestrel_nfa::NfaError::PredicateError(format!("Invalid predicate index: {}", parts[1]))
+            kestrel_event::PredicateError::EvaluationFailed(format!(
+                "Invalid predicate index: {}",
+                parts[1]
+            ))
         })?;
 
         let wait_start = std::time::Instant::now();
         let result = self
             .eval_loaded_predicate(rule_id, predicate_index, event)
             .await
-            .map_err(|e| kestrel_nfa::NfaError::PredicateError(e.to_string()))?;
+            .map_err(|e| kestrel_event::PredicateError::EvaluationFailed(e.to_string()))?;
         let wait_ns = wait_start.elapsed().as_nanos() as u64;
         self.pool_metrics.record_acquire(wait_ns);
         Ok(result)
     }
 
-    fn get_required_fields(&self, predicate_id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, predicate_id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         // Parse predicate_id as "rule_id:predicate_index"
         let parts: Vec<&str> = predicate_id.splitn(2, ':').collect();
         if parts.len() != 2 {
@@ -1051,9 +1047,12 @@ mod tests {
         )
         .unwrap();
 
-        engine.compile_rule("async-predicate", wasm_bytes).await.unwrap();
+        engine
+            .compile_rule("async-predicate", wasm_bytes)
+            .await
+            .unwrap();
 
-        assert!(kestrel_nfa::PredicateEvaluator::has_predicate(&engine, "async-predicate:0"));
+        assert!(kestrel_event::PredicateEvaluator::has_predicate(&engine, "async-predicate:0"));
 
         let event = Event::builder()
             .event_type(1)
@@ -1063,10 +1062,10 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = kestrel_nfa::PredicateEvaluator::evaluate(&engine, "invalid", &event).await;
+        let result = kestrel_event::PredicateEvaluator::evaluate(&engine, "invalid", &event).await;
         assert!(matches!(
             result,
-            Err(kestrel_nfa::NfaError::PredicateError(message)) if message.contains("Invalid predicate_id format")
+            Err(kestrel_event::PredicateError::EvaluationFailed(message)) if message.contains("Invalid predicate_id format")
         ));
     }
 

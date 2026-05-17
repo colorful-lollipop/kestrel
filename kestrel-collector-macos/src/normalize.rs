@@ -9,7 +9,7 @@ use kestrel_schema::{SchemaRegistry, TypedValue};
 use std::sync::Arc;
 use tracing::debug;
 
-use crate::types::{create_entity_key, RawEsfEvent};
+use crate::types::{RawEsfEvent, create_entity_key};
 
 // ============================================================================
 // Event Normalizer

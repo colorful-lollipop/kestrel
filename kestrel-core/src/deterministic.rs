@@ -13,8 +13,7 @@ use crate::replay::JsonLog;
 /// Recorded replay results: list of (event_id, alerts) pairs
 type RecordedResults = Arc<Mutex<Vec<(u64, Vec<Alert>)>>>;
 
-pub struct DeterministicVerifier {
-}
+pub struct DeterministicVerifier {}
 
 #[derive(Debug, Clone)]
 pub struct DeterministicResult {

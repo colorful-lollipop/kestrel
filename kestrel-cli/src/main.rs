@@ -6,9 +6,9 @@
 //! - Linux: Full eBPF collection + replay
 //! - macOS/Windows: Replay and mock collection (no eBPF)
 
-use anyhow::Result;
 #[cfg(feature = "ebpf")]
 use anyhow::Context;
+use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,6 +79,10 @@ enum Commands {
         /// Alert output configuration
         #[command(flatten)]
         alert_config: AlertOutputArgs,
+
+        /// Watch rules directory for changes and hot-reload
+        #[arg(long)]
+        watch_rules: bool,
     },
 
     /// Validate rules without running detection
@@ -126,9 +130,10 @@ async fn main() -> Result<()> {
             collector,
             log_level,
             alert_config,
+            watch_rules,
         } => {
             setup_logging(&log_level)?;
-            run_engine(rules, ebpf_object, &collector, &alert_config).await?;
+            run_engine(rules, ebpf_object, &collector, &alert_config, watch_rules).await?;
         },
         Commands::Validate { rules } => {
             setup_logging("info")?;
@@ -164,28 +169,24 @@ fn setup_logging(level: &str) -> Result<()> {
 }
 
 /// Build an [`AlertRouter`] from CLI alert output arguments.
-fn create_alert_router(
-    config: &AlertOutputArgs,
-) -> anyhow::Result<kestrel_core::AlertRouter> {
+fn create_alert_router(config: &AlertOutputArgs) -> anyhow::Result<kestrel_core::AlertRouter> {
     let mut router = kestrel_core::AlertRouter::new();
 
     match config.alert_output {
         AlertOutputType::Stdout => {
-            router.add_sink(
-                "stdout",
-                Arc::new(kestrel_core::StdoutSink::new(config.pretty_alerts)),
-            );
-        }
+            router
+                .add_sink("stdout", Arc::new(kestrel_core::StdoutSink::new(config.pretty_alerts)));
+        },
         AlertOutputType::File => {
             let path = config
                 .alert_file
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("--alert-file required when --alert-output=file"))?;
             router.add_sink("file", Arc::new(kestrel_core::FileSink::new(path)?));
-        }
+        },
         AlertOutputType::Null => {
             // No sinks = alerts are dropped
-        }
+        },
     }
 
     Ok(router)
@@ -196,6 +197,7 @@ async fn run_engine(
     ebpf_object: Option<PathBuf>,
     collector_type: &str,
     alert_args: &AlertOutputArgs,
+    watch_rules: bool,
 ) -> Result<()> {
     info!("Starting Kestrel detection engine");
     info!(rules_dir = %rules_dir.display(), "Loading rules from");
@@ -206,6 +208,9 @@ async fn run_engine(
     } else {
         Some(Arc::new(alert_router))
     };
+
+    // Keep a clone of rules_dir for hot-reload watcher (config takes ownership)
+    let rules_dir_for_watcher = rules_dir.clone();
 
     let config = kestrel_engine::EngineConfig {
         rules_dir,
@@ -221,6 +226,50 @@ async fn run_engine(
         compiled_single_event_rules = stats.single_event_rule_count,
         "Engine started"
     );
+
+    // Set up hot reload if requested
+    if watch_rules {
+        if rules_dir_for_watcher.exists() {
+            let rule_manager = engine.rule_manager().clone();
+            match kestrel_rules::hot_reload::RuleHotReloader::new(
+                rule_manager,
+                &rules_dir_for_watcher,
+                500, // 500ms debounce
+            ) {
+                Ok(mut hot_reloader) => {
+                    tokio::spawn(async move {
+                        while let Some(event) = hot_reloader.next_event().await {
+                            match event {
+                                kestrel_rules::hot_reload::HotReloadEvent::RulesReloaded(Ok(
+                                    count,
+                                )) => {
+                                    info!("Hot reload completed: {} rules active", count);
+                                },
+                                kestrel_rules::hot_reload::HotReloadEvent::RulesReloaded(Err(
+                                    e,
+                                )) => {
+                                    tracing::error!("Hot reload failed: {}", e);
+                                },
+                                kestrel_rules::hot_reload::HotReloadEvent::ValidationFailed(e) => {
+                                    tracing::warn!("Hot reload validation failed: {}", e);
+                                },
+                                _ => {},
+                            }
+                        }
+                    });
+                    info!("Rule hot-reload enabled for {}", rules_dir_for_watcher.display());
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to start rule watcher: {}", e);
+                },
+            }
+        } else {
+            tracing::warn!(
+                "Cannot watch rules directory: {} does not exist",
+                rules_dir_for_watcher.display()
+            );
+        }
+    }
 
     info!("Starting event processing loop...");
     engine.start().await?;
@@ -249,9 +298,7 @@ async fn run_engine(
         info!("No collector specified, running in engine-only mode");
     }
 
-    info!(
-        "Engine running and waiting for events. Press Ctrl+C to stop."
-    );
+    info!("Engine running and waiting for events. Press Ctrl+C to stop.");
 
     let mut stats_interval = interval(Duration::from_secs(10));
 
@@ -284,9 +331,8 @@ async fn create_collector(
         "ebpf" => {
             #[cfg(feature = "ebpf")]
             {
-                let object_path = ebpf_object.ok_or_else(|| {
-                    anyhow::anyhow!("eBPF collector requires --ebpf-object path")
-                })?;
+                let object_path = ebpf_object
+                    .ok_or_else(|| anyhow::anyhow!("eBPF collector requires --ebpf-object path"))?;
 
                 info!(path = %object_path.display(), "Loading eBPF collector object");
                 let ebpf = aya::Ebpf::load_file(&object_path).with_context(|| {
@@ -328,9 +374,7 @@ async fn create_collector(
         "mock" => {
             let count = 100; // Default mock event count
             info!(count, "Creating mock event collector");
-            Ok(Some(Box::new(
-                kestrel_core::MockEventCollector::generate_test_events(count),
-            )))
+            Ok(Some(Box::new(kestrel_core::MockEventCollector::generate_test_events(count))))
         },
         "replay" => {
             let path = ebpf_object.ok_or_else(|| {

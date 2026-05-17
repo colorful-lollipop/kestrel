@@ -66,7 +66,8 @@ impl EsfClient {
     /// Stop the ESF client.
     pub fn stop(&self) {
         info!("Stopping ESF client");
-        self.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

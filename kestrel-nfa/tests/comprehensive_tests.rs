@@ -165,9 +165,15 @@ fn test_three_step_complete() {
     let seq = create_sequence("three-step", vec![(1, "p1"), (2, "p2"), (3, "p3")], Some(10000));
     engine.load_sequence(seq).unwrap();
 
-    engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
-    engine.process_event_blocking(&create_event(2, 2000, 1)).unwrap();
-    let alerts = engine.process_event_blocking(&create_event(3, 3000, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
+    engine
+        .process_event_blocking(&create_event(2, 2000, 1))
+        .unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(3, 3000, 1))
+        .unwrap();
 
     assert_eq!(alerts.len(), 1);
     assert_eq!(alerts[0].events.len(), 3);
@@ -179,10 +185,14 @@ fn test_multi_step_partial() {
     let seq = create_sequence("partial", vec![(1, "p1"), (2, "p2"), (3, "p3")], Some(10000));
     engine.load_sequence(seq).unwrap();
 
-    let alerts = engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
     assert!(alerts.is_empty());
 
-    let alerts = engine.process_event_blocking(&create_event(2, 2000, 1)).unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(2, 2000, 1))
+        .unwrap();
     assert!(alerts.is_empty());
 }
 
@@ -196,8 +206,12 @@ fn test_maxspan_not_expired() {
     let seq = create_sequence("maxspan-ok", vec![(1, "p1"), (2, "p2")], Some(5000));
     engine.load_sequence(seq).unwrap();
 
-    engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
-    let alerts = engine.process_event_blocking(&create_event(2, 5000, 1)).unwrap(); // Within 5s
+    engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(2, 5000, 1))
+        .unwrap(); // Within 5s
 
     assert_eq!(alerts.len(), 1);
 }
@@ -228,8 +242,12 @@ fn test_maxspan_exact_boundary() {
     let seq = create_sequence("maxspan-exact", vec![(1, "p1"), (2, "p2")], Some(1000));
     engine.load_sequence(seq).unwrap();
 
-    engine.process_event_blocking(&create_event(1, 0, 1)).unwrap();
-    let alerts = engine.process_event_blocking(&create_event(2, 1000, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 0, 1))
+        .unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(2, 1000, 1))
+        .unwrap();
 
     // Boundary behavior - should match at exact maxspan
     println!("✅ Maxspan exact boundary: {} alerts", alerts.len());
@@ -246,13 +264,21 @@ fn test_entity_isolation_complete() {
     engine.load_sequence(seq).unwrap();
 
     // Entity 1 complete sequence
-    engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
-    let alerts1 = engine.process_event_blocking(&create_event(2, 2000, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
+    let alerts1 = engine
+        .process_event_blocking(&create_event(2, 2000, 1))
+        .unwrap();
     assert_eq!(alerts1.len(), 1);
 
     // Entity 2 complete sequence
-    engine.process_event_blocking(&create_event(1, 1000, 2)).unwrap();
-    let alerts2 = engine.process_event_blocking(&create_event(2, 2000, 2)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 1000, 2))
+        .unwrap();
+    let alerts2 = engine
+        .process_event_blocking(&create_event(2, 2000, 2))
+        .unwrap();
     assert_eq!(alerts2.len(), 1);
 }
 
@@ -263,10 +289,14 @@ fn test_entity_isolation_no_crossover() {
     engine.load_sequence(seq).unwrap();
 
     // Entity 1 step 1
-    engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
 
     // Entity 2 step 2 (should not match with entity 1's step 1)
-    let alerts = engine.process_event_blocking(&create_event(2, 2000, 2)).unwrap();
+    let alerts = engine
+        .process_event_blocking(&create_event(2, 2000, 2))
+        .unwrap();
     assert!(alerts.is_empty());
 }
 
@@ -362,7 +392,9 @@ fn test_state_cleanup() {
     engine.load_sequence(seq).unwrap();
 
     // Create partial match
-    engine.process_event_blocking(&create_event(1, 1000, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 1000, 1))
+        .unwrap();
 
     // Tick to trigger cleanup
     engine.tick(2000000); // 2 seconds later
@@ -538,11 +570,21 @@ fn test_long_running_sequence() {
     engine.load_sequence(seq).unwrap();
 
     // Progress through sequence over "time"
-    engine.process_event_blocking(&create_event(1, 0, 1)).unwrap();
-    engine.process_event_blocking(&create_event(2, 600000, 1)).unwrap(); // +10 min
-    engine.process_event_blocking(&create_event(3, 1200000, 1)).unwrap(); // +20 min
-    engine.process_event_blocking(&create_event(4, 2400000, 1)).unwrap(); // +40 min
-    let alerts = engine.process_event_blocking(&create_event(5, 3500000, 1)).unwrap(); // +58 min
+    engine
+        .process_event_blocking(&create_event(1, 0, 1))
+        .unwrap();
+    engine
+        .process_event_blocking(&create_event(2, 600000, 1))
+        .unwrap(); // +10 min
+    engine
+        .process_event_blocking(&create_event(3, 1200000, 1))
+        .unwrap(); // +20 min
+    engine
+        .process_event_blocking(&create_event(4, 2400000, 1))
+        .unwrap(); // +40 min
+    let alerts = engine
+        .process_event_blocking(&create_event(5, 3500000, 1))
+        .unwrap(); // +58 min
 
     assert_eq!(alerts.len(), 1);
     println!("✅ Long running sequence: completed");

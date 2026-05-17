@@ -32,11 +32,15 @@ impl TestEvaluator {
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestEvaluator {
-    async fn evaluate(&self, predicate_id: &str, _event: &Event) -> NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        predicate_id: &str,
+        _event: &Event,
+    ) -> kestrel_event::PredicateResult<bool> {
         Ok(self.results.get(predicate_id).copied().unwrap_or(true))
     }
 
-    fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(Vec::new())
     }
 

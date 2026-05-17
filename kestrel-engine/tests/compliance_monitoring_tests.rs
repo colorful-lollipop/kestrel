@@ -12,10 +12,10 @@ struct TestPredicateEvaluator;
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_event::PredicateResult<bool> {
         Ok(true)
     }
-    fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(vec![])
     }
     fn has_predicate(&self, _id: &str) -> bool {
@@ -85,7 +85,11 @@ fn test_pci_dss_unencrypted_card_data() {
         "FileAccess",
         "4111111111111111.txt",
     );
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20002,
@@ -125,7 +129,11 @@ fn test_pci_dss_database_encryption_check() {
     let base_time = 2_000_000_000u64;
 
     let e1 = create_compliance_event(20003, entity, base_time, "PCI", "DatabaseConfig", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20004,
@@ -165,7 +173,11 @@ fn test_pci_dss_audit_log_retention() {
     let base_time = 3_000_000_000u64;
 
     let e1 = create_compliance_event(20005, entity, base_time, "PCI", "LogRetention", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20006,
@@ -205,7 +217,11 @@ fn test_pci_dss_network_segmentation() {
     let base_time = 4_000_000_000u64;
 
     let e1 = create_compliance_event(20007, entity, base_time, "PCI", "NetworkAccess", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20008,
@@ -245,7 +261,11 @@ fn test_pci_dss_admin_access_monitoring() {
     let base_time = 5_000_000_000u64;
 
     let e1 = create_compliance_event(20009, entity, base_time, "PCI", "AdminLogin", "root");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20010,
@@ -289,7 +309,11 @@ fn test_gdpr_pii_exposure() {
     let base_time = 10_000_000_000u64;
 
     let e1 = create_compliance_event(20011, entity, base_time, "GDPR", "DataAccess", "pii");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20012,
@@ -329,7 +353,11 @@ fn test_gdpr_data_subject_access_request() {
     let base_time = 11_000_000_000u64;
 
     let e1 = create_compliance_event(20013, entity, base_time, "GDPR", "DSAR", "received");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20014,
@@ -369,7 +397,11 @@ fn test_gdpr_cross_border_transfer() {
     let base_time = 12_000_000_000u64;
 
     let e1 = create_compliance_event(20015, entity, base_time, "GDPR", "DataTransfer", "initiated");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20016,
@@ -409,7 +441,11 @@ fn test_gdpr_consent_management() {
     let base_time = 13_000_000_000u64;
 
     let e1 = create_compliance_event(20017, entity, base_time, "GDPR", "Consent", "withdrawn");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20018,
@@ -449,7 +485,11 @@ fn test_gdpr_data_retention_expiry() {
     let base_time = 14_000_000_000u64;
 
     let e1 = create_compliance_event(20019, entity, base_time, "GDPR", "DataRetention", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20020,
@@ -493,7 +533,11 @@ fn test_hipaa_phi_access_log() {
     let base_time = 20_000_000_000u64;
 
     let e1 = create_compliance_event(20021, entity, base_time, "HIPAA", "PHIAccess", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20022,
@@ -533,7 +577,11 @@ fn test_hipaa_minimum_necessary_violation() {
     let base_time = 21_000_000_000u64;
 
     let e1 = create_compliance_event(20023, entity, base_time, "HIPAA", "BulkAccess", "request");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20024,
@@ -573,7 +621,11 @@ fn test_hipaa_emergency_access_break_glass() {
     let base_time = 22_000_000_000u64;
 
     let e1 = create_compliance_event(20025, entity, base_time, "HIPAA", "BreakGlass", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20026,
@@ -614,7 +666,11 @@ fn test_hipaa_workstation_security() {
 
     let e1 =
         create_compliance_event(20027, entity, base_time, "HIPAA", "Workstation", "unattended");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20028,
@@ -658,7 +714,11 @@ fn test_sox_financial_data_modification() {
     let base_time = 30_000_000_000u64;
 
     let e1 = create_compliance_event(20029, entity, base_time, "SOX", "FinancialRecord", "access");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20030,
@@ -699,7 +759,11 @@ fn test_sox_segregation_of_duties() {
 
     let e1 =
         create_compliance_event(20031, entity, base_time, "SOX", "ConflictingRole", "assigned");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20032,
@@ -740,7 +804,11 @@ fn test_sox_change_management() {
 
     let e1 =
         create_compliance_event(20033, entity, base_time, "SOX", "UnauthorizedChange", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20034,
@@ -784,7 +852,11 @@ fn test_nist_identify_asset_management() {
     let base_time = 40_000_000_000u64;
 
     let e1 = create_compliance_event(20035, entity, base_time, "NIST", "UnknownAsset", "detected");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20036,
@@ -825,7 +897,11 @@ fn test_nist_protect_access_control() {
 
     let e1 =
         create_compliance_event(20037, entity, base_time, "NIST", "DefaultCredentials", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20038,
@@ -865,7 +941,11 @@ fn test_nist_detect_anomaly_events() {
     let base_time = 42_000_000_000u64;
 
     let e1 = create_compliance_event(20039, entity, base_time, "NIST", "Anomaly", "detected");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20040,
@@ -905,7 +985,11 @@ fn test_nist_respond_incident_handling() {
     let base_time = 43_000_000_000u64;
 
     let e1 = create_compliance_event(20041, entity, base_time, "NIST", "Incident", "reported");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20042,
@@ -945,7 +1029,11 @@ fn test_nist_recover_backup_restoration() {
     let base_time = 44_000_000_000u64;
 
     let e1 = create_compliance_event(20043, entity, base_time, "NIST", "BackupFailure", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20044,
@@ -990,7 +1078,11 @@ fn test_iso27001_policy_violation() {
 
     let e1 =
         create_compliance_event(20045, entity, base_time, "ISO27001", "PolicyViolation", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20046,
@@ -1031,7 +1123,11 @@ fn test_iso27001_cryptographic_controls() {
 
     let e1 =
         create_compliance_event(20047, entity, base_time, "ISO27001", "WeakEncryption", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20048,
@@ -1072,7 +1168,11 @@ fn test_iso27001_supplier_relationships() {
 
     let e1 =
         create_compliance_event(20049, entity, base_time, "ISO27001", "ThirdPartyRisk", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20050,
@@ -1116,7 +1216,11 @@ fn test_policy_password_complexity() {
     let base_time = 60_000_000_000u64;
 
     let e1 = create_compliance_event(20051, entity, base_time, "Policy", "WeakPassword", "attempt");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20052,
@@ -1157,7 +1261,11 @@ fn test_policy_privileged_account_review() {
 
     let e1 =
         create_compliance_event(20053, entity, base_time, "Policy", "StaleAccount", "review_due");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20054,
@@ -1198,7 +1306,11 @@ fn test_policy_data_classification() {
 
     let e1 =
         create_compliance_event(20055, entity, base_time, "Policy", "MisclassifiedData", "check");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20056,
@@ -1238,7 +1350,11 @@ fn test_policy_patch_management() {
     let base_time = 63_000_000_000u64;
 
     let e1 = create_compliance_event(20057, entity, base_time, "Policy", "MissingPatch", "scan");
-    assert!(nfa.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        nfa.process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
 
     let e2 = create_compliance_event(
         20058,

@@ -12,6 +12,9 @@ mod pushdown;
 
 pub mod platform;
 
+#[cfg(target_os = "linux")]
+pub mod dynamic_probe;
+
 pub use executor::{BlockStatus, EbpfExecutor, EbpfExecutorConfig, EbpfExecutorMetrics};
 pub use health::{
     EbpfHealthChecker, EbpfHealthStatus, HealthCheckConfig, HealthCheckError, HealthMetrics,
@@ -29,6 +32,9 @@ pub use platform::{
     EventTypeRegistry, MockPlatform, Platform, PlatformCapability, PlatformError, PlatformInfo,
     PlatformManager,
 };
+
+#[cfg(target_os = "linux")]
+pub use dynamic_probe::*;
 
 use aya::Ebpf;
 use aya::Pod;

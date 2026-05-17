@@ -9,8 +9,9 @@ license.workspace = true
 kestrel-schema = { path = "../kestrel-schema" }
 serde = { workspace = true }
 thiserror = { workspace = true }
-smallvec = { workspace = true }
+smallvec = { workspace = true, features = ["serde"] }
 ahash = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }
 parking_lot = "0.12"
+async-trait = { workspace = true }

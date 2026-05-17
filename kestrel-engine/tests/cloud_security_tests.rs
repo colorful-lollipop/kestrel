@@ -12,10 +12,10 @@ struct TestPredicateEvaluator;
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_event::PredicateResult<bool> {
         Ok(true)
     }
-    fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(vec![])
     }
     fn has_predicate(&self, _id: &str) -> bool {
@@ -60,7 +60,9 @@ fn test_aws_root_account_usage() {
     nfa.load_sequence(seq).unwrap();
 
     let alerts = nfa
-        .process_event_blocking(Arc::new(create_cloud_event(20001, 0xB001u128, 1_000_000_000u64).clone()))
+        .process_event_blocking(Arc::new(
+            create_cloud_event(20001, 0xB001u128, 1_000_000_000u64).clone(),
+        ))
         .unwrap();
     assert_eq!(alerts.len(), 1);
 }
@@ -83,9 +85,11 @@ fn test_aws_iam_policy_change() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20002, 0xB002u128, 2_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20002, 0xB002u128, 2_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -111,14 +115,18 @@ fn test_aws_s3_bucket_public_access() {
     nfa.load_sequence(seq).unwrap();
 
     assert!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20003, 0xB003u128, 3_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20003, 0xB003u128, 3_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20004, 0xB003u128, 3_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20004, 0xB003u128, 3_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -141,9 +149,11 @@ fn test_aws_security_group_egress() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20005, 0xB004u128, 4_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20005, 0xB004u128, 4_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -166,9 +176,11 @@ fn test_aws_cloudtrail_disabled() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20006, 0xB005u128, 5_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20006, 0xB005u128, 5_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -191,9 +203,11 @@ fn test_aws_kms_key_deletion() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20007, 0xB006u128, 6_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20007, 0xB006u128, 6_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -220,9 +234,11 @@ fn test_aws_ec2_user_data_modification() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20008, 0xB007u128, 7_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20008, 0xB007u128, 7_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -245,9 +261,11 @@ fn test_aws_guardduty_disabled() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20009, 0xB008u128, 8_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20009, 0xB008u128, 8_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -274,9 +292,11 @@ fn test_azure_rbac_role_assignment() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20010, 0xB010u128, 10_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20010, 0xB010u128, 10_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -299,9 +319,11 @@ fn test_azure_key_vault_access() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20011, 0xB011u128, 11_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20011, 0xB011u128, 11_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -324,9 +346,11 @@ fn test_azure_storage_account_key_regeneration() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20012, 0xB012u128, 12_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20012, 0xB012u128, 12_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -349,9 +373,11 @@ fn test_azure_network_security_group_change() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20013, 0xB013u128, 13_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20013, 0xB013u128, 13_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -374,9 +400,11 @@ fn test_azure_conditional_access_disabled() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20014, 0xB014u128, 14_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20014, 0xB014u128, 14_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -399,9 +427,11 @@ fn test_azure_mfa_disabled() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20015, 0xB015u128, 15_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20015, 0xB015u128, 15_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -428,9 +458,11 @@ fn test_gcp_service_account_key_creation() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20016, 0xB020u128, 20_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20016, 0xB020u128, 20_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -453,9 +485,11 @@ fn test_gcp_iam_policy_binding() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20017, 0xB021u128, 21_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20017, 0xB021u128, 21_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -478,9 +512,11 @@ fn test_gcp_storage_bucket_public() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20018, 0xB022u128, 22_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20018, 0xB022u128, 22_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -503,9 +539,11 @@ fn test_gcp_cloud_audit_logs_disabled() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20019, 0xB023u128, 23_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20019, 0xB023u128, 23_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -528,9 +566,11 @@ fn test_gcp_compute_firewall_rule_change() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20020, 0xB024u128, 24_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20020, 0xB024u128, 24_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -557,9 +597,11 @@ fn test_container_privileged_mode() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20021, 0xB030u128, 30_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20021, 0xB030u128, 30_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -582,9 +624,11 @@ fn test_container_host_namespace() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20022, 0xB031u128, 31_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20022, 0xB031u128, 31_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -607,9 +651,11 @@ fn test_container_sensitive_mount() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20023, 0xB032u128, 32_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20023, 0xB032u128, 32_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -635,14 +681,18 @@ fn test_container_image_pull_policy() {
     nfa.load_sequence(seq).unwrap();
 
     assert!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20024, 0xB033u128, 33_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20024, 0xB033u128, 33_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20025, 0xB033u128, 33_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20025, 0xB033u128, 33_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -665,9 +715,11 @@ fn test_container_runtime_escape() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20026, 0xB034u128, 34_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20026, 0xB034u128, 34_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -694,9 +746,11 @@ fn test_lambda_environment_exfil() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20027, 0xB040u128, 40_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20027, 0xB040u128, 40_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -719,9 +773,11 @@ fn test_lambda_policy_privilege_escalation() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20028, 0xB041u128, 41_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20028, 0xB041u128, 41_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -744,9 +800,11 @@ fn test_function_url_unauthorized_access() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20029, 0xB042u128, 42_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20029, 0xB042u128, 42_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -773,9 +831,11 @@ fn test_cross_tenant_access_attempt() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20030, 0xB050u128, 50_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20030, 0xB050u128, 50_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -801,14 +861,18 @@ fn test_resource_quota_abuse() {
     nfa.load_sequence(seq).unwrap();
 
     assert!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20031, 0xB051u128, 51_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20031, 0xB051u128, 51_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20032, 0xB051u128, 51_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20032, 0xB051u128, 51_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -838,14 +902,18 @@ fn test_cloud_data_download_anomaly() {
     nfa.load_sequence(seq).unwrap();
 
     assert!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20033, 0xB060u128, 60_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20033, 0xB060u128, 60_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20034, 0xB060u128, 60_300_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20034, 0xB060u128, 60_300_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -872,9 +940,11 @@ fn test_snapshot_export_unauthorized() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20035, 0xB061u128, 61_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20035, 0xB061u128, 61_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -901,9 +971,11 @@ fn test_database_public_snapshot() {
     nfa.load_sequence(seq).unwrap();
 
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_cloud_event(20036, 0xB062u128, 62_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_cloud_event(20036, 0xB062u128, 62_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }

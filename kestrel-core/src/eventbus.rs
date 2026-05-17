@@ -4,7 +4,9 @@
 //! It supports batching, backpressure, and partitioning.
 
 use crate::BackpressureConfig;
-use crate::metrics_reporter::{MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter};
+use crate::metrics_reporter::{
+    MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter,
+};
 use kestrel_event::Event;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -171,7 +173,8 @@ impl EventBusHandle {
             self.metrics
                 .backpressure_count
                 .fetch_add(1, Ordering::Relaxed);
-            self.metrics_reporter.counter_inc(self.m_backpressure_count, 1);
+            self.metrics_reporter
+                .counter_inc(self.m_backpressure_count, 1);
 
             let timeout_duration = Duration::from_millis(
                 self.backpressure_config.backpressure_timeout.as_millis() as u64,
@@ -292,7 +295,6 @@ impl EventBus {
             partitioner,
             metrics_reporter: metrics_reporter.clone(),
             m_events_received,
-            m_events_processed,
             m_events_dropped,
             m_backpressure_count,
         };
@@ -351,7 +353,10 @@ impl EventBus {
     ///
     /// This is useful for testing and simple use cases where you don't need a custom sink.
     /// For production use, prefer `new_with_sink_and_reporter()` to connect to a downstream consumer.
-    pub fn new_with_reporter(config: EventBusConfig, metrics_reporter: Arc<dyn MetricsReporter>) -> Self {
+    pub fn new_with_reporter(
+        config: EventBusConfig,
+        metrics_reporter: Arc<dyn MetricsReporter>,
+    ) -> Self {
         let (sink_tx, mut sink_rx) = mpsc::channel(1);
 
         // Spawn a background consumer that simply receives and drops events
@@ -386,7 +391,10 @@ impl EventBus {
     }
 
     /// Worker partition that batches and delivers events
-    #[tracing::instrument(skip(receiver, sink_tx, metrics, shutdown, reporter), fields(partition_id))]
+    #[tracing::instrument(
+        skip(receiver, sink_tx, metrics, shutdown, reporter),
+        fields(partition_id)
+    )]
     async fn worker_partition(
         partition_id: usize,
         mut receiver: mpsc::Receiver<Event>,

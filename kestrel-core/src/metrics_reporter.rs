@@ -112,28 +112,20 @@ impl MetricsReporter for InMemoryMetricsReporter {
                 let idx = counters.len();
                 counters.push((descriptor, AtomicU64::new(0)));
                 MetricId(idx as u64)
-            }
+            },
             MetricKind::Histogram { buckets } => {
                 let mut histograms = self.histograms.write();
                 let idx = histograms.len();
-                let bucket_cells = buckets
-                    .iter()
-                    .map(|&b| (b, AtomicU64::new(0)))
-                    .collect();
-                histograms.push((
-                    descriptor,
-                    bucket_cells,
-                    AtomicU64::new(0),
-                    AtomicU64::new(0),
-                ));
+                let bucket_cells = buckets.iter().map(|&b| (b, AtomicU64::new(0))).collect();
+                histograms.push((descriptor, bucket_cells, AtomicU64::new(0), AtomicU64::new(0)));
                 MetricId(0x4000_0000_0000_0000 | idx as u64)
-            }
+            },
             MetricKind::Gauge => {
                 let mut gauges = self.gauges.write();
                 let idx = gauges.len();
                 gauges.push((descriptor, AtomicU64::new(0)));
                 MetricId(0x8000_0000_0000_0000 | idx as u64)
-            }
+            },
         }
     }
 
@@ -191,11 +183,7 @@ impl MetricsReporter for InMemoryMetricsReporter {
                 .collect::<Vec<_>>()
                 .join(",");
             if labels.is_empty() {
-                out.push_str(&format!(
-                    "{} {}\n\n",
-                    desc.name,
-                    value.load(Ordering::Relaxed)
-                ));
+                out.push_str(&format!("{} {}\n\n", desc.name, value.load(Ordering::Relaxed)));
             } else {
                 out.push_str(&format!(
                     "{}{{{}}} {}\n\n",
@@ -221,10 +209,7 @@ impl MetricsReporter for InMemoryMetricsReporter {
             if labels.is_empty() {
                 out.push_str(&format!("{} {}\n\n", desc.name, val));
             } else {
-                out.push_str(&format!(
-                    "{}{{{}}} {}\n\n",
-                    desc.name, labels, val
-                ));
+                out.push_str(&format!("{}{{{}}} {}\n\n", desc.name, labels, val));
             }
         }
 

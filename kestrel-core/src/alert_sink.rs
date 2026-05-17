@@ -70,16 +70,10 @@ pub enum AlertSinkError {
 /// Pluggable destination for alerts.
 pub trait AlertSink: Send + Sync {
     /// Emit a single alert.
-    fn emit(
-        &self,
-        alert: &Alert,
-    ) -> Result<(EmitStatus, Backpressure), AlertSinkError>;
+    fn emit(&self, alert: &Alert) -> Result<(EmitStatus, Backpressure), AlertSinkError>;
 
     /// Emit a batch of alerts.
-    fn emit_batch(
-        &self,
-        alerts: &[Alert],
-    ) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
+    fn emit_batch(&self, alerts: &[Alert]) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
         let mut overall = EmitStatus::Acknowledged;
         let mut max_bp = Backpressure::Normal;
         for alert in alerts {
@@ -121,10 +115,7 @@ impl StdoutSink {
 }
 
 impl AlertSink for StdoutSink {
-    fn emit(
-        &self,
-        alert: &Alert,
-    ) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
+    fn emit(&self, alert: &Alert) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
         let json = if self.pretty {
             serde_json::to_string_pretty(alert)
         } else {
@@ -164,17 +155,13 @@ impl FileSink {
 }
 
 impl AlertSink for FileSink {
-    fn emit(
-        &self,
-        alert: &Alert,
-    ) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
+    fn emit(&self, alert: &Alert) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
         let json = serde_json::to_string(alert)
             .map_err(|e| AlertSinkError::Serialization(e.to_string()))?;
 
         use std::io::Write;
         let mut file = self.file.lock();
-        writeln!(file, "{}", json)
-            .map_err(|e| AlertSinkError::Transport(e.to_string()))?;
+        writeln!(file, "{}", json).map_err(|e| AlertSinkError::Transport(e.to_string()))?;
 
         Ok((EmitStatus::Acknowledged, Backpressure::Normal))
     }
@@ -214,10 +201,7 @@ impl AlertRouter {
 }
 
 impl AlertSink for AlertRouter {
-    fn emit(
-        &self,
-        alert: &Alert,
-    ) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
+    fn emit(&self, alert: &Alert) -> Result<(EmitStatus, Backpressure), AlertSinkError> {
         let mut overall = EmitStatus::Acknowledged;
         let mut max_bp = Backpressure::Normal;
         for (_name, sink) in &self.sinks {

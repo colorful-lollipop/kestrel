@@ -10,9 +10,13 @@
 use crate::metrics::{EvictionReason, NfaMetrics};
 use crate::state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 use crate::store::{StateStore, StateStoreConfig};
-use crate::{CompiledSequence, NfaError, NfaResult, PredicateEvaluator, SequenceAlert};
+use crate::{
+    CompiledSequence, NfaError, NfaResult, PredicateEvaluator, PredicateResult, SequenceAlert,
+};
 use ahash::AHashMap;
-use kestrel_core::metrics_reporter::{MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter};
+use kestrel_core::metrics_reporter::{
+    MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter,
+};
 use kestrel_event::Event;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -25,15 +29,21 @@ pub trait EventRef {
 }
 
 impl EventRef for Event {
-    fn as_event_ref(&self) -> &Event { self }
+    fn as_event_ref(&self) -> &Event {
+        self
+    }
 }
 
 impl EventRef for &Event {
-    fn as_event_ref(&self) -> &Event { self }
+    fn as_event_ref(&self) -> &Event {
+        self
+    }
 }
 
 impl EventRef for Arc<Event> {
-    fn as_event_ref(&self) -> &Event { &**self }
+    fn as_event_ref(&self) -> &Event {
+        &**self
+    }
 }
 
 /// Configuration for the NFA engine
@@ -362,9 +372,7 @@ impl NfaEngine {
             let mut evaluations = Vec::with_capacity(results.len());
             for r in results {
                 // JoinHandle yields Result<NfaResult<SequenceEvaluation>, JoinError>
-                evaluations.push(
-                    r.map_err(|e| NfaError::PredicateError(e.to_string()))??
-                );
+                evaluations.push(r.map_err(|e| NfaError::PredicateError(e.to_string()))??);
             }
             evaluations
         } else {
@@ -420,7 +428,11 @@ impl NfaEngine {
 
         for eval in evaluations {
             // Record sequence-level event metric
-            if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics_arc(&eval.sequence_id) {
+            if let Some(seq_metrics) = self
+                .metrics
+                .read()
+                .get_sequence_metrics_arc(&eval.sequence_id)
+            {
                 seq_metrics.record_event_relaxed();
             }
 
@@ -428,7 +440,9 @@ impl NfaEngine {
 
             // Apply budget checks sequentially (matches original behavior)
             for (_predicate_id, eval_time_ns) in &eval.predicate_evals {
-                if let Some(seq_metrics) = self.metrics.read().get_sequence_metrics(&eval.sequence_id) {
+                if let Some(seq_metrics) =
+                    self.metrics.read().get_sequence_metrics(&eval.sequence_id)
+                {
                     seq_metrics.record_evaluation(*eval_time_ns);
                 }
 
@@ -467,10 +481,13 @@ impl NfaEngine {
 
                         // Check if this is a single-step sequence (complete immediately)
                         if seq.step_count() == 1 {
-                            if let Some(pm) = self.state_store.get(&eval.sequence_id, eval.entity_key, 0) {
+                            if let Some(pm) =
+                                self.state_store.get(&eval.sequence_id, eval.entity_key, 0)
+                            {
                                 let alert = self.generate_alert(&seq, pm)?;
                                 alerts.push(alert);
-                                self.state_store.remove(&eval.sequence_id, eval.entity_key, 0);
+                                self.state_store
+                                    .remove(&eval.sequence_id, eval.entity_key, 0);
                             }
                         }
                     }
@@ -879,10 +896,8 @@ async fn evaluate_sequence_phase1(
             let matched = predicate_evaluator
                 .evaluate(&until_step.predicate_id, &event)
                 .await?;
-            predicate_evals.push((
-                until_step.predicate_id.clone(),
-                start.elapsed().as_nanos() as u64,
-            ));
+            predicate_evals
+                .push((until_step.predicate_id.clone(), start.elapsed().as_nanos() as u64));
 
             if matched {
                 return Ok(SequenceEvaluation {
@@ -907,10 +922,8 @@ async fn evaluate_sequence_phase1(
                 let matched = predicate_evaluator
                     .evaluate(&step.predicate_id, &event)
                     .await?;
-                predicate_evals.push((
-                    step.predicate_id.clone(),
-                    start.elapsed().as_nanos() as u64,
-                ));
+                predicate_evals
+                    .push((step.predicate_id.clone(), start.elapsed().as_nanos() as u64));
 
                 if matched {
                     let action = if step.state_id == 0 {
@@ -949,17 +962,12 @@ fn get_expected_state(
     let mut max_state: NfaStateId = 0;
     let mut found = false;
     for step in &sequence.steps {
-        let _ = state_store.with_match(
-            &sequence.id,
-            entity_key,
-            step.state_id,
-            |pm| {
-                if !pm.terminated && pm.current_state >= max_state {
-                    max_state = pm.current_state;
-                    found = true;
-                }
-            },
-        );
+        let _ = state_store.with_match(&sequence.id, entity_key, step.state_id, |pm| {
+            if !pm.terminated && pm.current_state >= max_state {
+                max_state = pm.current_state;
+                found = true;
+            }
+        });
     }
     if found {
         Ok(max_state.saturating_add(1))
@@ -992,11 +1000,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PredicateEvaluator for TestPredicateEvaluator {
-        async fn evaluate(&self, predicate_id: &str, _event: &kestrel_event::Event) -> NfaResult<bool> {
+        async fn evaluate(
+            &self,
+            predicate_id: &str,
+            _event: &kestrel_event::Event,
+        ) -> PredicateResult<bool> {
             Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
         }
 
-        fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+        fn get_required_fields(&self, _predicate_id: &str) -> PredicateResult<Vec<u32>> {
             Ok(vec![])
         }
 
@@ -1015,11 +1027,11 @@ mod tests {
             &self,
             predicate_id: &str,
             _event: &kestrel_event::Event,
-        ) -> NfaResult<bool> {
+        ) -> PredicateResult<bool> {
             Ok(*self.predicates.get(predicate_id).unwrap_or(&false))
         }
 
-        fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+        fn get_required_fields(&self, _predicate_id: &str) -> PredicateResult<Vec<u32>> {
             Ok(vec![])
         }
 
@@ -1034,7 +1046,8 @@ mod tests {
         predicates.insert("pred1".to_string(), true);
         predicates.insert("pred2".to_string(), true);
 
-        let evaluator: Arc<dyn PredicateEvaluator> = Arc::new(AsyncTestPredicateEvaluator { predicates });
+        let evaluator: Arc<dyn PredicateEvaluator> =
+            Arc::new(AsyncTestPredicateEvaluator { predicates });
         let mut engine = NfaEngine::new(NfaEngineConfig::default(), evaluator);
 
         let sequence = NfaSequence::new(
@@ -1533,8 +1546,14 @@ mod tests {
         }
 
         // Final alert should be identical
-        let p_final = parallel_engine.process_event(&create_test_event(3, 4_000)).await.unwrap();
-        let s_final = sequential_engine.process_event(&create_test_event(3, 4_000)).await.unwrap();
+        let p_final = parallel_engine
+            .process_event(&create_test_event(3, 4_000))
+            .await
+            .unwrap();
+        let s_final = sequential_engine
+            .process_event(&create_test_event(3, 4_000))
+            .await
+            .unwrap();
         assert_eq!(p_final.len(), s_final.len());
     }
 

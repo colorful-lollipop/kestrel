@@ -84,8 +84,7 @@ fn bench_field_access(c: &mut Criterion) {
 fn bench_typed_value_clone(c: &mut Criterion) {
     let mut group = c.benchmark_group("typed_value_clone");
 
-    let string_value =
-        TypedValue::String("a moderately long string value for benchmarking".into());
+    let string_value = TypedValue::String("a moderately long string value for benchmarking".into());
     let arc_str: std::sync::Arc<str> =
         std::sync::Arc::from("a moderately long string value for benchmarking");
     let u64_value = TypedValue::U64(123_456_789);

@@ -9,6 +9,7 @@
 use crate::state::{NfaStateId, PartialMatch};
 use crate::{NfaError, NfaResult, SeqId};
 use ahash::AHashMap;
+use async_trait::async_trait;
 use parking_lot::RwLock;
 use priority_queue::PriorityQueue;
 
@@ -68,6 +69,55 @@ impl Default for QuotaConfig {
             max_per_sequence: 10_000,
         }
     }
+}
+
+/// Backend trait for state store implementations.
+///
+/// This trait abstracts over in-memory and distributed (e.g. Redis) backends
+/// so that the NFA engine can work with either.
+#[async_trait]
+pub trait StateStoreBackend: Send + Sync {
+    /// Insert or update a partial match.
+    async fn insert(&self, match_state: PartialMatch) -> NfaResult<()>;
+
+    /// Remove a partial match and return it if it existed.
+    async fn remove(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch>;
+
+    /// Get a clone of a partial match.
+    async fn get(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch>;
+
+    /// Access a partial match via a closure without cloning.
+    async fn with_match<F, R>(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce(&PartialMatch) -> R + Send;
+
+    /// Remove all expired partial matches.
+    async fn cleanup_expired(&self, now_ns: u64, maxspan_ms: u64) -> Vec<PartialMatch>;
+
+    /// Evict up to `count` entries using an LRU policy.
+    async fn evict_lru(&self, count: usize) -> Vec<PartialMatch>;
+
+    /// Total number of partial matches currently stored.
+    async fn total_matches(&self) -> usize;
+
+    /// Remove all partial matches for a given sequence.
+    async fn remove_by_sequence(&self, seq_id: SeqId) -> usize;
 }
 
 /// A shard of the state store
@@ -237,7 +287,9 @@ impl StateStore {
             return seq_id;
         }
 
-        let seq_id = self.next_seq_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq_id = self
+            .next_seq_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let seq_id_string = sequence_id.to_string();
         map.insert(seq_id_string.clone(), seq_id);
         self.seq_id_reverse.write().insert(seq_id, seq_id_string);
@@ -321,7 +373,9 @@ impl StateStore {
         // Check per-entity quota
         let entity_count = shard.get_entity_count(key.0, key.1);
         if entity_count >= self.config.max_partial_matches_per_entity {
-            let seq_name = self.seq_id_reverse.read()
+            let seq_name = self
+                .seq_id_reverse
+                .read()
                 .get(&key.0)
                 .cloned()
                 .unwrap_or_else(|| format!("seq_{}", key.0));
@@ -337,7 +391,9 @@ impl StateStore {
         // Check per-sequence quota
         let seq_count = shard.get_sequence_count(key.0);
         if seq_count >= self.config.max_partial_matches_per_sequence {
-            let seq_name = self.seq_id_reverse.read()
+            let seq_name = self
+                .seq_id_reverse
+                .read()
                 .get(&key.0)
                 .cloned()
                 .unwrap_or_else(|| format!("seq_{}", key.0));
@@ -432,6 +488,60 @@ impl StateStore {
             }
         }
         total_removed
+    }
+}
+
+#[async_trait]
+impl StateStoreBackend for StateStore {
+    async fn insert(&self, match_state: PartialMatch) -> NfaResult<()> {
+        self.insert(match_state)
+    }
+
+    async fn remove(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch> {
+        self.remove(sequence_id, entity_key, state_id)
+    }
+
+    async fn get(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+    ) -> Option<PartialMatch> {
+        self.get(sequence_id, entity_key, state_id)
+    }
+
+    async fn with_match<F, R>(
+        &self,
+        sequence_id: &str,
+        entity_key: u128,
+        state_id: NfaStateId,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce(&PartialMatch) -> R + Send,
+    {
+        self.with_match(sequence_id, entity_key, state_id, f)
+    }
+
+    async fn cleanup_expired(&self, now_ns: u64, maxspan_ms: u64) -> Vec<PartialMatch> {
+        self.cleanup_expired(now_ns, maxspan_ms)
+    }
+
+    async fn evict_lru(&self, count: usize) -> Vec<PartialMatch> {
+        self.evict_lru(count)
+    }
+
+    async fn total_matches(&self) -> usize {
+        self.total_matches()
+    }
+
+    async fn remove_by_sequence(&self, seq_id: SeqId) -> usize {
+        self.remove_by_sequence(seq_id)
     }
 }
 

@@ -61,8 +61,12 @@ pub fn run_nfa_latency_benchmarks() {
     struct NoOpPredicateEvaluator;
 
     #[async_trait::async_trait]
-impl PredicateEvaluator for NoOpPredicateEvaluator {
-        async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> kestrel_nfa::NfaResult<bool> {
+    impl PredicateEvaluator for NoOpPredicateEvaluator {
+        async fn evaluate(
+            &self,
+            _predicate_id: &str,
+            _event: &Event,
+        ) -> kestrel_nfa::NfaResult<bool> {
             Ok(true)
         }
 

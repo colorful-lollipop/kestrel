@@ -87,13 +87,7 @@ fn bench_sequence_matching(c: &mut Criterion) {
             SeqStep::new(1, "pred2".to_string(), 2),
         ];
         // maxspan of 1ms - events are 2ms apart, so second event should timeout
-        let sequence = NfaSequence::new(
-            "test-seq-timeout".to_string(),
-            100,
-            steps,
-            Some(1),
-            None,
-        );
+        let sequence = NfaSequence::new("test-seq-timeout".to_string(), 100, steps, Some(1), None);
         let compiled = CompiledSequence {
             id: "test-seq-timeout".to_string(),
             sequence,
@@ -109,8 +103,16 @@ fn bench_sequence_matching(c: &mut Criterion) {
         let second_event = create_event(2, 2_000_000, 42); // 2ms later, exceeds 1ms maxspan
 
         b.iter(|| {
-            black_box(engine.process_event_blocking(black_box(&first_event)).unwrap());
-            black_box(engine.process_event_blocking(black_box(&second_event)).unwrap());
+            black_box(
+                engine
+                    .process_event_blocking(black_box(&first_event))
+                    .unwrap(),
+            );
+            black_box(
+                engine
+                    .process_event_blocking(black_box(&second_event))
+                    .unwrap(),
+            );
         });
     });
 

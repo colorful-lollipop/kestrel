@@ -323,8 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_event_collector_with_name() {
-        let collector = MockEventCollector::generate_test_events(5)
-            .with_name("test-collector");
+        let collector = MockEventCollector::generate_test_events(5).with_name("test-collector");
         assert_eq!(collector.name(), "test-collector");
     }
 

@@ -103,12 +103,14 @@ enum AlertHandleInner {
 impl std::fmt::Debug for AlertHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.inner {
-            AlertHandleInner::Channel(_) => {
-                f.debug_struct("AlertHandle").field("type", &"channel").finish()
-            }
-            AlertHandleInner::Sink(_) => {
-                f.debug_struct("AlertHandle").field("type", &"sink").finish()
-            }
+            AlertHandleInner::Channel(_) => f
+                .debug_struct("AlertHandle")
+                .field("type", &"channel")
+                .finish(),
+            AlertHandleInner::Sink(_) => f
+                .debug_struct("AlertHandle")
+                .field("type", &"sink")
+                .finish(),
         }
     }
 }
@@ -130,15 +132,12 @@ impl AlertHandle {
                     .await
                     .map_err(|_| AlertError::OutputClosed)?;
                 Ok(())
-            }
-            AlertHandleInner::Sink(sink) => sink
-                .emit(&alert)
-                .map(|_| ())
-                .map_err(|e| match e {
-                    AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
-                    AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
-                    AlertSinkError::Transport(s) => AlertError::IoError(s),
-                }),
+            },
+            AlertHandleInner::Sink(sink) => sink.emit(&alert).map(|_| ()).map_err(|e| match e {
+                AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
+                AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+                AlertSinkError::Transport(s) => AlertError::IoError(s),
+            }),
         }
     }
 
@@ -151,15 +150,12 @@ impl AlertHandle {
                     mpsc::error::TrySendError::Closed(_) => AlertError::OutputClosed,
                 })?;
                 Ok(())
-            }
-            AlertHandleInner::Sink(sink) => sink
-                .emit(&alert)
-                .map(|_| ())
-                .map_err(|e| match e {
-                    AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
-                    AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
-                    AlertSinkError::Transport(s) => AlertError::IoError(s),
-                }),
+            },
+            AlertHandleInner::Sink(sink) => sink.emit(&alert).map(|_| ()).map_err(|e| match e {
+                AlertSinkError::Unavailable(_) => AlertError::OutputClosed,
+                AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+                AlertSinkError::Transport(s) => AlertError::IoError(s),
+            }),
         }
     }
 }
@@ -212,17 +208,12 @@ impl AlertOutput {
     /// This is a non-blocking helper that lets existing `AlertOutput` users
     /// optionally route alerts to any `AlertSink` implementation without
     /// changing the async channel-based API.
-    pub fn emit_to_sink(
-        alert: &Alert,
-        sink: &dyn AlertSink,
-    ) -> Result<(), AlertError> {
-        sink.emit(alert)
-            .map(|_| ())
-            .map_err(|e| match e {
-                AlertSinkError::Unavailable(_s) => AlertError::OutputClosed,
-                AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
-                AlertSinkError::Transport(s) => AlertError::IoError(s),
-            })
+    pub fn emit_to_sink(alert: &Alert, sink: &dyn AlertSink) -> Result<(), AlertError> {
+        sink.emit(alert).map(|_| ()).map_err(|e| match e {
+            AlertSinkError::Unavailable(_s) => AlertError::OutputClosed,
+            AlertSinkError::Serialization(s) => AlertError::SerializationError(s),
+            AlertSinkError::Transport(s) => AlertError::IoError(s),
+        })
     }
 
     /// Output alert to stdout

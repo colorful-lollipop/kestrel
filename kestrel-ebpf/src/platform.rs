@@ -125,8 +125,6 @@ pub trait Platform: Send + Sync {
     fn shutdown(&mut self) -> Result<(), PlatformError>;
 }
 
-
-
 /// Mock platform for testing
 pub struct MockPlatform {
     info: PlatformInfo,

@@ -18,8 +18,10 @@ pub use metrics::{EvictionReason, NfaMetrics, SequenceMetrics};
 pub use state::{NfaSequence, NfaStateId, PartialMatch, SeqStep};
 pub use store::{QuotaConfig, StateStore, StateStoreConfig};
 
-use async_trait::async_trait;
-use kestrel_event::Event;
+// Re-export PredicateEvaluator from kestrel-event to break cyclic dependency
+// (kestrel-core -> kestrel-runtime-lua -> kestrel-nfa -> kestrel-core)
+pub use kestrel_event::{Event, PredicateError, PredicateEvaluator, PredicateResult};
+
 use std::sync::Arc;
 
 /// Sequence identifier (u32 for fast comparison and small keys)
@@ -49,20 +51,10 @@ pub enum NfaError {
 /// Result type for NFA operations
 pub type NfaResult<T> = Result<T, NfaError>;
 
-/// Predicate evaluator trait - interface for evaluating predicates on events
-///
-/// This trait is implemented by Wasm and Lua runtimes to provide
-/// predicate evaluation capabilities to the NFA engine.
-#[async_trait]
-pub trait PredicateEvaluator: Send + Sync {
-    /// Evaluate a predicate against an event
-    async fn evaluate(&self, predicate_id: &str, event: &Event) -> NfaResult<bool>;
-
-    /// Get the field IDs required by a predicate
-    fn get_required_fields(&self, predicate_id: &str) -> NfaResult<Vec<u32>>;
-
-    /// Check if a predicate exists
-    fn has_predicate(&self, predicate_id: &str) -> bool;
+impl From<PredicateError> for NfaError {
+    fn from(err: PredicateError) -> Self {
+        NfaError::PredicateError(err.to_string())
+    }
 }
 
 /// Cached predicate evaluator that wraps a PredicateEvaluator and adds caching
@@ -89,9 +81,9 @@ impl CachedPredicateEvaluator {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PredicateEvaluator for CachedPredicateEvaluator {
-    async fn evaluate(&self, predicate_id: &str, event: &Event) -> NfaResult<bool> {
+    async fn evaluate(&self, predicate_id: &str, event: &Event) -> PredicateResult<bool> {
         let pred_id: Arc<str> = Arc::from(predicate_id);
         let key = (pred_id.clone(), event.ts_mono_ns);
 
@@ -109,7 +101,7 @@ impl PredicateEvaluator for CachedPredicateEvaluator {
         Ok(result)
     }
 
-    fn get_required_fields(&self, predicate_id: &str) -> NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, predicate_id: &str) -> PredicateResult<Vec<u32>> {
         self.inner.get_required_fields(predicate_id)
     }
 
@@ -243,9 +235,8 @@ pub mod test_helpers {
     }
 
     #[async_trait::async_trait]
-    #[async_trait::async_trait]
     impl PredicateEvaluator for MockEvaluator {
-        async fn evaluate(&self, predicate_id: &str, _event: &Event) -> NfaResult<bool> {
+        async fn evaluate(&self, predicate_id: &str, _event: &Event) -> PredicateResult<bool> {
             // Update counts
             self.call_count.fetch_add(1, Ordering::SeqCst);
             self.predicate_calls
@@ -257,7 +248,7 @@ pub mod test_helpers {
 
             // Check if this predicate should fail
             if self.failure_predicates.contains(&predicate_id.to_string()) {
-                return Err(NfaError::PredicateError(format!(
+                return Err(PredicateError::EvaluationFailed(format!(
                     "Simulated failure for {}",
                     predicate_id
                 )));
@@ -271,7 +262,7 @@ pub mod test_helpers {
                 .unwrap_or(self.default_result))
         }
 
-        fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+        fn get_required_fields(&self, _predicate_id: &str) -> PredicateResult<Vec<u32>> {
             Ok(self.required_fields.clone())
         }
 

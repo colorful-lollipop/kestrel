@@ -106,7 +106,7 @@ impl SeqStep {
 }
 
 /// Tracks an in-progress partial match for a specific entity
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PartialMatch {
     /// Sequence this partial match is for
     pub sequence_id: String,
@@ -129,6 +129,9 @@ pub struct PartialMatch {
 
     /// Whether this match has been terminated (by until condition)
     pub terminated: bool,
+
+    /// Maxspan for this sequence (cached here for storage backends that need TTL)
+    pub maxspan_ms: Option<u64>,
 }
 
 /// Information about a matched event in the sequence
@@ -142,6 +145,40 @@ pub struct MatchedEvent {
 
     /// Timestamp of this match
     pub timestamp_ns: u64,
+}
+
+impl serde::Serialize for MatchedEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("MatchedEvent", 3)?;
+        state.serialize_field("state_id", &self.state_id)?;
+        state.serialize_field("event", &*self.event)?;
+        state.serialize_field("timestamp_ns", &self.timestamp_ns)?;
+        state.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MatchedEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct MatchedEventHelper {
+            state_id: NfaStateId,
+            event: Event,
+            timestamp_ns: u64,
+        }
+        let helper = MatchedEventHelper::deserialize(deserializer)?;
+        Ok(MatchedEvent {
+            state_id: helper.state_id,
+            event: Arc::new(helper.event),
+            timestamp_ns: helper.timestamp_ns,
+        })
+    }
 }
 
 impl PartialMatch {
@@ -167,6 +204,7 @@ impl PartialMatch {
             started_at: timestamp_ns,
             last_match_ns: timestamp_ns,
             terminated: false,
+            maxspan_ms: None,
         }
     }
 

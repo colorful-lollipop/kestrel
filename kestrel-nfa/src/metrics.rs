@@ -156,7 +156,6 @@ impl SequenceMetrics {
 }
 
 /// Overall NFA engine metrics
-#[derive(Debug)]
 pub struct NfaMetrics {
     /// Per-sequence metrics indexed by sequence ID
     pub sequences: RwLock<AHashMap<String, Arc<SequenceMetrics>>>,
@@ -184,6 +183,17 @@ pub struct NfaMetrics {
 
     /// Metric ID for loaded sequences
     m_sequences_active: MetricId,
+}
+
+impl std::fmt::Debug for NfaMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NfaMetrics")
+            .field("total_events_processed", &self.total_events_processed)
+            .field("total_alerts", &self.total_alerts)
+            .field("loaded_sequences", &self.loaded_sequences)
+            .field("peak_loaded_sequences", &self.peak_loaded_sequences)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NfaMetrics {
@@ -261,7 +271,10 @@ impl NfaMetrics {
     pub fn unregister_sequence(&self, sequence_id: &str) -> Option<Arc<SequenceMetrics>> {
         let result = self.sequences.write().remove(sequence_id);
         if result.is_some() {
-            let count = self.loaded_sequences.fetch_sub(1, Ordering::Relaxed).saturating_sub(1);
+            let count = self
+                .loaded_sequences
+                .fetch_sub(1, Ordering::Relaxed)
+                .saturating_sub(1);
             if let Some(ref reporter) = self.reporter {
                 reporter.gauge_set(self.m_sequences_active, count as f64);
             }

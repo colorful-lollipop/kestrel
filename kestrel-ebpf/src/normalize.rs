@@ -214,8 +214,8 @@ impl EventNormalizer {
         let directory = self.parse_bytes(&event.secondary);
         if let Some(directory_value) = directory.as_ref() {
             if let Some(directory_field) = self.schema.get_field_id("file.directory") {
-                builder =
-                    builder.field(directory_field, TypedValue::String(directory_value.clone().into()));
+                builder = builder
+                    .field(directory_field, TypedValue::String(directory_value.clone().into()));
             }
         }
         if let Some(name_value) = name.as_ref() {

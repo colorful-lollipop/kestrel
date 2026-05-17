@@ -67,39 +67,25 @@ fn bench_event_throughput(c: &mut Criterion) {
 
     for event_count in [100, 1000, 10000].iter() {
         let events: Vec<Event> = (0..*event_count)
-            .map(|i| {
-                create_test_event(
-                    1001 + (i % 10) as u16,
-                    1_000_000_000 + i as u64,
-                    i as u128,
-                )
-            })
+            .map(|i| create_test_event(1001 + (i % 10) as u16, 1_000_000_000 + i as u64, i as u128))
             .collect();
 
-        group.bench_with_input(
-            BenchmarkId::new("iterate", event_count),
-            event_count,
-            |b, _| {
-                b.iter(|| {
-                    for event in &events {
-                        black_box(event.event_type_id);
-                        black_box(event.ts_mono_ns);
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("iterate", event_count), event_count, |b, _| {
+            b.iter(|| {
+                for event in &events {
+                    black_box(event.event_type_id);
+                    black_box(event.ts_mono_ns);
+                }
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("clone", event_count),
-            event_count,
-            |b, _| {
-                b.iter(|| {
-                    for event in &events {
-                        black_box(event.clone());
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("clone", event_count), event_count, |b, _| {
+            b.iter(|| {
+                for event in &events {
+                    black_box(event.clone());
+                }
+            });
+        });
     }
 
     group.finish();

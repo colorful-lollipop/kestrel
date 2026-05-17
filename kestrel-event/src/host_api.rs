@@ -121,14 +121,14 @@ impl<'a> HostApiV1 for HostApiContext<'a> {
 
     fn re_match(&self, pattern_id: u32, text: &str) -> bool {
         let cache = self.regex_cache.read();
-        cache.get(&pattern_id).map_or(false, |re| re.is_match(text))
+        cache.get(&pattern_id).is_some_and(|re| re.is_match(text))
     }
 
     fn glob_match(&self, pattern_id: u32, text: &str) -> bool {
         let cache = self.glob_cache.read();
         cache
             .get(&pattern_id)
-            .map_or(false, |pattern| pattern.matches(text))
+            .is_some_and(|pattern| pattern.matches(text))
     }
 
     fn alert_emit(&self, event_handle: u32) -> i32 {

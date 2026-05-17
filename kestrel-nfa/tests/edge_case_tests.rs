@@ -10,11 +10,15 @@ struct TestEvaluator;
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestEvaluator {
-    async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> NfaResult<bool> {
+    async fn evaluate(
+        &self,
+        _predicate_id: &str,
+        _event: &Event,
+    ) -> kestrel_event::PredicateResult<bool> {
         Ok(true)
     }
 
-    fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _predicate_id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(Vec::new())
     }
 
@@ -471,7 +475,9 @@ fn test_tick_with_expired_matches() {
     engine.load_sequence(seq).unwrap();
 
     // Create partial match
-    engine.process_event_blocking(&create_event(1, 0, 1)).unwrap();
+    engine
+        .process_event_blocking(&create_event(1, 0, 1))
+        .unwrap();
 
     // Tick to trigger cleanup
     engine.tick(200_000_000); // 200ms later
@@ -557,7 +563,11 @@ fn test_rapid_event_burst() {
     // Send 1000 events rapidly
     for i in 0..1000 {
         let event_type = if i % 2 == 0 { 1 } else { 2 };
-        let _ = engine.process_event_blocking(&create_event(event_type, i as u64 * 1000, (i % 100) as u128));
+        let _ = engine.process_event_blocking(&create_event(
+            event_type,
+            i as u64 * 1000,
+            (i % 100) as u128,
+        ));
     }
 
     // Should complete without panic
@@ -574,7 +584,8 @@ fn test_alternating_events_same_entity() {
     // Alternating events for same entity
     for i in 0..10 {
         let event_type = if i % 2 == 0 { 1 } else { 2 };
-        let _ = engine.process_event_blocking(&create_event(event_type, i as u64 * 1_000_000, entity));
+        let _ =
+            engine.process_event_blocking(&create_event(event_type, i as u64 * 1_000_000, entity));
     }
 
     // Should handle gracefully
@@ -749,7 +760,8 @@ fn test_engine_statistics() {
 
     // Process events
     for i in 0..100 {
-        let _ = engine.process_event_blocking(&create_event(1, i as u64 * 1_000_000, (i % 10) as u128));
+        let _ =
+            engine.process_event_blocking(&create_event(1, i as u64 * 1_000_000, (i % 10) as u128));
     }
 
     // Verify engine still functional

@@ -7,8 +7,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use kestrel_core::eventbus::{DefaultPartitioner, Partitioner, PublishError};
 use kestrel_core::{
     ActionDecision, ActionExecutor, ActionPolicy, ActionTarget, ActionType, Alert, AlertHandle,
-    AlertOutput, AlertOutputConfig, AlertSink, EventBus, EventBusConfig, EventBusHandle, NoOpExecutor,
-    ReplayConfig, ReplaySource, ReplayStats, Severity, TimeManager,
+    AlertOutput, AlertOutputConfig, AlertSink, EventBus, EventBusConfig, EventBusHandle,
+    NoOpExecutor, ReplayConfig, ReplaySource, ReplayStats, Severity, TimeManager,
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
@@ -1136,8 +1136,7 @@ mod tests {
     use super::*;
     use kestrel_event::Event;
     use kestrel_event::test_helpers::test_event;
-    use kestrel_nfa::{CompiledSequence, NfaResult, NfaSequence, SeqStep};
-    use tokio::time::Duration;
+    use kestrel_nfa::{CompiledSequence, NfaSequence, SeqStep};
 
     struct TestMockEvaluator {
         result: bool,
@@ -1145,11 +1144,18 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PredicateEvaluator for TestMockEvaluator {
-        async fn evaluate(&self, _predicate_id: &str, _event: &Event) -> NfaResult<bool> {
+        async fn evaluate(
+            &self,
+            _predicate_id: &str,
+            _event: &Event,
+        ) -> kestrel_event::PredicateResult<bool> {
             Ok(self.result)
         }
 
-        fn get_required_fields(&self, _predicate_id: &str) -> NfaResult<Vec<u32>> {
+        fn get_required_fields(
+            &self,
+            _predicate_id: &str,
+        ) -> kestrel_event::PredicateResult<Vec<u32>> {
             Ok(Vec::new())
         }
 

@@ -24,11 +24,11 @@ impl TestPredicateEvaluator {
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_event::PredicateResult<bool> {
         Ok(self.match_all)
     }
 
-    fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(vec![])
     }
 
@@ -278,7 +278,12 @@ async fn test_apt_persistence_mechanisms() {
     let e1 = create_event(1, 601, base, entity);
     let e2 = create_event(2, 602, base + 10_000_000_000, entity);
 
-    assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        engine
+            .process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
     let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
     assert_eq!(alerts.len(), 1);
     assert!(alerts[0].rule_id.contains("registry-run-keys"));
@@ -565,7 +570,12 @@ async fn test_apt_interrupted_sequence_recovery() {
     let e1 = create_event(1, 1501, base, entity);
     let e2_timeout = create_event(2, 1502, base + 700_000_000_000, entity); // +700s > 600s maxspan
 
-    assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+    assert!(
+        engine
+            .process_event_blocking(Arc::new(e1.clone()))
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         engine
             .process_event_blocking(Arc::new(e2_timeout.clone()))
@@ -578,9 +588,21 @@ async fn test_apt_interrupted_sequence_recovery() {
     let e2_retry = create_event(4, 1502, base + 805_000_000_000, entity);
     let e3_retry = create_event(5, 1503, base + 810_000_000_000, entity);
 
-    assert!(engine.process_event_blocking(Arc::new(e1_retry.clone())).unwrap().is_empty());
-    assert!(engine.process_event_blocking(Arc::new(e2_retry.clone())).unwrap().is_empty());
-    let alerts = engine.process_event_blocking(Arc::new(e3_retry.clone())).unwrap();
+    assert!(
+        engine
+            .process_event_blocking(Arc::new(e1_retry.clone()))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        engine
+            .process_event_blocking(Arc::new(e2_retry.clone()))
+            .unwrap()
+            .is_empty()
+    );
+    let alerts = engine
+        .process_event_blocking(Arc::new(e3_retry.clone()))
+        .unwrap();
     assert_eq!(alerts.len(), 1);
 }
 
@@ -635,7 +657,12 @@ async fn test_apt_mitre_attack_mapping() {
         let e1 = create_event(1, event_type_1, base, entity);
         let e2 = create_event(2, event_type_2, base + 5_000_000_000, entity);
 
-        assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+        assert!(
+            engine
+                .process_event_blocking(Arc::new(e1.clone()))
+                .unwrap()
+                .is_empty()
+        );
         let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
         assert_eq!(alerts.len(), 1, "MITRE {} should trigger", technique);
         assert!(alerts[0].rule_id.contains(technique));
@@ -743,7 +770,12 @@ async fn test_apt_cross_entity_correlation() {
             *entity,
         );
 
-        assert!(engine.process_event_blocking(Arc::new(e1.clone())).unwrap().is_empty());
+        assert!(
+            engine
+                .process_event_blocking(Arc::new(e1.clone()))
+                .unwrap()
+                .is_empty()
+        );
         let alerts = engine.process_event_blocking(Arc::new(e2.clone())).unwrap();
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].entity_key, *entity);

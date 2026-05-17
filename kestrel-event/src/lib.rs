@@ -7,7 +7,7 @@ use kestrel_schema::*;
 use smallvec::SmallVec;
 
 /// Represents a single event in the system
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Event {
     /// Unique event ID (monotonically increasing, for stable sorting in replay)
     pub event_id: u64,
@@ -216,6 +216,36 @@ pub enum BuildError {
 }
 
 pub mod host_api;
+
+/// Predicate evaluation error type
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum PredicateError {
+    #[error("Predicate error: {0}")]
+    Error(String),
+    #[error("Predicate not found: {0}")]
+    NotFound(String),
+    #[error("Evaluation failed: {0}")]
+    EvaluationFailed(String),
+}
+
+/// Result type for predicate operations
+pub type PredicateResult<T> = Result<T, PredicateError>;
+
+/// Trait for evaluating predicates against events
+///
+/// This trait is implemented by Wasm and Lua runtimes to provide
+/// predicate evaluation capabilities to the NFA engine.
+#[async_trait::async_trait]
+pub trait PredicateEvaluator: Send + Sync {
+    /// Evaluate a predicate against an event
+    async fn evaluate(&self, predicate_id: &str, event: &Event) -> PredicateResult<bool>;
+
+    /// Get the field IDs required by a predicate
+    fn get_required_fields(&self, predicate_id: &str) -> PredicateResult<Vec<u32>>;
+
+    /// Check if a predicate exists
+    fn has_predicate(&self, predicate_id: &str) -> bool;
+}
 
 // Re-export kestrel_schema for convenience
 pub use kestrel_schema;

@@ -12,10 +12,10 @@ struct TestPredicateEvaluator;
 
 #[async_trait::async_trait]
 impl PredicateEvaluator for TestPredicateEvaluator {
-    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_nfa::NfaResult<bool> {
+    async fn evaluate(&self, _id: &str, _e: &Event) -> kestrel_event::PredicateResult<bool> {
         Ok(true)
     }
-    fn get_required_fields(&self, _id: &str) -> kestrel_nfa::NfaResult<Vec<u32>> {
+    fn get_required_fields(&self, _id: &str) -> kestrel_event::PredicateResult<Vec<u32>> {
         Ok(vec![])
     }
     fn has_predicate(&self, _id: &str) -> bool {
@@ -59,9 +59,11 @@ fn test_scada_modbus_exploit() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30001, 0xD001u128, 1_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30001, 0xD001u128, 1_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -86,14 +88,18 @@ fn test_scada_dnp3_manipulation() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30001, 0xD002u128, 2_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30001, 0xD002u128, 2_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30002, 0xD002u128, 2_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30002, 0xD002u128, 2_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -115,9 +121,11 @@ fn test_scada_icmp_redirect_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30003, 0xD003u128, 3_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30003, 0xD003u128, 3_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -139,9 +147,11 @@ fn test_scada_s7comm_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30004, 0xD004u128, 4_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30004, 0xD004u128, 4_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -166,14 +176,18 @@ fn test_scada_opcua_exploit() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30005, 0xD005u128, 5_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30005, 0xD005u128, 5_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30006, 0xD005u128, 5_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30006, 0xD005u128, 5_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -195,9 +209,11 @@ fn test_scada_ethernet_ip_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30007, 0xD006u128, 6_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30007, 0xD006u128, 6_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -219,9 +235,11 @@ fn test_scada_profinet_manipulation() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30008, 0xD007u128, 7_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30008, 0xD007u128, 7_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -243,9 +261,11 @@ fn test_scada_bacnet_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30009, 0xD008u128, 8_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30009, 0xD008u128, 8_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -274,14 +294,18 @@ fn test_stuxnet_style_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30010, 0xD010u128, 10_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30010, 0xD010u128, 10_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30011, 0xD010u128, 10_600_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30011, 0xD010u128, 10_600_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -303,9 +327,11 @@ fn test_havex_ics_scan() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30012, 0xD011u128, 11_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30012, 0xD011u128, 11_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -330,14 +356,18 @@ fn test_industroyer_crashoverride() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30013, 0xD012u128, 12_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30013, 0xD012u128, 12_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30014, 0xD012u128, 12_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30014, 0xD012u128, 12_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -359,9 +389,11 @@ fn test_triton_trisis_attack() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30015, 0xD013u128, 13_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30015, 0xD013u128, 13_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -390,14 +422,18 @@ fn test_iot_mirai_botnet() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30016, 0xD020u128, 20_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30016, 0xD020u128, 20_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30017, 0xD020u128, 20_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30017, 0xD020u128, 20_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -419,9 +455,11 @@ fn test_iot_default_credentials() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30018, 0xD021u128, 21_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30018, 0xD021u128, 21_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -446,14 +484,18 @@ fn test_iot_firmware_vulnerability() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30019, 0xD022u128, 22_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30019, 0xD022u128, 22_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30020, 0xD022u128, 22_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30020, 0xD022u128, 22_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -478,14 +520,18 @@ fn test_iot_botnet_c2_communication() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30021, 0xD023u128, 23_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30021, 0xD023u128, 23_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30022, 0xD023u128, 23_300_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30022, 0xD023u128, 23_300_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -510,14 +556,18 @@ fn test_iot_unauthorized_access() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30023, 0xD024u128, 24_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30023, 0xD024u128, 24_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30024, 0xD024u128, 24_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30024, 0xD024u128, 24_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -546,14 +596,18 @@ fn test_ics_network_scan() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30025, 0xD030u128, 30_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30025, 0xD030u128, 30_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30026, 0xD030u128, 30_050_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30026, 0xD030u128, 30_050_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -575,9 +629,11 @@ fn test_ics_protocol_anomaly() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30027, 0xD031u128, 31_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30027, 0xD031u128, 31_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -599,9 +655,11 @@ fn test_ics_unauthorized_device() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30028, 0xD032u128, 32_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30028, 0xD032u128, 32_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -627,19 +685,25 @@ fn test_ics_command_sequence_anomaly() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30029, 0xD033u128, 33_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30029, 0xD033u128, 33_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30029, 0xD033u128, 33_010_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30029, 0xD033u128, 33_010_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30029, 0xD033u128, 33_020_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30029, 0xD033u128, 33_020_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -668,14 +732,18 @@ fn test_physical_access_breach() {
     };
     nfa.load_sequence(seq).unwrap();
     assert!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30030, 0xD040u128, 40_000_000_000u64).clone()))
-            .unwrap()
-            .is_empty()
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30030, 0xD040u128, 40_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30031, 0xD040u128, 40_100_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30031, 0xD040u128, 40_100_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -697,9 +765,11 @@ fn test_cctv_tampering() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30032, 0xD041u128, 41_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30032, 0xD041u128, 41_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }
@@ -721,9 +791,11 @@ fn test_environmental_sensor_anomaly() {
     };
     nfa.load_sequence(seq).unwrap();
     assert_eq!(
-        nfa.process_event_blocking(Arc::new(create_iot_event(30033, 0xD042u128, 42_000_000_000u64).clone()))
-            .unwrap()
-            .len(),
+        nfa.process_event_blocking(Arc::new(
+            create_iot_event(30033, 0xD042u128, 42_000_000_000u64).clone()
+        ))
+        .unwrap()
+        .len(),
         1
     );
 }

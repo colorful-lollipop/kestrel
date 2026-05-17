@@ -4,7 +4,9 @@
 //! in hot paths. This is particularly useful for event processing
 //! where we need to allocate Vecs and other collections frequently.
 
-use crate::metrics_reporter::{MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter};
+use crate::metrics_reporter::{
+    MetricDescriptor, MetricId, MetricKind, MetricsReporter, NoOpMetricsReporter,
+};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -99,7 +101,8 @@ impl<T: Default> ObjectPool<T> {
         let obj = {
             let mut pool = self.pool.lock();
             let wait_ns = start.elapsed().as_nanos() as u64;
-            self.metrics_reporter.counter_inc(self.m_wait_time_ns, wait_ns);
+            self.metrics_reporter
+                .counter_inc(self.m_wait_time_ns, wait_ns);
 
             if let Some(obj) = pool.pop() {
                 self.current_size.fetch_sub(1, Ordering::Relaxed);
@@ -128,7 +131,8 @@ impl<T: Default> ObjectPool<T> {
         let start = Instant::now();
         let mut pool = self.pool.lock();
         let wait_ns = start.elapsed().as_nanos() as u64;
-        self.metrics_reporter.counter_inc(self.m_wait_time_ns, wait_ns);
+        self.metrics_reporter
+            .counter_inc(self.m_wait_time_ns, wait_ns);
 
         if let Some(obj) = pool.pop() {
             drop(pool);
@@ -314,8 +318,6 @@ pub struct PoolManager {
     /// Pool for event batches
     pub event_batch_pool: Option<Arc<EventVecPool>>,
 }
-
-use std::sync::Arc;
 
 impl PoolManager {
     /// Create a new pool manager with default pools
