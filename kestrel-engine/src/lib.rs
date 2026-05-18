@@ -12,6 +12,7 @@ use kestrel_core::{
 };
 use kestrel_event::Event;
 use kestrel_nfa::{CompiledSequence, NfaEngine, NfaEngineConfig, PredicateEvaluator};
+use kestrel_observability::{NoopTraceCollector, TraceCollector};
 use kestrel_rules::{Rule, RuleDefinition, RuleManager, Severity as RuleSeverity};
 use kestrel_schema::{
     EventTypeDef, RuleCapabilities, RuleManifest as SchemaRuleManifest,
@@ -93,6 +94,9 @@ pub struct EngineConfig {
 
     /// NFA engine configuration
     pub nfa_config: Option<NfaEngineConfig>,
+
+    /// Optional trace collector for rule evaluation tracing
+    pub trace_collector: Option<Arc<dyn TraceCollector>>,
 }
 
 impl Default for EngineConfig {
@@ -107,6 +111,7 @@ impl Default for EngineConfig {
             #[cfg(feature = "wasm")]
             wasm_config: None,
             nfa_config: Some(NfaEngineConfig::default()),
+            trace_collector: None,
         }
     }
 }
@@ -137,6 +142,7 @@ struct EvalContext<'a> {
     alerts_generated: &'a std::sync::atomic::AtomicU64,
     actions_generated: &'a std::sync::atomic::AtomicU64,
     errors_count: &'a std::sync::atomic::AtomicU64,
+    trace_collector: &'a Arc<dyn TraceCollector>,
 }
 
 #[derive(Debug, Clone)]
@@ -261,6 +267,9 @@ pub struct DetectionEngine {
 
     /// Error counter for tracking engine errors (atomic for thread safety)
     errors_count: Arc<std::sync::atomic::AtomicU64>,
+
+    /// Trace collector for rule evaluation tracing
+    trace_collector: Arc<dyn TraceCollector>,
 }
 
 impl DetectionEngine {
@@ -358,6 +367,11 @@ impl DetectionEngine {
 
         let single_event_rules = Arc::new(ArcSwap::new(Arc::new(Vec::new())));
 
+        // Initialize trace collector
+        let trace_collector: Arc<dyn TraceCollector> = config
+            .trace_collector
+            .unwrap_or_else(|| Arc::new(NoopTraceCollector::new()));
+
         // Initialize action executor
         let action_executor = config
             .action_executor
@@ -387,6 +401,7 @@ impl DetectionEngine {
             alerts_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             actions_generated: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             errors_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            trace_collector,
         };
 
         engine.compile_rules().await?;
@@ -792,65 +807,67 @@ impl DetectionEngine {
         let nfa_engines = self.nfa_engines.clone();
         let alert_handle = self.alert_handle.clone();
         let action_executor = self.action_executor.clone();
-        let alerts_generated = self.alerts_generated.clone();
-        let actions_generated = self.actions_generated.clone();
-        let errors_count = self.errors_count.clone();
-        let schema = self.schema.clone();
-        let mode = self.mode;
-        let partitioner = self.partitioner.clone();
-        let partition_count = self.partition_count;
-        #[cfg(feature = "wasm")]
-        let wasm_engine = self.wasm_engine.clone();
+                let alerts_generated = self.alerts_generated.clone();
+                let actions_generated = self.actions_generated.clone();
+                let errors_count = self.errors_count.clone();
+                let schema = self.schema.clone();
+                let mode = self.mode;
+                let partitioner = self.partitioner.clone();
+                let partition_count = self.partition_count;
+                let trace_collector = self.trace_collector.clone();
+                #[cfg(feature = "wasm")]
+                let wasm_engine = self.wasm_engine.clone();
 
-        tokio::spawn(async move {
-            info!("Event processing loop started");
-            while let Some(batch) = receiver.recv().await {
-                if batch.is_empty() {
-                    continue;
-                }
+                tokio::spawn(async move {
+                    info!("Event processing loop started");
+                    while let Some(batch) = receiver.recv().await {
+                        if batch.is_empty() {
+                            continue;
+                        }
 
-                let partition_id = partitioner.partition(&batch[0], partition_count);
-                let rules_guard = single_event_rules.load();
-                let eval_context = EvalContext {
-                    nfa_engine: &nfa_engines[partition_id],
-                    single_event_rules: &*rules_guard,
-                    #[cfg(feature = "wasm")]
-                    wasm_engine: wasm_engine.as_ref(),
-                    mode,
-                    action_executor: &action_executor,
-                    schema: schema.as_ref(),
-                    alerts_generated: alerts_generated.as_ref(),
-                    actions_generated: actions_generated.as_ref(),
-                    errors_count: errors_count.as_ref(),
-                };
+                        let partition_id = partitioner.partition(&batch[0], partition_count);
+                        let rules_guard = single_event_rules.load();
+                        let eval_context = EvalContext {
+                            nfa_engine: &nfa_engines[partition_id],
+                            single_event_rules: &*rules_guard,
+                            #[cfg(feature = "wasm")]
+                            wasm_engine: wasm_engine.as_ref(),
+                            mode,
+                            action_executor: &action_executor,
+                            schema: schema.as_ref(),
+                            alerts_generated: alerts_generated.as_ref(),
+                            actions_generated: actions_generated.as_ref(),
+                            errors_count: errors_count.as_ref(),
+                            trace_collector: &trace_collector,
+                        };
 
-                for event in batch {
-                    let result =
-                        DetectionEngine::eval_event_with_rules(&event, &eval_context).await;
+                        for event in batch {
+                            let result =
+                                DetectionEngine::eval_event_with_rules(&event, &eval_context).await;
 
-                    match result {
-                        Ok(alerts) => {
-                            if !alerts.is_empty() {
-                                let alert_handle = alert_handle.clone();
-                                let errors_count = errors_count.clone();
-                                tokio::spawn(async move {
-                                    DetectionEngine::emit_alerts(
-                                        &alert_handle,
-                                        alerts,
-                                        errors_count.as_ref(),
-                                    )
-                                    .await;
-                                });
+                            match result {
+                                Ok(alerts) => {
+                                    if !alerts.is_empty() {
+                                        let alert_handle = alert_handle.clone();
+                                        let errors_count = errors_count.clone();
+                                        tokio::spawn(async move {
+                                            DetectionEngine::emit_alerts(
+                                                &alert_handle,
+                                                alerts,
+                                                errors_count.as_ref(),
+                                            )
+                                            .await;
+                                        });
+                                    }
+                                },
+                                Err(error) => {
+                                    error!(error = %error, "Failed to evaluate event batch item");
+                                    errors_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                },
                             }
-                        },
-                        Err(error) => {
-                            error!(error = %error, "Failed to evaluate event batch item");
-                            errors_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        },
+                        }
                     }
-                }
-            }
-        });
+                });
 
         let event_handle = self.event_bus.handle();
         tokio::spawn(async move {
@@ -884,6 +901,7 @@ impl DetectionEngine {
             alerts_generated: self.alerts_generated.as_ref(),
             actions_generated: self.actions_generated.as_ref(),
             errors_count: self.errors_count.as_ref(),
+            trace_collector: &self.trace_collector,
         };
 
         DetectionEngine::eval_event_with_rules(event, &context).await
@@ -893,6 +911,9 @@ impl DetectionEngine {
         event: &Event,
         context: &EvalContext<'_>,
     ) -> Result<Vec<Alert>, EngineError> {
+        use kestrel_observability::TraceStep;
+        use std::time::Instant;
+
         debug!(
             event_type_id = event.event_type_id,
             entity_key = event.entity_key,
@@ -901,6 +922,11 @@ impl DetectionEngine {
 
         let mut alerts = Vec::new();
         let event_arc = Arc::new(event.clone());
+        let eval_start = Instant::now();
+
+        // Start NFA trace
+        let nfa_trace_id = context.trace_collector.start_trace("nfa", event);
+        let mut nfa_steps = Vec::new();
 
         {
             let mut guard = context.nfa_engine.lock().await;
@@ -909,10 +935,16 @@ impl DetectionEngine {
                     Ok(sequence_alerts) => {
                         for seq_alert in sequence_alerts {
                             alerts.push(alert_from_sequence_match(&seq_alert));
-
                             context
                                 .alerts_generated
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                            if nfa_trace_id != 0 {
+                                nfa_steps.push(TraceStep::SequenceComplete {
+                                    sequence_id: seq_alert.rule_id.clone(),
+                                    matched_events: seq_alert.events.iter().map(|e| e.event_id).collect(),
+                                });
+                            }
                         }
                     },
                     Err(error) => {
@@ -923,6 +955,21 @@ impl DetectionEngine {
                     },
                 }
             }
+        }
+
+        // Record NFA trace if tracing is active
+        if nfa_trace_id != 0 {
+            let trace = kestrel_observability::RuleTrace {
+                trace_id: nfa_trace_id,
+                rule_id: "nfa".to_string(),
+                event_id: event.event_id,
+                timestamp_ns: event.ts_mono_ns,
+                duration: eval_start.elapsed(),
+                matched: !alerts.is_empty(),
+                steps: nfa_steps,
+                error: None,
+            };
+            context.trace_collector.record_trace(trace);
         }
 
         #[cfg(feature = "wasm")]
@@ -975,6 +1022,36 @@ impl DetectionEngine {
 
             while let Some(result) = evaluations.next().await {
                 let (single_rule, matched) = result?;
+
+                // Record trace for this rule evaluation
+                if context.trace_collector.is_rule_traced(&single_rule.rule_id) {
+                    let trace_id = context.trace_collector.start_trace(&single_rule.rule_id, event);
+                    if trace_id != 0 {
+                        let pred_explanation = if matched {
+                            format!("Predicate matched for event type {}", event.event_type_id)
+                        } else {
+                            format!("Predicate did not match for event type {}", event.event_type_id)
+                        };
+
+                        let trace = kestrel_observability::RuleTrace {
+                            trace_id,
+                            rule_id: single_rule.rule_id.clone(),
+                            event_id: event.event_id,
+                            timestamp_ns: event.ts_mono_ns,
+                            duration: Instant::now().duration_since(eval_start),
+                            matched,
+                            steps: vec![kestrel_observability::TraceStep::Predicate {
+                                predicate_id: format!("{}", single_rule.event_type),
+                                result: matched,
+                                explanation: pred_explanation,
+                                field_values: Vec::new(),
+                            }],
+                            error: None,
+                        };
+                        context.trace_collector.record_trace(trace);
+                    }
+                }
+
                 if !matched {
                     continue;
                 }

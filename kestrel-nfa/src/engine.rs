@@ -21,6 +21,7 @@ use kestrel_event::Event;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, trace, warn};
 
 /// Trait to accept either `&Event` or `Arc<Event>` in `process_event_blocking`.
@@ -122,6 +123,9 @@ pub struct NfaEngine {
     /// Metrics reporter
     metrics_reporter: Arc<dyn MetricsReporter>,
 
+    /// Trace collector for rule evaluation tracing
+    trace_collector: Arc<dyn kestrel_observability::TraceCollector>,
+
     /// Metric IDs
     m_events_processed: MetricId,
     m_sequences_active: MetricId,
@@ -188,6 +192,7 @@ impl NfaEngine {
             config,
             budget_tracker: RwLock::new(AHashMap::default()),
             metrics_reporter,
+            trace_collector: Arc::new(kestrel_observability::NoopTraceCollector::new()),
             m_events_processed,
             m_sequences_active,
             m_alerts_generated,
@@ -200,6 +205,14 @@ impl NfaEngine {
     /// Create a new NFA engine
     pub fn new(config: NfaEngineConfig, predicate_evaluator: Arc<dyn PredicateEvaluator>) -> Self {
         Self::with_metrics_reporter(config, predicate_evaluator, Arc::new(NoOpMetricsReporter))
+    }
+
+    /// Set the trace collector for this engine
+    pub fn set_trace_collector(
+        &mut self,
+        trace_collector: Arc<dyn kestrel_observability::TraceCollector>,
+    ) {
+        self.trace_collector = trace_collector;
     }
 
     /// Load a compiled sequence into the engine
@@ -672,7 +685,7 @@ impl NfaEngine {
 
         let captures = self.extract_captures(sequence, &events)?;
 
-        Ok(SequenceAlert {
+        let alert = SequenceAlert {
             rule_id: sequence.id.clone(),
             rule_name: sequence.id.clone(), // Use ID as name for now
             sequence_id: sequence.id.clone(),
@@ -680,7 +693,37 @@ impl NfaEngine {
             timestamp_ns: partial_match.last_match_ns,
             events,
             captures,
-        })
+        };
+
+        // Record trace for sequence completion
+        if self.trace_collector.is_rule_traced(&alert.rule_id) {
+            let trace_id = if let Some(event) = alert.events.last() {
+                self.trace_collector.start_trace(&alert.rule_id, event)
+            } else {
+                0
+            };
+            if trace_id != 0 {
+                use kestrel_observability::{RuleTrace, TraceStep};
+                use std::time::Instant;
+                let event_ids: Vec<u64> = alert.events.iter().map(|e| e.event_id).collect();
+                let trace = RuleTrace {
+                    trace_id,
+                    rule_id: alert.rule_id.clone(),
+                    event_id: alert.timestamp_ns,
+                    timestamp_ns: alert.timestamp_ns,
+                    duration: Duration::from_nanos(0),
+                    matched: true,
+                    steps: vec![TraceStep::SequenceComplete {
+                        sequence_id: alert.sequence_id.clone(),
+                        matched_events: event_ids,
+                    }],
+                    error: None,
+                };
+                self.trace_collector.record_trace(trace);
+            }
+        }
+
+        Ok(alert)
     }
 
     /// Extract field captures from matched events based on sequence configuration

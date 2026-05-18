@@ -18,6 +18,7 @@ kestrel-core = { path = "../kestrel-core" }
 kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-eql = { path = "../kestrel-eql" }
+kestrel-observability = { path = "../kestrel-observability" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }

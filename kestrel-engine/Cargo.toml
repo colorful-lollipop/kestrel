@@ -6,26 +6,25 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-tokio = { workspace = true }
-async-trait = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-smallvec = { workspace = true }
-ahash = { workspace = true }
-parking_lot = "0.12"
+kestrel-core = { path = "../kestrel-core" }
+kestrel-rules = { path = "../kestrel-rules" }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-nfa = { path = "../kestrel-nfa" }
+kestrel-observability = { path = "../kestrel-observability" }
 arc-swap = "1.7"
 wat = "1.0"
 futures = "0.3"
-kestrel-schema = { path = "../kestrel-schema" }
-kestrel-event = { path = "../kestrel-event" }
-kestrel-core = { path = "../kestrel-core" }
-kestrel-rules = { path = "../kestrel-rules" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+smallvec = { workspace = true }
+ahash = { workspace = true }
 kestrel-runtime-wasm = { path = "../kestrel-runtime-wasm", optional = true }
 kestrel-runtime-lua = { path = "../kestrel-runtime-lua", optional = true }
-kestrel-nfa = { path = "../kestrel-nfa" }
 kestrel-eql = { path = "../kestrel-eql", optional = true }
 
 [features]

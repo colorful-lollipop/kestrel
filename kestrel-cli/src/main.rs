@@ -117,6 +117,29 @@ enum Commands {
         #[command(flatten)]
         alert_config: AlertOutputArgs,
     },
+
+    /// Explain why a rule did or didn't match for a given event
+    Explain {
+        /// Rules directory
+        #[arg(short, long, default_value = "./rules")]
+        rules: PathBuf,
+
+        /// Rule ID to explain
+        #[arg(short, long)]
+        rule_id: String,
+
+        /// Event type ID
+        #[arg(long)]
+        event_type: u16,
+
+        /// Entity key
+        #[arg(long, default_value = "42")]
+        entity_key: u128,
+
+        /// Monotonic timestamp
+        #[arg(long, default_value = "1000")]
+        timestamp: u64,
+    },
 }
 
 #[tokio::main]
@@ -151,6 +174,16 @@ async fn main() -> Result<()> {
         } => {
             setup_logging("info")?;
             replay_log(rules, log, speed, &alert_config).await?;
+        },
+        Commands::Explain {
+            rules,
+            rule_id,
+            event_type,
+            entity_key,
+            timestamp,
+        } => {
+            setup_logging("info")?;
+            explain_rules(rules, rule_id, event_type, entity_key, timestamp).await?;
         },
     }
 
@@ -481,6 +514,64 @@ async fn replay_log(
         current_ts_wall_ns = stats.current_ts_wall_ns,
         "Replay completed"
     );
+
+    Ok(())
+}
+
+async fn explain_rules(
+    rules_dir: PathBuf,
+    rule_id: String,
+    event_type: u16,
+    entity_key: u128,
+    timestamp: u64,
+) -> Result<()> {
+    info!(%rule_id, event_type, entity_key, timestamp, "Explaining rule evaluation");
+
+    // Create an in-memory trace collector
+    let trace_config = kestrel_observability::TraceConfig {
+        enabled: true,
+        traced_rules: vec![rule_id.clone()],
+        ..Default::default()
+    };
+    let trace_collector = Arc::new(kestrel_observability::InMemoryTraceCollector::new(trace_config));
+    let trace_collector_dyn: Arc<dyn kestrel_observability::TraceCollector> = trace_collector.clone();
+
+    let config = kestrel_engine::EngineConfig {
+        rules_dir,
+        trace_collector: Some(trace_collector_dyn),
+        ..Default::default()
+    };
+
+    let engine = kestrel_engine::DetectionEngine::new(config).await?;
+
+    // Create a test event
+    let event = kestrel_event::Event::builder()
+        .event_type(event_type)
+        .entity_key(entity_key)
+        .ts_mono(timestamp)
+        .ts_wall(timestamp)
+        .build()?;
+
+    // Evaluate the event
+    let alerts = engine.eval_event(&event).await?;
+
+    // Get traces and explain
+    let traces = trace_collector.get_traces_for_rule(&rule_id);
+
+    if traces.is_empty() {
+        println!("No trace found for rule '{}' on this event.", rule_id);
+        println!("The rule may not have been evaluated (check if the event type matches).");
+    } else {
+        for trace in traces {
+            let explanation = kestrel_observability::Explain::explain(&trace);
+            println!("{}", explanation);
+        }
+    }
+
+    println!("\nAlerts generated: {}", alerts.len());
+    for alert in alerts {
+        println!("- Rule: {}, Severity: {:?}", alert.rule_id, alert.severity);
+    }
 
     Ok(())
 }

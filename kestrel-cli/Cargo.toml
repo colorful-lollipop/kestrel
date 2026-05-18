@@ -27,6 +27,7 @@ kestrel-schema = { path = "../kestrel-schema" }
 kestrel-event = { path = "../kestrel-event" }
 kestrel-rules = { path = "../kestrel-rules" }
 kestrel-core = { path = "../kestrel-core" }
+kestrel-observability = { path = "../kestrel-observability" }
 
 # Optional platform dependencies (Linux eBPF)
 aya = { workspace = true, optional = true }

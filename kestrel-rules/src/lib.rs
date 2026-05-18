@@ -13,6 +13,7 @@ use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
 pub mod compiler;
+pub mod hot_reload;
 pub use compiler::{
     CompilationError, CompilationManager, CompileResult, CompiledForm, CompiledRule, IrCondition,
     IrPredicate, IrRule, IrRuleType, IrSequenceStep, RuleCompiler,
