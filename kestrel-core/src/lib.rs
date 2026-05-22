@@ -5,6 +5,8 @@
 pub mod action;
 pub mod alert;
 pub mod alert_sink;
+pub mod budget;
+pub mod circuit_breaker;
 pub mod config_reload;
 pub mod deterministic;
 pub mod eventbus;
@@ -28,6 +30,11 @@ pub use alert::{Alert, AlertHandle, AlertOutput, AlertOutputConfig, EventEvidenc
 pub use alert_sink::{
     AlertRouter, AlertSink, AlertSinkError, Backpressure, EmitStatus, FileSink, SinkHealth,
     StdoutSink,
+};
+pub use budget::{BudgetStatus, BudgetTracker, RuleBudget, RuleConsumption};
+pub use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitState, NoOpCircuitBreaker, RuleHealthStatus,
+    SlidingWindowCircuitBreaker,
 };
 /// Re-export common types
 pub use eventbus::{EventBus, EventBusConfig, EventBusHandle, EventBusMetricsSnapshot};

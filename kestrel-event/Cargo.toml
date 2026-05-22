@@ -14,4 +14,5 @@ ahash = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }
 parking_lot = "0.12"
+crossbeam-queue = "0.3"
 async-trait = { workspace = true }

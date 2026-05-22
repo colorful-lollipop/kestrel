@@ -19,6 +19,7 @@ members = [
     "kestrel-ffi",
     "kestrel-lab",
     "kestrel-observability",
+    "kestrel-rule-tester",
 ]
 resolver = "2"
 

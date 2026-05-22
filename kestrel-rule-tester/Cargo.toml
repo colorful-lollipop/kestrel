@@ -1,0 +1,30 @@
+[package]
+name = "kestrel-rule-tester"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+description = "Rule sandbox and deterministic validation framework for Kestrel"
+readme = "README.md"
+
+[dependencies]
+kestrel-engine = { path = "../kestrel-engine" }
+kestrel-rules = { path = "../kestrel-rules" }
+kestrel-schema = { path = "../kestrel-schema" }
+kestrel-event = { path = "../kestrel-event" }
+kestrel-core = { path = "../kestrel-core" }
+kestrel-observability = { path = "../kestrel-observability" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tempfile = "3.13"
+async-trait = { workspace = true }
+smallvec = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"

@@ -127,6 +127,34 @@ impl Event {
             })
             .unwrap_or_else(|| default.into())
     }
+
+    /// Clear all fields and reset metadata without deallocating capacity.
+    pub fn clear(&mut self) {
+        self.fields.clear();
+        self.event_id = 0;
+        self.event_type_id = 0;
+        self.ts_mono_ns = 0;
+        self.ts_wall_ns = 0;
+        self.entity_key = 0;
+        self.source_id = None;
+    }
+
+    /// Reset the event with new metadata, clearing fields.
+    pub fn reset(
+        &mut self,
+        event_type_id: EventTypeId,
+        ts_mono_ns: TimestampMono,
+        ts_wall_ns: TimestampWall,
+        entity_key: EntityKey,
+    ) {
+        self.fields.clear();
+        self.event_id = 0;
+        self.event_type_id = event_type_id;
+        self.ts_mono_ns = ts_mono_ns;
+        self.ts_wall_ns = ts_wall_ns;
+        self.entity_key = entity_key;
+        self.source_id = None;
+    }
 }
 
 /// Event builder for convenient event construction
@@ -216,6 +244,7 @@ pub enum BuildError {
 }
 
 pub mod host_api;
+pub mod pool;
 
 /// Predicate evaluation error type
 #[derive(Debug, Clone, thiserror::Error)]
@@ -249,6 +278,7 @@ pub trait PredicateEvaluator: Send + Sync {
 
 // Re-export kestrel_schema for convenience
 pub use kestrel_schema;
+pub use pool::{EventPool, EventPoolStats, PooledEvent};
 
 /// Test helpers for constructing events in tests.
 pub mod test_helpers {
